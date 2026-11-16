@@ -8,7 +8,6 @@ import {
 } from './CommandRoomPage';
 import { canDecide, decisionWhy, GROUPS, inboxFromServer, KIND_LABEL, RENDERER_LABEL, WorkInboxPage } from './WorkInboxPage';
 import { navFor } from '../App';
-import { LangProvider } from '../i18n';
 
 const EMPLOYEES: RosterEmployee[] = [
   { id: 'emp-1', name: '销售员工', duty: '询价与报价', status: 'active', ownerUserId: 'user-sales' },
@@ -23,16 +22,8 @@ const OWNER = { userId: 'user-owner', roles: ['owner'], owner: true };
 const SALES = { userId: 'user-sales', roles: ['employee'], owner: false };
 
 describe('execution pages reuse the v12 copy', () => {
-  it('in English (the default), the command room shows no Chinese text', () => {
-    const html = renderToStaticMarkup(<CommandRoomPage />);
-    expect(html).toContain('Agent Room');
-    expect(html).toContain('Shared collaboration log');
-    expect(html).toContain('No tasks from the conversation yet.');
-    expect(html).not.toMatch(/[一-鿿]/);
-  });
-
   it('keeps the command room title and subtitle on one head, and shows no invented conversation or task', () => {
-    const html = renderToStaticMarkup(<LangProvider initial="zh"><CommandRoomPage /></LangProvider>);
+    const html = renderToStaticMarkup(<CommandRoomPage />);
     expect(html).toContain('Agent Room 指挥室');
     expect(html).toContain('同一件工作里，企业负责人、超级智能体和数字员工共享目标、上下文、任务与回报。');
     expect(html).toContain('共享协作记录');
