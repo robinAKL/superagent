@@ -54,7 +54,7 @@ d('knowledge UI over real HTTP handlers', () => {
       await page.getByRole('button',{name:'验证并连接数据库',exact:true}).click();
       const schemaResponse=page.waitForResponse(r=>r.url().includes('/connections/')&&r.url().endsWith('/sync'));
       await page.getByRole('button',{name:'读取数据库结构知识',exact:true}).click(); expect((await schemaResponse).status()).toBe(200);
-      await page.getByText('表 approved_invoices',{exact:true}).waitFor();
+      await page.locator('#knowledge-items-list .mr-meta').filter({ hasText: '表 approved_invoices' }).waitFor();
       await page.getByRole('button',{name:'确认此版本',exact:true}).click();
       await page.getByLabel('待批准的 SQL 模板',{exact:true}).fill('SELECT id,email AS masked FROM approved_invoices WHERE status=$1');
       await page.getByLabel('参数名称（英文逗号分隔，可留空）',{exact:true}).fill('status');
