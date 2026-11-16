@@ -28,7 +28,7 @@ else {
 }
 `;
 
-async function fixture(t, agent = 'codex') {
+async function fixture(t, agent = 'codex', options = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'superagent-link-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const executable = join(directory, 'fake.mjs');
@@ -36,19 +36,24 @@ async function fixture(t, agent = 'codex') {
   const stateFile = join(directory, 'state.json');
   const log = join(directory, 'agent-arguments.log');
   const config = { endpoint: 'http://127.0.0.1', stateFile, projects: { p1: { directory, executable, agent } } };
+  if (options.launchWithApprovals) config.projects.p1.approvals = 'room';
   const events = [];
   const requests = [];
   const control = { refuseDispatch: false };
-  const fetcher = async (url, options) => {
+  const fetcher = async (url, init) => {
     const path = url.pathname;
-    const body = JSON.parse(options.body);
+    const body = JSON.parse(init.body);
     requests.push({ path, body });
     if (path.endsWith('/poll')) return Response.json({ events: events.filter((event) => event.seq > body.since) });
+    if (path.endsWith('/approvals')) return Response.json({ approval: { id: 'approval-1', expiresAt: Date.now() + 60_000 } }, { status: 201 });
+    if (path.endsWith('/approvals/approval-1/wait')) {
+      return Response.json({ approval: { status: options.approvalStatus } });
+    }
     if (control.refuseDispatch && path.endsWith('/progress')) return Response.json({}, { status: 404 });
     return Response.json({});
   };
   return {
-    make: () => new WorkerLink(config, 'test-token', { fetcher }),
+    make: () => new WorkerLink(config, 'test-token', { fetcher, launchWithApprovals: options.launchWithApprovals }),
     args: async () => (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse),
     state: async () => JSON.parse(await readFile(stateFile, 'utf8')),
     save: async (state) => writeFile(stateFile, JSON.stringify(state)),
@@ -97,6 +102,30 @@ test('restarts an unfinished task through its explicit saved session', async (t)
     const link = f.make();
     await link.runNext();
     assert.deepEqual((await f.args())[0].argv, args);
+  }
+});
+
+test('relays an App Server approval over the worker API and applies one decision', async (t) => {
+  for (const [approvalStatus, expected] of [['allowed', 'allow'], ['denied', 'deny'], ['expired', 'deny']]) {
+    const f = await fixture(t, 'codex', {
+      approvalStatus,
+      launchWithApprovals(_project, _prompt, _session, _notify, approve) {
+        const controller = new AbortController();
+        const completed = approve({
+          kind: 'command', command: 'git status', requestId: 'native-1', threadId: 'thread-1', turnId: 'turn-1',
+        }, controller.signal).then((decision) => ({ result: decision }));
+        return { completed, cancel: () => controller.abort() };
+      },
+    });
+    f.wake(1, 'Review code');
+    const link = f.make();
+    await link.poll(undefined, 0);
+    await link.runNext();
+    const request = f.requests.find(({ path }) => path.endsWith('/approvals'));
+    assert.equal(request.body.roomTaskId, 'task1');
+    assert.equal(request.body.tool, 'codex.command');
+    assert.equal(request.body.input.requestId, 'native-1');
+    assert.equal(f.requests.find(({ path }) => path.endsWith('/report'))?.body.body, expected);
   }
 });
 

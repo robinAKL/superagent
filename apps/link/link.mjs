@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { launchAgent, projectDirectory } from './agent.mjs';
+import { launchAgent, launchCodexWithApprovals, projectDirectory } from './agent.mjs';
 
 const IDLE_ERROR_DELAY_MS = 2_000;
 const STATE_TEMP_SUFFIX = '.tmp';
@@ -13,8 +13,9 @@ export class WorkerLink {
   #api;
   #stateFile;
   #launch;
+  #launchWithApprovals;
 
-  constructor(config, token, { fetcher = fetch, launch = launchAgent } = {}) {
+  constructor(config, token, { fetcher = fetch, launch = launchAgent, launchWithApprovals = launchCodexWithApprovals } = {}) {
     const endpoint = new URL(config.endpoint);
     if ((endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(endpoint.hostname)))
       || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Configure a trusted HTTPS endpoint.');
@@ -27,6 +28,7 @@ export class WorkerLink {
       }
     }
     this.#launch = launch;
+    this.#launchWithApprovals = launchWithApprovals;
     try { this.#state = JSON.parse(readFileSync(config.stateFile, 'utf8')); }
     catch (error) {
       if (error.code !== 'ENOENT') throw error;
@@ -54,6 +56,33 @@ export class WorkerLink {
 
   #update(job, kind, body) {
     return this.#api('/room-tasks/' + encodeURIComponent(job.id) + '/' + kind, { body }, AbortSignal.timeout(10_000));
+  }
+
+  async #approve(job, request, signal) {
+    const summary = {
+      command: 'Codex requests permission to run a command.',
+      file_change: 'Codex requests permission to change files.',
+      network_access: 'Codex requests permission to access the network.',
+    }[request.kind];
+    const { approval } = await this.#api('/approvals', {
+      roomTaskId: job.id, tool: 'codex.' + request.kind, input: request, summary,
+    }, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
+    const deadline = typeof approval.expiresAt === 'number' ? approval.expiresAt : Date.parse(approval.expiresAt);
+    if (!Number.isFinite(deadline) || typeof approval.id !== 'string') return 'deny';
+    while (!signal.aborted && Date.now() < deadline) {
+      const waitMs = Math.min(25_000, Math.max(0, deadline - Date.now()));
+      try {
+        const { approval: latest } = await this.#api('/approvals/' + encodeURIComponent(approval.id) + '/wait', {
+          waitMs,
+        }, AbortSignal.any([signal, AbortSignal.timeout(waitMs + 5_000)]));
+        if (latest.status === 'allowed') return 'allow';
+        if (latest.status !== 'pending') return 'deny';
+      } catch (error) {
+        if ([400, 401, 403, 404, 409].includes(error.status)) return 'deny';
+        await delay(IDLE_ERROR_DELAY_MS, undefined, { signal }).catch(() => {});
+      }
+    }
+    return 'deny';
   }
 
   #wake(event) {
@@ -117,13 +146,16 @@ export class WorkerLink {
       try {
         const project = projectDirectory(this.#projects, job.projectId);
         const progressMessages = new Set();
-        const process = this.#launch(project, job.prompt, job.session, (event) => {
+        const notify = (event) => {
           if (event.session) { job.session = event.session; this.#save(); }
           if (event.progress && !progressMessages.has(event.progress)) {
             progressMessages.add(event.progress);
             void this.#update(job, 'progress', event.progress).catch(() => {});
           }
-        });
+        };
+        const process = project.agent === 'codex' && project.approvals === 'room'
+          ? this.#launchWithApprovals(project, job.prompt, job.session, notify, (request, signal) => this.#approve(job, request, signal))
+          : this.#launch(project, job.prompt, job.session, notify);
         this.#active = { job, process };
         void this.#api('/heartbeat', { busy: true, waitingAuthReason: null }, AbortSignal.timeout(10_000)).catch(() => {});
         void this.#update(job, 'progress', 'Agent started.').catch(() => {});
