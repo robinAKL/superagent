@@ -18,7 +18,7 @@ Create a private configuration file with absolute paths and a separate state fil
 }
 ```
 
-Use `claude-code` for the Claude Code adapter. Set `executable` to the installed native executable or the absolute JavaScript CLI entry point. The Link starts the executable without a shell and feeds the prompt on stdin. Codex uses the read-only sandbox. Claude Code uses plan mode. Use a dedicated local account and scope its project and tool permissions before testing.
+Use `claude-code` for the Claude Code adapter. Set `executable` to the installed native executable or the absolute JavaScript CLI entry point. Link starts the executable without a shell and feeds the prompt on stdin. The agent uses the CLI configuration and permissions of the operating-system account that starts Link, including its configured tools and MCP servers. Configure the agent under that account before running Link. Headless execution follows the CLI's own approval behavior.
 
 ```sh
 node apps/link/start.mjs path/to/config.json
