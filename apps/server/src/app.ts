@@ -8,6 +8,7 @@ import { createAuthenticate, requireRole, type AuthConfig } from './auth.js';
 import type { SetupDeps } from './modules/setup/service.js';
 import type { KnowledgeDeps } from './modules/knowledge/service.js';
 import { longWorkModule, mailWebhook, type LongWorkDeps } from './modules/longwork/http.js';
+import { workerLinkModule } from './modules/workers/index.js';
 
 export interface ReadinessCheck {
   name: string;
@@ -56,6 +57,8 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   const authCfgForBrowser = auth;
   const authenticate = createAuthenticate(auth);
   await app.register(mailWebhook, { deps: opts.longWorkDeps });
+  // Workers authenticate with their own revocable token, not a user sign-in (room T-03).
+  await app.register(workerLinkModule, { prefix: '/api/v1/worker-link' });
 
   await app.register(async (api) => {
     api.addHook('preHandler', authenticate);

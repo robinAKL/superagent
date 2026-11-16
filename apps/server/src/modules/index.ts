@@ -10,6 +10,7 @@ import { gatewayModule } from './gateway/index.js';
 import { humanworkModule } from './humanwork/index.js';
 import { sopModule } from './sop/index.js';
 import { executionModule } from './execution/index.js';
+import { workersModule } from './workers/index.js';
 
 export interface ModuleDef {
   prefix: string;
@@ -33,4 +34,6 @@ export const modules: ModuleDef[] = [
   { prefix: 'work-items', plugin: humanworkModule }, // T-41 Grok
   { prefix: 'sop', plugin: sopModule, roles: ['admin', 'owner'] }, // T-41 Grok (runtime) / T-48 page
   { prefix: 'executions', plugin: executionModule, roles: ['admin', 'owner'] }, // T-56 executor
+  // Worker registry (register / list / revoke). The worker's own channel is /api/v1/worker-link, outside sign-in.
+  { prefix: 'workers', plugin: workersModule, roles: ['admin', 'owner'] }, // room T-03
 ];
