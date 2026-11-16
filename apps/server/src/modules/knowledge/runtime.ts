@@ -7,7 +7,7 @@ import { GatewayAnalysisModel, type AnalysisGateway } from '../analysis/gateway-
 import { configuredDatabases } from './database-config.js';
 import { managedSourcePlugins } from './sources.js';
 import { PgKnowledgeAudit } from './audit.js';
-import { VeraMcpKnowledge } from './vera-mcp.js';
+import { LiveMcpKnowledge } from './live-mcp.js';
 /** All identity/endpoints/pools originate from the fail-closed platform bootstrap. */
 export function createKnowledgeDeps(runtime: Runtime & { llm?: AnalysisGateway }): KnowledgeDeps {
   const sourceResources = runtime.config.sourceResources ?? [], plugins = managedSourcePlugins(sourceResources, runtime.app.setupDeps.secrets);
@@ -16,11 +16,11 @@ export function createKnowledgeDeps(runtime: Runtime & { llm?: AnalysisGateway }
   const { config, pool } = runtime;
   const repo = config.mode === 'dev' ? new MemoryKnowledgeRepository() : pool && new PgKnowledgeRepository(pool);
   if (!repo) throw Error('Knowledge requires persistent runtime dependencies');
-  const veraMcp = new VeraMcpKnowledge(repo, runtime.app.setupDeps.secrets);
-  if (config.mode === 'dev') return { repo, veraMcp, veraAnswerGateway: runtime.llm, sourceResources, plugins, model, database: database.gateway, close: database.close, enqueue: async () => undefined };
+  const liveMcp = new LiveMcpKnowledge(repo, runtime.app.setupDeps.secrets);
+  if (config.mode === 'dev') return { repo, liveMcp, mcpAnswerGateway: runtime.llm, sourceResources, plugins, model, database: database.gateway, close: database.close, enqueue: async () => undefined };
   if (!pool || !config.blobUrl || !config.docIntelEndpoint) throw Error('Knowledge requires persistent runtime dependencies');
   return {
-    repo, veraMcp, veraAnswerGateway: runtime.llm, sourceResources, plugins,
+    repo, liveMcp, mcpAnswerGateway: runtime.llm, sourceResources, plugins,
     audit: new PgKnowledgeAudit(pool),
     model,
     database: database.gateway, close: database.close,

@@ -25,23 +25,29 @@ const tools = [
 ];
 const liveTools = [
   {
-    name: 'list_vera_knowledge',
-    description: 'Discover live VERA CRM knowledge available through the signed-in user’s connection, including documents, resource templates and read-only queries. Use the returned schemas to select a query.',
+    name: 'list_mcp_sources',
+    description: 'List the signed-in user’s connected MCP knowledge sources and their IDs.',
     inputSchema: { type: 'object', additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
-    name: 'read_vera_knowledge',
-    description: 'Read a live CRM document such as an operating guide. Use the URI from list_vera_knowledge or a URI expanded from one of its resource templates.',
-    inputSchema: { type: 'object', required: ['uri'], additionalProperties: false, properties: { uri: { type: 'string', maxLength: 1500 } } },
+    name: 'list_mcp_knowledge',
+    description: 'Discover documents, resource templates and enabled read-only queries from a connected MCP source.',
+    inputSchema: { type: 'object', required: ['sourceId'], additionalProperties: false, properties: { sourceId: { type: 'string', pattern: '^[a-f0-9]{64}$' } } },
     annotations: { readOnlyHint: true },
   },
   {
-    name: 'query_vera_knowledge',
-    description: 'Run a read-only query on VERA CRM for current information such as pricing knowledge or order details. Use the name and input schema from list_vera_knowledge.',
+    name: 'read_mcp_knowledge',
+    description: 'Read a live document using its URI or an expanded resource template from list_mcp_knowledge.',
+    inputSchema: { type: 'object', required: ['sourceId', 'uri'], additionalProperties: false, properties: { sourceId: { type: 'string', pattern: '^[a-f0-9]{64}$' }, uri: { type: 'string', maxLength: 1500 } } },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'query_mcp_knowledge',
+    description: 'Run an enabled read-only query on a connected MCP source. Use the name and input schema from list_mcp_knowledge.',
     inputSchema: {
-      type: 'object', required: ['name', 'arguments'], additionalProperties: false,
-      properties: { name: { type: 'string', maxLength: 128 }, arguments: { type: 'object' } },
+      type: 'object', required: ['sourceId', 'name', 'arguments'], additionalProperties: false,
+      properties: { sourceId: { type: 'string', pattern: '^[a-f0-9]{64}$' }, name: { type: 'string', maxLength: 128 }, arguments: { type: 'object' } },
     },
     annotations: { readOnlyHint: true },
   },
@@ -97,8 +103,8 @@ export function mountKnowledgeMcp(app: FastifyInstance, service: KnowledgeServic
         }
         case 'ping': return success({});
         case 'tools/list': {
-          const vera = service.deps.veraMcp;
-          const connected = vera?.status(await service.deps.repo.read(req.user!), req.user!).connected;
+          const live = service.deps.liveMcp;
+          const connected = live?.list(await service.deps.repo.read(req.user!), req.user!).some(source => source.enabled);
           return success({ tools: connected ? [...tools, ...liveTools] : tools });
         }
         case 'tools/call': {
@@ -118,10 +124,11 @@ export function mountKnowledgeMcp(app: FastifyInstance, service: KnowledgeServic
               }
               return success(toolResult(await service.preview(req.user!, sourceId, version, { confirmedOnly: true })));
             }
-            const vera = service.deps.veraMcp;
-            if (vera && params?.name === 'list_vera_knowledge') return success(toolResult(await vera.catalog(req.user!)));
-            if (vera && params?.name === 'read_vera_knowledge') return success(toolResult(await vera.read(req.user!, args.uri)));
-            if (vera && params?.name === 'query_vera_knowledge') return success(toolResult(await vera.call(req.user!, args.name, args.arguments)));
+            const live = service.deps.liveMcp;
+            if (live && params?.name === 'list_mcp_sources') return success(toolResult({ sources: live.list(await service.deps.repo.read(req.user!), req.user!).filter(source => source.enabled) }));
+            if (live && params?.name === 'list_mcp_knowledge') return success(toolResult(await live.catalog(req.user!, args.sourceId)));
+            if (live && params?.name === 'read_mcp_knowledge') return success(toolResult(await live.read(req.user!, args.sourceId, args.uri)));
+            if (live && params?.name === 'query_mcp_knowledge') return success(toolResult(await live.call(req.user!, args.sourceId, args.name, args.arguments)));
             return fail(-32602, 'Unknown tool');
           } catch (error) {
             if (!(error instanceof KnowledgeError)) {
@@ -129,7 +136,7 @@ export function mountKnowledgeMcp(app: FastifyInstance, service: KnowledgeServic
             }
             const message = error.code === 'version_changed'
               ? 'The source version has changed. Search again for the current version.'
-              : error.code === 'vera_reauthorize' ? 'Connect or reauthorize VERA CRM in Knowledge sources.'
+              : error.code === 'mcp_reauthorize' ? 'Reauthorize this MCP source in Knowledge sources.'
                 : 'The requested knowledge could not be read.';
             return success({ isError: true, content: [{ type: 'text', text: message }] });
           }

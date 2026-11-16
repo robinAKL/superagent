@@ -9,7 +9,8 @@ import type { SetupDeps } from './modules/setup/service.js';
 import type { KnowledgeDeps } from './modules/knowledge/service.js';
 import { longWorkModule, mailWebhook, type LongWorkDeps } from './modules/longwork/http.js';
 import { workerLinkModule } from './modules/workers/index.js';
-import { VERA_CALLBACK_PATH } from './modules/knowledge/vera-mcp.js';
+import { MCP_CALLBACK, MCP_CLIENT_DOCUMENT, mcpClientDocument } from './modules/knowledge/mcp-oauth.js';
+import { publicMcpEndpoint } from './modules/knowledge/plugins/mcp-public-http.js';
 
 export interface ReadinessCheck {
   name: string;
@@ -35,17 +36,27 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   });
 
   app.get('/healthz', async () => ({ ok: true }));
-  if (opts.knowledgeDeps?.veraMcp) {
+  if (opts.knowledgeDeps?.liveMcp) {
     // The SPA completes the exchange using the signed-in user's Super Agent credentials.
-    app.get<{ Querystring: Record<string, unknown> }>(VERA_CALLBACK_PATH, (req, reply) => {
+    app.get<{ Params: { binding?: string }; Querystring: Record<string, unknown> }>(MCP_CALLBACK + '/:binding?', (req, reply) => {
+      const binding = req.params.binding;
+      if (binding && !/^[a-f0-9]{32}$/.test(binding)) return reply.code(404).send();
       const fragment = new URLSearchParams();
       for (const key of ['state', 'code', 'iss']) {
         const value = req.query[key];
-        if (typeof value === 'string' && value.length <= 2048) fragment.set('vera_' + key, value);
+        if (typeof value === 'string' && value.length <= 2048) fragment.set('mcp_' + key, value);
       }
-      fragment.set('vera_return', '1');
+      fragment.set('mcp_callback', MCP_CALLBACK + (binding ? '/' + binding : ''));
       return reply.header('Cache-Control', 'no-store').header('Referrer-Policy', 'no-referrer')
         .redirect('/#knowledge?' + fragment.toString());
+    });
+    app.get<{ Params: { binding?: string } }>(MCP_CLIENT_DOCUMENT + '/:binding?', (req, reply) => {
+      const { binding } = req.params;
+      if (binding && !/^[a-f0-9]{32}$/.test(binding)) return reply.code(404).send();
+      try {
+        const origin = publicMcpEndpoint('https://' + (req.headers.host ?? '')).origin;
+        return mcpClientDocument(origin, binding);
+      } catch { return reply.code(400).send(); }
     });
   }
 

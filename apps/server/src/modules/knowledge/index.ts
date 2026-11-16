@@ -2,8 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { KnowledgeError } from './domain.js';
 import { KnowledgeService, type KnowledgeDeps } from './service.js';
 import { mountKnowledgeMcp } from './mcp.js';
-import { VERA_MCP_URL } from './vera-mcp.js';
-import { answerFromVera } from './vera-answer.js';
+import { answerFromMcp } from './mcp-answer.js';
 export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = async (app, opts) => {
   const service = opts.deps ? new KnowledgeService(opts.deps) : null;
   await app.register(async mcp => { mountKnowledgeMcp(mcp, service); });
@@ -18,45 +17,54 @@ export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = asy
   app.post<{ Params: { id: string } }>('/connections/:id/import', async (req, reply) => { const result = await service!.importSelection(req.user!, req.params.id, body(req)); return result.error ? reply.code(502).send({ error: 'source_sync_failed', message: result.error }) : result; });
   app.get<{ Params: { id: string }; Querystring: { templateId?: string; revision?: string } }>('/connections/:id/fact-freshness', req => service!.factFreshness(req.user!, req.params.id, req.query.templateId ?? '', req.query.revision ?? ''));
   app.get('/overview', req => service!.overview(req.user!));
-  const vera = () => {
-    if (!opts.deps?.veraMcp) throw new KnowledgeError('vera_mcp_unavailable', 'VERA CRM 知识连接尚未配置。', 503);
-    return opts.deps.veraMcp;
+  const mcp = () => {
+    if (!opts.deps?.liveMcp) throw new KnowledgeError('mcp_unavailable', 'MCP 知识连接尚未配置。', 503);
+    return opts.deps.liveMcp;
   };
-  app.post('/connections/mcp', (req, reply) => {
+  app.post('/connections/mcp', async (req, reply) => {
     const input = body(req);
-    if (input.endpoint === VERA_MCP_URL && opts.deps?.veraMcp) {
-      reply.header('Cache-Control', 'no-store');
-      return vera().start(req.user!, req.headers.origin, req.headers.host);
+    if (!opts.deps?.liveMcp) {
+      reply.code(201);
+      return service!.connectPublicMcp(req.user!, input);
+    }
+    reply.header('Cache-Control', 'no-store');
+    const result = await mcp().connect(req.user!, input, req.headers.origin, req.headers.host);
+    if ('authorizationUrl' in result) return { authorizationUrl: result.authorizationUrl };
+    const { catalog } = result;
+    if (req.user!.roles.some(role => role === 'owner' || role === 'admin')) {
+      const resources = catalog.resources.filter(resource => /^[a-z][a-z0-9+.-]*:[^\s\x00-\x1f]+$/i.test(resource.uri) && resource.uri.length <= 1000)
+        .map(resource => ({ uri: resource.uri, title: (resource.title || resource.name || resource.uri).slice(0, 180) }));
+      if (resources.length) await service!.connectPublicMcp(req.user!, { endpoint: catalog.source }, { name: catalog.name, resources });
     }
     reply.code(201);
-    return service!.connectPublicMcp(req.user!, input);
+    return { ...result.source, status: 'confirmed' };
   });
-  app.post('/connections/mcp/vera/finish', (req, reply) => {
+  app.post('/connections/mcp/oauth/finish', (req, reply) => {
     reply.header('Cache-Control', 'no-store');
-    return vera().finish(req.user!, body(req));
+    return mcp().finish(req.user!, body(req));
   });
-  app.delete('/connections/mcp/vera', (req, reply) => {
+  app.delete<{ Params: { id: string } }>('/connections/mcp/live/:id', (req, reply) => {
     reply.header('Cache-Control', 'no-store');
-    return vera().disconnect(req.user!);
+    return mcp().disconnect(req.user!, req.params.id);
   });
-  app.get('/connections/mcp/vera/catalog', (req, reply) => {
+  app.get<{ Params: { id: string } }>('/connections/mcp/live/:id/catalog', (req, reply) => {
     reply.header('Cache-Control', 'no-store');
-    return vera().catalog(req.user!);
+    return mcp().catalog(req.user!, req.params.id);
   });
-  app.post('/connections/mcp/vera/read', (req, reply) => {
+  app.post<{ Params: { id: string } }>('/connections/mcp/live/:id/read', (req, reply) => {
     reply.header('Cache-Control', 'no-store');
-    return vera().read(req.user!, body(req).uri);
+    return mcp().read(req.user!, req.params.id, body(req).uri);
   });
-  app.post('/connections/mcp/vera/query', { bodyLimit: 16 * 1024 }, (req, reply) => {
+  app.post<{ Params: { id: string } }>('/connections/mcp/live/:id/query', { bodyLimit: 16 * 1024 }, (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     const input = body(req);
-    return vera().call(req.user!, input.name, input.arguments);
+    return mcp().call(req.user!, req.params.id, input.name, input.arguments);
   });
-  app.post('/connections/mcp/vera/ask', { bodyLimit: 8 * 1024 }, (req, reply) => {
+  app.post<{ Params: { id: string } }>('/connections/mcp/live/:id/ask', { bodyLimit: 8 * 1024 }, (req, reply) => {
     reply.header('Cache-Control', 'no-store');
-    const gateway = opts.deps?.veraAnswerGateway;
-    if (!gateway) throw new KnowledgeError('vera_model_unavailable', '大脑模型尚未配置。', 503);
-    return answerFromVera(req.user!, body(req).question, vera(), gateway);
+    const gateway = opts.deps?.mcpAnswerGateway;
+    if (!gateway) throw new KnowledgeError('mcp_model_unavailable', '大脑模型尚未配置。', 503);
+    return answerFromMcp(req.user!, req.params.id, body(req).question, mcp(), gateway);
   });
   app.post('/connections', (req, reply) => { reply.code(201); return service!.createConnection(req.user!, body(req)); });
   app.post<{ Params: { id: string } }>('/connections/:id/confirm', req => service!.confirmConnection(req.user!, req.params.id));

@@ -14,7 +14,7 @@ import type { DatabaseGateway } from './database.js';
 import { CATEGORIES, type Category } from './profile.js';
 import { createPublicMcp, isPublicMcpScope } from './plugins/mcp-resources.js';
 import { publicMcpEndpoint } from './plugins/mcp-public-http.js';
-import type { VeraMcpKnowledge } from './vera-mcp.js';
+import type { LiveMcpKnowledge } from './live-mcp.js';
 import type { AnalysisGateway } from '../analysis/gateway-model.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
@@ -25,8 +25,8 @@ export interface KnowledgeDeps {
   binary?: BinaryDeps;
   database?: DatabaseGateway;
   publicMcp?: ReturnType<typeof createPublicMcp>;
-  veraMcp?: VeraMcpKnowledge;
-  veraAnswerGateway?: AnalysisGateway;
+  liveMcp?: LiveMcpKnowledge;
+  mcpAnswerGateway?: AnalysisGateway;
   close?: () => Promise<void>;
   audit?: AuditSink;
 }
@@ -97,7 +97,7 @@ export class KnowledgeService {
     const visibleRecs=recs.filter(r=>r.kind!=='relation'||r.relation&&objectKeys.has(r.relation.from)&&objectKeys.has(r.relation.to));
     return {
       spaceName: s.spaceName,
-      veraMcp: this.deps.veraMcp?.status(s, ctx),
+      mcpConnections: this.deps.liveMcp?.list(s, ctx),
       sourceResources: (this.deps.sourceResources ?? []).filter(r => r.audience.includes(ctx.userId) && r.projectIds.every(p => ctx.projectScopes.includes(p))).map(({ audience: _, ...r }) => ({ ...r, scope: publicSourceScope(r) })),
       plugins: MANIFESTS.map(m => ({ ...m, installed: true, builtIn: true, enabled: !s.disabledPlugins.includes(m.id), configured: m.id === 'local-file' || m.id === 'mcp' || (m.id === 'database' && !!this.deps.database?.list(ctx).length) || !!this.deps.plugins?.[m.id] })),
       databaseResources: this.deps.database?.list(ctx) ?? [],
@@ -149,11 +149,11 @@ export class KnowledgeService {
     }
     throw new KnowledgeError('connection_test_failed', '来源连接测试未通过。', 409);
   }
-  async connectPublicMcp(ctx: UserContext, input: Record<string, unknown>) {
+  async connectPublicMcp(ctx: UserContext, input: Record<string, unknown>, verified?: { name: string; resources: { uri: string; title: string }[] }) {
     requireManager(ctx);
     const endpoint = publicMcpEndpoint(input.endpoint).href;
     if ((await this.deps.repo.read(ctx)).disabledPlugins.includes('mcp')) throw new KnowledgeError('plugin_disabled', 'MCP 来源已暂停。', 409);
-    const { name, resources } = await this.publicMcp.discover(endpoint);
+    const { name, resources } = verified ?? await this.publicMcp.discover(endpoint);
     return this.deps.repo.transact(ctx, s => {
       if (s.disabledPlugins.includes('mcp')) throw new KnowledgeError('plugin_disabled', 'MCP 来源已暂停。', 409);
       const existing = s.source.connections.find(conn => conn.pluginId === 'mcp' && conn.scope.publicMcpEndpoint === endpoint && s.connectionMeta[conn.id]?.audience[0] === ctx.userId);
