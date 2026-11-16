@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { runCodexTurn } from './codex-app-server.mjs';
 
 const AUTH_ERROR = /not logged in|please (log|sign) in|authentication required|unauthorized|invalid api key|login required|token (has )?expired/i;
 const RESULT_LIMIT = 60_000;
@@ -14,19 +15,53 @@ export function projectDirectory(projects, projectId) {
   return { ...project, directory };
 }
 
+function spawnAgent(project, args) {
+  const command = project.executable.endsWith('.js') || project.executable.endsWith('.mjs') ? process.execPath : project.executable;
+  const argv = command === process.execPath ? [project.executable, ...args] : args;
+  const env = { ...process.env };
+  delete env.SUPERAGENT_WORKER_TOKEN;
+  return spawn(command, argv, {
+    cwd: project.directory, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32', windowsHide: true,
+  });
+}
+
+function terminateAgent(child) {
+  if (!child.pid || child.exitCode !== null) return;
+  if (process.platform === 'win32') {
+    const taskkill = join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'taskkill.exe');
+    const terminated = spawnSync(taskkill, ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    if (terminated.status !== 0) child.kill();
+  } else {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+  }
+}
+
+export function launchCodexWithApprovals(project, prompt, session, notify, approve) {
+  const child = spawnAgent(project, ['app-server']);
+  const controller = new AbortController();
+  child.stderr.resume();
+  child.stdin.on('error', () => {}); // App Server can exit with writes queued.
+  const closed = new Promise((resolve) => {
+    child.once('error', () => resolve({ failure: 'Codex App Server could not be started.' }));
+    child.once('close', () => resolve({ failure: 'Codex App Server disconnected.' }));
+  });
+  const turn = runCodexTurn({
+    input: child.stdin, output: child.stdout, cwd: project.directory, prompt, session, notify, approve, signal: controller.signal,
+  });
+  const completed = Promise.race([turn, closed]).finally(() => {
+    controller.abort();
+    terminateAgent(child);
+  });
+  return { completed, cancel: () => controller.abort() };
+}
+
 export function launchAgent(project, prompt, session, notify) {
   const codex = project.agent === 'codex';
   const args = codex
     ? ['exec', '--json', ...(session ? ['resume', session] : []), '-']
     : ['--print', '--output-format', 'stream-json', '--verbose', ...(session ? ['--resume', session] : [])];
-  const command = project.executable.endsWith('.js') || project.executable.endsWith('.mjs') ? process.execPath : project.executable;
-  const argv = command === process.execPath ? [project.executable, ...args] : args;
-  const env = { ...process.env };
-  delete env.SUPERAGENT_WORKER_TOKEN;
-  const child = spawn(command, argv, {
-    cwd: project.directory, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
-    detached: process.platform !== 'win32', windowsHide: true,
-  });
+  const child = spawnAgent(project, args);
   let result = '';
   let errorText = '';
   let cancelled = false;
@@ -66,13 +101,7 @@ export function launchAgent(project, prompt, session, notify) {
   function cancel() {
     if (cancelled || !child.pid || child.exitCode !== null) return;
     cancelled = true;
-    if (process.platform === 'win32') {
-      const taskkill = join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'taskkill.exe');
-      const terminated = spawnSync(taskkill, ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-      if (terminated.status !== 0) child.kill();
-    } else {
-      try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
-    }
+    terminateAgent(child);
   }
   return { cancel, completed };
 }
