@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { useT, type Dict } from '../i18n';
+import { useLang, useT, type Dict } from '../i18n';
 import './KnowledgePage.css';
 import { DatabaseSourcePanel } from './DatabaseSourcePanel';
 
@@ -27,6 +27,13 @@ interface Overview {
 }
 interface SearchResult { answer: string; hits: Evidence[] }
 const ROOT = '/api/v1/knowledge';
+const DEFAULT_SPACE_NAME = '企业知识';
+const ENGLISH_PLUGINS: Record<string, { name: string; capabilities: string[] }> = {
+  'local-file': { name: 'Local files', capabilities: ['File import', 'Version and line references'] },
+  email: { name: 'Enterprise email', capabilities: ['Approved mailbox', 'Incremental sync'] },
+  sharepoint: { name: 'SharePoint', capabilities: ['Document library scope', 'Source permission sync'] },
+  database: { name: 'Read-only database', capabilities: ['Schema knowledge', 'Controlled live queries'] },
+};
 
 const TEXT = {
   en: {
@@ -120,6 +127,9 @@ const TEXT = {
     binaryQueuedNotice: 'Document queued for parsing. Review and confirm the material version once parsing completes.',
     eyebrow: 'KNOWLEDGE / ENTERPRISE CONTEXT',
     pageTitle: 'Enterprise Knowledge',
+    progressLabel: 'Knowledge setup progress',
+    mcpTitle: 'Read knowledge via MCP',
+    mcpHint: 'Connect a Streamable HTTP client using an Entra access token for Super Agent. Search and read confirmed sources you have permission to access.',
     loadingBtn: 'Loading…',
     refreshBtn: 'Refresh',
     introMain: 'Build grounded evidence from trusted sources so every recommendation traces back to the original text.',
@@ -335,6 +345,9 @@ const TEXT = {
     binaryQueuedNotice: '文档已加入解析队列。解析完成后仍需核对并确认资料版本。',
     eyebrow: 'KNOWLEDGE / 企业上下文',
     pageTitle: '企业知识',
+    progressLabel: '知识配置进度',
+    mcpTitle: '通过 MCP 读取知识',
+    mcpHint: '在支持 Streamable HTTP 的客户端中配置 Super Agent 的 Entra 访问令牌，即可搜索和读取你有权限访问的已确认资料。',
     loadingBtn: '读取中…',
     refreshBtn: '刷新状态',
     introMain: '从可信来源建立依据，让每一条建议都能回到原文。',
@@ -612,6 +625,12 @@ function RecommendationCard({ recommendation: r, disabled, onAction, label, t }:
 
 export function KnowledgePage() {
   const t = useT(TEXT);
+  const [lang] = useLang();
+  const pluginDisplay = (plugin: Plugin) => (lang === 'en' ? ENGLISH_PLUGINS[plugin.id] : undefined) ?? plugin;
+  const pluginName = (id: string, catalog: Plugin[]) => {
+    const plugin = catalog.find(entry => entry.id === id);
+    return plugin ? pluginDisplay(plugin).name : id;
+  };
   const label = (value: string) => {
     const key = STATUS_KEYS[value];
     return key ? t(key) : value;
@@ -621,7 +640,7 @@ export function KnowledgePage() {
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await api<T & { message?: string; error?: string }>(ROOT + path, init);
     if (response.status < 200 || response.status >= 300 || response.body.error) {
-      throw new Error(response.body.message ?? response.body.error ?? t('reqFailedHttp', { status: response.status }));
+      throw new Error((lang === 'zh' ? response.body.message : undefined) ?? t('reqFailedHttp', { status: response.status }));
     }
     return response.body;
   }
@@ -665,7 +684,9 @@ export function KnowledgePage() {
     } finally { if (sequence === refreshSequence.current) setLoading(false); }
   }, []);
   useEffect(() => { void load(); return () => { refreshSequence.current++; searchSequence.current++; }; }, [load]);
-  useEffect(() => { setSpaceName(overview?.spaceName ?? ''); }, [overview?.spaceName]);
+  useEffect(() => {
+    setSpaceName(overview?.spaceName === DEFAULT_SPACE_NAME ? '' : overview?.spaceName ?? '');
+  }, [overview?.spaceName]);
   const analysisActive = overview?.analyses.some(run => run.status === 'queued' || run.status === 'running') ?? false;
   const parseActive = overview?.parseJobs.some(job => job.status === 'queued' || job.status === 'running') ?? false;
   useEffect(() => {
@@ -829,7 +850,7 @@ export function KnowledgePage() {
       <div>
         <span className="knowledge-eyebrow">{t('eyebrow')}</span>
         <h1>{t('pageTitle')}</h1>
-        {overview ? <p className="knowledge-space-name">{overview.spaceName}</p> : null}
+        {overview?.spaceName && overview.spaceName !== DEFAULT_SPACE_NAME ? <p className="knowledge-space-name">{overview.spaceName}</p> : null}
       </div>
       <button className="btn" type="button" onClick={() => void load()} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
     </header>
@@ -838,7 +859,7 @@ export function KnowledgePage() {
     {notice ? <div className="knowledge-notice" role="status">{notice}</div> : null}
     {!overview && loading ? <div className="panel knowledge-empty" role="status">{t('loadingState')}</div> : null}
     {overview ? <>
-      <ol className="panel knowledge-stepper" aria-label="Knowledge 3-step progress">
+      <ol className="panel knowledge-stepper" aria-label={t('progressLabel')}>
         <li className={`knowledge-stepper-item ${step1Done ? 'is-done' : currentStep === 1 ? 'is-current' : ''}`}>
           <div className="knowledge-stepper-head">
             <span className="knowledge-step">01</span>
@@ -881,12 +902,12 @@ export function KnowledgePage() {
             const readyToConfigure = plugin.installed && plugin.enabled && plugin.configured;
             return <div key={plugin.id} data-testid={`plugin-${plugin.id}`} className={`knowledge-source-card ${isSelected ? 'is-selected' : ''}`}>
               <div className="knowledge-source-card-top">
-                <strong>{plugin.name}</strong>
+                <strong>{pluginDisplay(plugin).name}</strong>
                 <span className="knowledge-badge">{!plugin.installed ? t('badgeNotInstalled') : !plugin.enabled ? t('badgePaused') : plugin.configured ? t('badgeEnabledConfigured') : t('badgeInstalledPending')}</span>
               </div>
-              <small>{plugin.builtIn ? t('builtInPrefix') : ''}{plugin.capabilities.join(' · ') || t('capsFallback')}</small>
+              <small>{plugin.builtIn ? t('builtInPrefix') : ''}{pluginDisplay(plugin).capabilities.join(' · ') || t('capsFallback')}</small>
               <div className="knowledge-source-card-actions">
-                {!plugin.installed ? <button className="btn" type="button" disabled={!!busy} onClick={() => void action(`install:${plugin.id}`, `/plugins/${encodeURIComponent(plugin.id)}/install`, {}, t('pluginInstalledNotice'))}>{t('installPluginBtn', { name: plugin.name })}</button> : <button className="btn" type="button" disabled={!!busy} onClick={() => void action(`plugin:${plugin.id}`, `/plugins/${encodeURIComponent(plugin.id)}`, { enabled: !plugin.enabled }, plugin.enabled ? t('pluginPausedNotice') : t('pluginEnabledNotice'))}>{plugin.enabled ? t('pausePluginBtn', { name: plugin.name }) : t('enablePluginBtn', { name: plugin.name })}</button>}
+                {!plugin.installed ? <button className="btn" type="button" disabled={!!busy} onClick={() => void action(`install:${plugin.id}`, `/plugins/${encodeURIComponent(plugin.id)}/install`, {}, t('pluginInstalledNotice'))}>{t('installPluginBtn', { name: pluginDisplay(plugin).name })}</button> : <button className="btn" type="button" disabled={!!busy} onClick={() => void action(`plugin:${plugin.id}`, `/plugins/${encodeURIComponent(plugin.id)}`, { enabled: !plugin.enabled }, plugin.enabled ? t('pluginPausedNotice') : t('pluginEnabledNotice'))}>{plugin.enabled ? t('pausePluginBtn', { name: pluginDisplay(plugin).name }) : t('enablePluginBtn', { name: pluginDisplay(plugin).name })}</button>}
                 {readyToConfigure || plugin.id === 'database' ? <button className="btn" type="button" onClick={() => selectSourceCard(plugin.id)}>{isSelected && plugin.id !== 'database' ? t('hideConfigBtn') : t('configureCardBtn')}</button> : null}
               </div>
             </div>;
@@ -895,9 +916,9 @@ export function KnowledgePage() {
         <p className="helper knowledge-plugin-hint">{t('pluginHint')}</p>
 
         {activeSourceCard && activeSourceCard !== 'database' ? <form onSubmit={createConnection} className="knowledge-form knowledge-inset">
-          <h3>{t('connFormTitle', { name: activeCardPlugin?.name ?? selectedPlugin })}</h3>
+          <h3>{t('connFormTitle', { name: activeCardPlugin ? pluginDisplay(activeCardPlugin).name : selectedPlugin })}</h3>
           <label className="field"><span>{t('connNameLabel')}</span><input required maxLength={160} value={connectionName} placeholder={t('connNamePlaceholder')} onChange={event => setConnectionName(event.target.value)} /></label>
-          <label className="field"><span>{t('sourcePluginLabel')}</span><select value={selectedPlugin} onChange={event => { setPluginId(event.target.value); setActiveSourceCard(event.target.value); setResourceId(''); setReadOnlyAcknowledged(false); }} disabled={!plugins.length}>{!plugins.length ? <option value="">{t('noReadyPlugin')}</option> : plugins.map(plugin => <option key={plugin.id} value={plugin.id}>{plugin.name}</option>)}</select></label>
+          <label className="field"><span>{t('sourcePluginLabel')}</span><select value={selectedPlugin} onChange={event => { setPluginId(event.target.value); setActiveSourceCard(event.target.value); setResourceId(''); setReadOnlyAcknowledged(false); }} disabled={!plugins.length}>{!plugins.length ? <option value="">{t('noReadyPlugin')}</option> : plugins.map(plugin => <option key={plugin.id} value={plugin.id}>{pluginDisplay(plugin).name}</option>)}</select></label>
           {remotePlugin ? <>
             <label className="field"><span>{t('approvedResourceLabel')}</span><select value={selectedResource?.id ?? ''} disabled={!sourceResources.length || !!busy} onChange={event => { setResourceId(event.target.value); setReadOnlyAcknowledged(false); }}>{!sourceResources.length ? <option value="">{t('noApprovedResource')}</option> : sourceResources.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}</select></label>
             {selectedResource ? <ScopeSummary scope={selectedResource.scope} projectIds={selectedResource.projectIds} t={t} /> : <p className="helper">{t('needAdminScope')}</p>}
@@ -908,7 +929,7 @@ export function KnowledgePage() {
         </form> : null}
 
         {overview.connections.length ? <ul className="knowledge-source-list">{overview.connections.map(connection => <li key={connection.id}>
-          <div><strong>{connection.name}</strong><small>{overview.plugins.find(plugin => plugin.id === connection.pluginId)?.name ?? connection.pluginId}</small></div>
+          <div><strong>{connection.name}</strong><small>{pluginName(connection.pluginId, overview.plugins)}</small></div>
           <span className={`knowledge-badge ${connection.status === 'confirmed' ? 'is-green' : ''}`}>{label(connection.status)}</span>
           {overview.canConfirm && ['draft', 'tested', 'pending_confirmation', 'sync_failed', 'needs_reauth'].includes(connection.status) ? <button className="btn" disabled={!!busy} onClick={() => void action(`confirm:${connection.id}`, `/connections/${encodeURIComponent(connection.id)}/confirm`, {}, t('connConfirmedNotice'))}>{connection.status === 'draft' ? t('confirmConnBtn') : t('retestConfirmBtn')}</button> : null}
           {overview.canConfirm && connection.status === 'confirmed' ? <button className="btn" disabled={!!busy} onClick={() => void action(`confirm:${connection.id}`, `/connections/${encodeURIComponent(connection.id)}/confirm`, {}, t('connRetestedNotice'))}>{t('retestConnBtn')}</button> : null}
@@ -938,7 +959,7 @@ export function KnowledgePage() {
         </div>
 
         {overview.parseJobs.length ? <div className="knowledge-parse-jobs" aria-label={t('parseJobsAria')}><h3>{t('parseJobsTitle')}</h3><ul className="knowledge-source-list">{overview.parseJobs.map(job => <li key={job.id}>
-          <div><strong>{job.name}</strong><small>{t('jobId', { id: job.id })}</small>{job.error ? <small className="knowledge-job-error">{job.error}</small> : null}{job.status === 'completed' ? <small>{t('jobCompletedHint')}</small> : job.status === 'outcome_unknown' ? <small className="knowledge-job-error">{t('jobUnknownHint')}</small> : null}</div>
+          <div><strong>{job.name}</strong><small>{t('jobId', { id: job.id })}</small>{job.error ? <small className="knowledge-job-error">{lang === 'zh' ? job.error : t('reqFailed')}</small> : null}{job.status === 'completed' ? <small>{t('jobCompletedHint')}</small> : job.status === 'outcome_unknown' ? <small className="knowledge-job-error">{t('jobUnknownHint')}</small> : null}</div>
           <span className={`knowledge-badge ${job.status === 'completed' ? 'is-green' : job.status === 'outcome_unknown' || job.status === 'failed' ? 'is-warning' : ''}`}>{label(job.status)}</span>
         </li>)}</ul></div> : null}
 
@@ -964,6 +985,11 @@ export function KnowledgePage() {
         <form className="knowledge-search-form" onSubmit={search}><label className="field"><span>{t('searchLabel')}</span><input required maxLength={200} value={query} onChange={event => setQuery(event.target.value)} placeholder={t('searchPlaceholder')} /></label><button className="btn" disabled={searching || !!busy || !query.trim()}>{searching ? t('searchingBtn') : t('searchBtn')}</button></form>
         {searchError ? <p className="knowledge-alert" role="alert">{searchError}</p> : null}
         {searchResult ? <div className="knowledge-search-result" aria-live="polite">{searchResult.hits.length ? <><p className="knowledge-answer">{searchResult.answer || t('searchFoundDefault')}</p><EvidenceList evidence={searchResult.hits} t={t} /></> : <p className="knowledge-empty">{t('searchNoHits')}</p>}</div> : <p className="helper">{t('searchIdleHint')}</p>}
+        <details>
+          <summary>{t('mcpTitle')}</summary>
+          <p className="helper">{t('mcpHint')}</p>
+          <code>{window.location.origin}{ROOT}/mcp</code>
+        </details>
       </section>
 
       <details className="panel knowledge-advanced" open={advancedOpen} onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
@@ -973,7 +999,7 @@ export function KnowledgePage() {
         </summary>
         <div className="knowledge-advanced-body">
           <form className="knowledge-space-form" aria-label={t('spaceFormAria')} onSubmit={renameSpace}>
-            <label className="field"><span>{t('spaceNameLabel')}</span><input required maxLength={160} value={spaceName} onChange={event => setSpaceName(event.target.value)} /></label>
+            <label className="field"><span>{t('spaceNameLabel')}</span><input required maxLength={160} value={spaceName} placeholder={t('pageTitle')} onChange={event => setSpaceName(event.target.value)} /></label>
             <button className="btn" disabled={!!busy || !spaceName.trim()}>{t('saveSpaceBtn')}</button>
             <p className="helper">{t('spaceNameHint')}</p>
           </form>
