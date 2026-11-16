@@ -22,7 +22,8 @@ interface Recommendation {
 interface Overview {
   spaceName: string; sourceResources: SourceResource[];
   plugins: Plugin[]; connections: Connection[]; items: Item[];
-  analyses: { id: string; status: string; stage: string }[]; recommendations: Recommendation[];
+  analyses: { id: string; status: string; stage: string; error?: string | null }[]; recommendations: Recommendation[];
+  analysisReadiness?: { ready: true } | { ready: false; code: string };
   canConfirm: boolean;
   mcpConnections?: McpConnection[];
   parseJobs: { id: string; name: string; status: string; error: string | null }[];
@@ -229,6 +230,19 @@ const TEXT = {
     analyzingBtn: 'Analysis running',
     startAnalysisBtn: 'Start analysis',
     analysisSubmittedNotice: 'Analysis job submitted. Progress follows server status.',
+    analysisSettings: 'Open model settings',
+    analysisSetupRequired: 'Configure a model provider and select a primary model in Settings.',
+    analysisInvalidKey: 'The model provider rejected the API key. Replace it in Settings.',
+    analysisSelectModel: 'Select a primary model in Settings.',
+    analysisMissingPrice: 'The primary model has no verified price. Select a verified model or contact your platform administrator.',
+    analysisSetBudget: 'Set a monthly model budget in Settings.',
+    analysisBudgetExhausted: 'The remaining monthly budget is too low for this analysis.',
+    analysisUnavailable: 'Analysis is unavailable right now. Try refreshing this page.',
+    analysisProviderFailed: 'The model provider declined the analysis request.',
+    analysisUnknownOutcome: 'The model request outcome is unclear. Check model usage before trying again.',
+    analysisInvalidOutput: 'The model did not return suggestions that could be verified against the materials.',
+    analysisRunFailed: 'The analysis failed. Try again.',
+    analysisPermission: 'An owner or administrator can start an analysis.',
     needConfirmedHint: 'Confirm at least one authorized material version first.',
     noAnalyses: 'No analyses run yet. Source permissions and versions are re-checked before analysis starts.',
     noRecommendations: 'No draft recommendations yet. Only analysis results with valid current citations appear here.',
@@ -434,6 +448,19 @@ const TEXT = {
     analyzingBtn: '分析进行中',
     startAnalysisBtn: '开始分析',
     analysisSubmittedNotice: '分析任务已提交，进度以服务端状态为准。',
+    analysisSettings: '打开模型设置',
+    analysisSetupRequired: '请在设置中配置模型供应商并选择主模型。',
+    analysisInvalidKey: '模型供应商拒绝了 API 密钥，请在设置中替换。',
+    analysisSelectModel: '请在设置中选择主模型。',
+    analysisMissingPrice: '主模型缺少已验证的价格记录，请选择已验证的模型或联系平台管理员。',
+    analysisSetBudget: '请在设置中设定模型的月度预算。',
+    analysisBudgetExhausted: '剩余月度预算不足以运行此次分析。',
+    analysisUnavailable: '分析暂时不可用，请刷新页面重试。',
+    analysisProviderFailed: '模型供应商拒绝了分析请求。',
+    analysisUnknownOutcome: '模型请求的结果待确认，请检查模型用量后再试。',
+    analysisInvalidOutput: '模型返回的建议无法根据资料验证。',
+    analysisRunFailed: '分析失败，请重试。',
+    analysisPermission: '所有者或管理员可以开始分析。',
     needConfirmedHint: '请先确认至少一份有权限的资料版本。',
     noAnalyses: '尚未运行分析。分析开始前会再次检查来源权限和版本。',
     noRecommendations: '暂无建议草案。只有带当前有效引用的分析结果才会出现在这里。',
@@ -454,6 +481,28 @@ const TEXT = {
 } satisfies Dict<string>;
 
 type TextKey = keyof typeof TEXT.en;
+const ANALYSIS_MESSAGES: Record<string, TextKey> = {
+  llm_not_configured: 'analysisSetupRequired',
+  llm_key_invalid: 'analysisInvalidKey',
+  model_not_selected: 'analysisSelectModel',
+  price_unknown: 'analysisMissingPrice',
+  budget_not_set: 'analysisSetBudget',
+  budget_exhausted: 'analysisBudgetExhausted',
+  analysis_unavailable: 'analysisUnavailable',
+  analysis_check_failed: 'analysisUnavailable',
+  model_provider_failed: 'analysisProviderFailed',
+  model_outcome_unknown: 'analysisUnknownOutcome',
+  invalid_model_output: 'analysisInvalidOutput',
+  unsupported_recommendation: 'analysisInvalidOutput',
+  unsupported_relation: 'analysisInvalidOutput',
+  no_evidence: 'needConfirmedHint',
+  analysis_active: 'analyzingBtn',
+};
+const ANALYSIS_SETTINGS_CODES = new Set(['llm_not_configured', 'llm_key_invalid', 'model_not_selected', 'price_unknown', 'budget_not_set', 'budget_exhausted']);
+
+class KnowledgeRequestError extends Error {
+  constructor(message: string, readonly code?: string) { super(message); }
+}
 type Translate = (key: TextKey, vars?: Record<string, string | number>) => string;
 
 const STATUS_KEYS: Record<string, TextKey> = {
@@ -635,7 +684,7 @@ export function KnowledgePage() {
         throw new Error(t(response.body.error === 'mcp_oauth_registration' ? 'mcpRegistrationError' : 'mcpPublicClient', { url: response.body.message?.match(/https:\/\/\S+/)?.[0] ?? '' }));
       }
       if (response.body.error === 'connection_test_failed') throw new Error(t('connectionTestFailed'));
-      throw new Error((lang === 'zh' ? response.body.message : undefined) ?? t('reqFailedHttp', { status: response.status }));
+      throw new KnowledgeRequestError((lang === 'zh' ? response.body.message : undefined) ?? t('reqFailedHttp', { status: response.status }), response.body.error);
     }
     return response.body;
   }
@@ -658,6 +707,7 @@ export function KnowledgePage() {
   const [mcpClientId, setMcpClientId] = useState('');
   const [mcpScope, setMcpScope] = useState('');
   const [sourceFeedback, setSourceFeedback] = useState<{ text: string; error?: boolean } | null>(null);
+  const [analysisFeedback, setAnalysisFeedback] = useState<{ code?: string; message: string } | null>(null);
   const [resourceId, setResourceId] = useState('');
   const [readOnlyAcknowledged, setReadOnlyAcknowledged] = useState(false);
   const [spaceName, setSpaceName] = useState('');
@@ -709,6 +759,9 @@ export function KnowledgePage() {
     setSpaceName(overview?.spaceName === DEFAULT_SPACE_NAME ? '' : overview?.spaceName ?? '');
   }, [overview?.spaceName]);
   const analysisActive = overview?.analyses.some(run => run.status === 'queued' || run.status === 'running') ?? false;
+  const analysisBlock = overview?.analysisReadiness?.ready === false ? overview.analysisReadiness.code : undefined;
+  const analysisIssue = analysisFeedback?.code ?? analysisBlock;
+  const analysisMessage = analysisFeedback?.message ?? (analysisBlock ? t(ANALYSIS_MESSAGES[analysisBlock] ?? 'analysisUnavailable') : '');
   const parseJobs = overview?.parseJobs.filter(job => job.status !== 'completed' && job.error !== 'superseded') ?? [];
   const parseActive = parseJobs.some(job => job.status === 'queued' || job.status === 'running');
   const profilesRefining = overview?.items.some(item => item.profile?.refining) ?? false;
@@ -743,8 +796,10 @@ export function KnowledgePage() {
     if (actionInFlight.current) return false;
     actionInFlight.current = true;
     const forSources = path.startsWith('/connections') || path.startsWith('/plugins');
+    const forAnalysis = path === '/analyses';
     setBusy(key); setNotice(''); setError('');
     if (forSources) setSourceFeedback(null);
+    if (forAnalysis) setAnalysisFeedback(null);
     try {
       await request(path, { method, body: JSON.stringify(body) });
       if (forSources) setSourceFeedback({ text: success });
@@ -754,6 +809,10 @@ export function KnowledgePage() {
       return true;
     } catch (caught) {
       if (forSources) setSourceFeedback({ text: errorMessage(caught), error: true });
+      else if (forAnalysis) {
+        const code = caught instanceof KnowledgeRequestError ? caught.code : undefined;
+        setAnalysisFeedback({ code, message: t((code && ANALYSIS_MESSAGES[code]) || 'analysisRunFailed') });
+      }
       else setError(errorMessage(caught));
       return false;
     }
@@ -883,7 +942,7 @@ export function KnowledgePage() {
           setSourcesOpen(!sourcesOpen);
           if (!sourcesOpen) window.setTimeout(() => document.getElementById('knowledge-sources')?.scrollIntoView({ block: 'nearest' }), 0);
         }} aria-expanded={sourcesOpen} aria-controls="knowledge-sources">{t('manageSources')}</button>
-        <button className="btn" type="button" onClick={() => void load()} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
+        <button className="btn" type="button" onClick={() => { setAnalysisFeedback(null); void load(); }} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
       </div>
     </header>
     <div className="knowledge-intro"><p>{t('introMain')}</p></div>
@@ -1019,10 +1078,19 @@ export function KnowledgePage() {
       <section className="panel knowledge-section" aria-labelledby="knowledge-analysis-heading">
         <div className="knowledge-section-head">
           <div><h2 id="knowledge-analysis-heading">{t('sec3Title')}</h2><p className="helper">{t('sec3Sub')}</p></div>
-          <button className="btn" disabled={!!busy || analysisActive || !confirmedCount} onClick={() => void action('analysis', '/analyses', {}, t('analysisSubmittedNotice'))}>{busy === 'analysis' ? t('submitting') : analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}</button>
+          <button className="btn" disabled={!!busy || analysisActive || !confirmedCount || !!analysisBlock || !overview.canConfirm}
+            onClick={() => void action('analysis', '/analyses', {}, t('analysisSubmittedNotice'))}>{busy === 'analysis' ? t('submitting') : analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}</button>
         </div>
+        {overview.canConfirm && analysisMessage ? <div className="knowledge-alert knowledge-analysis-status" role="status">
+          <p>{analysisMessage}</p>
+          {analysisIssue && ANALYSIS_SETTINGS_CODES.has(analysisIssue) ? <a className="btn" href="#settings">{t('analysisSettings')}</a> : null}
+        </div> : null}
+        {!overview.canConfirm ? <p className="helper">{t('analysisPermission')}</p> : null}
         {!confirmedCount ? <p className="helper">{t('needConfirmedHint')}</p> : null}
-        {overview.analyses.length ? <ul className="knowledge-runs">{overview.analyses.slice(-5).reverse().map(run => <li key={run.id}><span className={`knowledge-badge ${run.status === 'completed' ? 'is-green' : ''}`}>{label(run.status)}</span><span>{label(run.stage)}</span><small>{run.id}</small></li>)}</ul> : <p className="knowledge-empty">{t('noAnalyses')}</p>}
+        {overview.analyses.length ? <ul className="knowledge-runs">{overview.analyses.slice(-5).reverse().map(run => <li key={run.id}>
+          <span className={`knowledge-badge ${run.status === 'completed' ? 'is-green' : ''}`}>{label(run.status)}</span><span>{label(run.stage)}</span><small>{run.id}</small>
+          {run.error && ['failed', 'outcome_unknown'].includes(run.status) ? <small className="knowledge-job-error">{t(ANALYSIS_MESSAGES[run.error] ?? 'analysisRunFailed')}</small> : null}
+        </li>)}</ul> : <p className="knowledge-empty">{t('noAnalyses')}</p>}
         {recommendations.length ? <div className="knowledge-recommendations">{recommendations.map(recommendation => <RecommendationCard key={recommendation.id} recommendation={recommendation} disabled={!!busy} onAction={action} label={label} t={t} />)}</div> : <p className="knowledge-empty">{t('noRecommendations')}</p>}
       </section>
 

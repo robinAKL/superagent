@@ -81,7 +81,9 @@ export class KnowledgeService {
   }
   async overview(ctx: UserContext) {
     const s = await this.deps.repo.read(ctx);
-    const refining = await this.profileModelReady(ctx);
+    const modelReadiness = await this.modelReadiness(ctx);
+    const analysisReadiness = this.deps.enqueue ? modelReadiness : { ready: false as const, code: 'analysis_unavailable' };
+    const refining = !!this.deps.model?.profile && modelReadiness.ready;
     const items = s.source.items.filter(i => this.allowed(s, ctx, i, false));
     const recs = s.recommendations.filter(r => !r.deleted).flatMap(r => {
       const valid = r.origin === 'manual' || r.evidence.length > 0 && r.evidence.every(e => this.valid(s, ctx, e));
@@ -98,6 +100,7 @@ export class KnowledgeService {
     return {
       spaceName: s.spaceName,
       mcpConnections: this.deps.liveMcp?.list(s, ctx),
+      analysisReadiness,
       sourceResources: (this.deps.sourceResources ?? []).filter(r => r.audience.includes(ctx.userId) && r.projectIds.every(p => ctx.projectScopes.includes(p))).map(({ audience: _, ...r }) => ({ ...r, scope: publicSourceScope(r) })),
       plugins: MANIFESTS.map(m => ({ ...m, installed: true, builtIn: true, enabled: !s.disabledPlugins.includes(m.id), configured: m.id === 'local-file' || m.id === 'mcp' || (m.id === 'database' && !!this.deps.database?.list(ctx).length) || !!this.deps.plugins?.[m.id] })),
       databaseResources: this.deps.database?.list(ctx) ?? [],
@@ -341,10 +344,22 @@ export class KnowledgeService {
       return { status: 'ready' as const };
     });
   }
-  /** Show "AI is organizing" only when the model is configured and within budget; otherwise rule labels are final. */
-  private async profileModelReady(ctx: UserContext): Promise<boolean> {
-    if (!this.deps.model?.profile) return false;
-    try { await this.deps.model.check?.(ctx.tenantId); return true; } catch { return false; }
+  private async requireModelReady(ctx: UserContext) {
+    const { model } = this.deps;
+    if (!model) throw new KnowledgeError('analysis_unavailable', '分析模型暂时不可用。', 503);
+    try { await model.check?.(ctx.tenantId); }
+    catch (error) {
+      if (error instanceof KnowledgeError) throw error;
+      throw new KnowledgeError('analysis_check_failed', '暂时无法检查分析模型，稍后重试。', 503);
+    }
+  }
+  private async modelReadiness(ctx: UserContext) {
+    try {
+      await this.requireModelReady(ctx);
+      return { ready: true as const };
+    } catch (error) {
+      return { ready: false as const, code: error instanceof KnowledgeError ? error.code : 'analysis_check_failed' };
+    }
   }
   private profileView(s: KnowledgeState, ctx: UserContext, item: Item, modelReady = false) {
     const p = s.profiles?.[item.id];
@@ -418,15 +433,16 @@ export class KnowledgeService {
   }
   async startAnalysis(ctx: UserContext) {
     requireManager(ctx);
-    if (!this.deps.model || !this.deps.enqueue) throw new KnowledgeError('analysis_unavailable', '分析需要已配置并通过预算校验的模型及持久化工作队列。', 503);
-    await this.deps.model.check?.(ctx.tenantId);
+    const { enqueue } = this.deps;
+    if (!enqueue) throw new KnowledgeError('analysis_unavailable', '分析工作队列暂时不可用。', 503);
+    await this.requireModelReady(ctx);
     const run = await this.deps.repo.transact(ctx, s => {
       if (!s.source.items.some(i => this.allowed(s, ctx, i))) throw new KnowledgeError('no_evidence', '无依据：先确认有权限的企业资料。', 409);
       if (s.analyses.some(r => r.actor.userId === ctx.userId && ['queued', 'running'].includes(r.status))) throw new KnowledgeError('analysis_active', '已有分析任务正在运行。', 409);
       const run = { id: id(), actor: ctx, status: 'queued' as const, stage: 'parse' as const, signature: signature(s, ctx), createdAt: stamp(), error: null };
       s.analyses.push(run); return run;
     });
-    await this.deps.enqueue(ctx, run.id); return { id: run.id, status: 'queued', stage: run.stage };
+    await enqueue(ctx, run.id); return { id: run.id, status: 'queued', stage: run.stage };
   }
   async editRecommendation(ctx: UserContext, recId: string, input: Record<string, unknown>, remove = false) {
     requireManager(ctx);

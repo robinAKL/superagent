@@ -10,6 +10,7 @@ import { confirmSource, emptyState, invalidateAnalyses, type Evidence, type Know
 import { runAnalysis } from '../src/modules/analysis/service.js';
 import { knowledgeModule } from '../src/modules/knowledge/index.js';
 import { migrate } from '../src/migrate.js';
+import { GatewayAnalysisModel } from '../src/modules/analysis/gateway-model.js';
 const owner: UserContext = { tenantId: 'tenant-a', userId: 'alice', roles: ['owner'], projectScopes: ['project-a'] };
 async function fixture() {
   const repo = new MemoryKnowledgeRepository(), service = new KnowledgeService({ repo });
@@ -74,6 +75,33 @@ describe('knowledge application: real source store + transactions', () => {
     await expect(f.service.createConnection(owner, { name: '数据库', pluginId: 'database', readOnlyAcknowledged: true })).rejects.toMatchObject({ code: 'connector_not_configured', statusCode: 503 });
     await expect(f.service.startAnalysis(owner)).rejects.toMatchObject({ code: 'analysis_unavailable', statusCode: 503 });
     await expect(f.service.createConnection(owner, { name: 'x', pluginId: 'local-file', scope: { password: 'placeholder' } })).rejects.toMatchObject({ code: 'secret_not_allowed' });
+  });
+  it('reports setup and budget prerequisites before submitting an analysis', async () => {
+    const { repo } = await confirmed();
+    let configured = false, hasBudget = false;
+    const model = new GatewayAnalysisModel({
+      check: async () => configured ? { ok: true, model: 'fixture' } : { ok: false, code: 'llm_not_configured' },
+      chat: async () => { throw Error('the readiness check must not call the provider'); },
+    }, async () => hasBudget);
+    const app = Fastify();
+    app.addHook('preHandler', async req => { req.user = owner; });
+    await app.register(knowledgeModule, { deps: { repo, model, enqueue: async () => undefined } });
+    const overview = () => app.inject('/overview').then(reply => reply.json());
+    const start = () => app.inject({ method: 'POST', url: '/analyses', payload: {} });
+    try {
+      for (const code of ['llm_not_configured', 'budget_not_set']) {
+        expect((await overview()).analysisReadiness).toEqual({ ready: false, code });
+        const reply = await start();
+        expect(reply.statusCode).toBe(503);
+        expect(reply.json().error).toBe(code);
+        expect((await repo.read(owner)).analyses).toEqual([]);
+        configured = true;
+      }
+      hasBudget = true;
+      expect((await overview()).analysisReadiness).toEqual({ ready: true });
+      expect((await start()).statusCode).toBe(202);
+      expect((await repo.read(owner)).analyses).toHaveLength(1);
+    } finally { await app.close(); }
   });
   it('employee cannot change source approval or recommendation state', async () => {
     const f = await confirmed(), employee = { ...owner, roles: ['employee'] as UserContext['roles'] };
