@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { validateSopGraph, type SopGraph } from '@superagent/shared';
 import { SopGraphView } from '../src/components/SopGraphView';
+import { LangProvider } from '../src/i18n';
 import { OntologyList, employeeContext } from '../src/pages/SuperAgentPage';
 
 const graph: SopGraph = {
@@ -17,7 +18,7 @@ describe('SOP graph view', () => {
   it('draws every node as a labelled button with its kind, and marks nodes that have structural issues', () => {
     const issues = validateSopGraph(graph, { employees: { 'emp-1': { status: 'active' } }, tools: { 'erp.post': { stage: 'available', effect: 'write' } } });
     expect(issues.map((i) => i.code)).toEqual(['write_without_review']);
-    const html = renderToStaticMarkup(<SopGraphView graph={graph} issues={issues} selected="e" />);
+    const html = renderToStaticMarkup(<LangProvider initial="zh"><SopGraphView graph={graph} issues={issues} selected="e" /></LangProvider>);
     expect(html.match(/<button/g)).toHaveLength(3);
     expect(html).toContain('aria-label="触发点：收到发票"');
     expect(html).toContain('问题：登记付款 会写入外部系统，之前必须经过人工审核');
@@ -27,7 +28,11 @@ describe('SOP graph view', () => {
   });
 
   it('an empty draft says so instead of drawing nothing', () => {
-    expect(renderToStaticMarkup(<SopGraphView graph={{ nodes: [], edges: [] }} />)).toContain('草稿里还没有节点');
+    expect(renderToStaticMarkup(<LangProvider initial="zh"><SopGraphView graph={{ nodes: [], edges: [] }} /></LangProvider>)).toContain('草稿里还没有节点');
+    // English is the default: no Chinese UI text.
+    const en = renderToStaticMarkup(<SopGraphView graph={{ nodes: [], edges: [] }} />);
+    expect(en).toContain('The draft has no nodes yet.');
+    expect(en).not.toMatch(/[一-鿿]/);
   });
 
   it('maps employee runtime status onto graph availability', () => {

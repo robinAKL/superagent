@@ -1,11 +1,29 @@
 import { layoutSopGraph, type SopGraph, type SopGraphIssue, type SopNodeKind } from '@superagent/shared';
+import { translate, useLang, type Dict, type Lang } from '../i18n';
 
+const TEXT = {
+  en: {
+    trigger: 'Trigger', agent: 'Super agent', employee: 'Employee', tool: 'Tool', human_review: 'Human review',
+    empty: 'The draft has no nodes yet.', graph: 'Flow chart', nodeLabel: '{kind}: {label}', problems: '. Issues: {list}', problemSep: '; ',
+  },
+  zh: {
+    trigger: '触发点', agent: '超级智能体', employee: '员工', tool: '工具', human_review: '人工审核',
+    empty: '草稿里还没有节点。', graph: '流程图', nodeLabel: '{kind}：{label}', problems: '。问题：{list}', problemSep: '；',
+  },
+} satisfies Dict<string>;
+
+/** Node kind in the given language. */
+export function kindLabel(kind: SopNodeKind, lang: Lang): string {
+  return translate(TEXT, lang, kind);
+}
+
+/** Chinese node kind labels, kept for callers that have not moved to kindLabel() yet. */
 export const KIND_LABEL: Record<SopNodeKind, string> = {
-  trigger: '触发点',
-  agent: '超级智能体',
-  employee: '员工',
-  tool: '工具',
-  human_review: '人工审核',
+  trigger: TEXT.zh.trigger,
+  agent: TEXT.zh.agent,
+  employee: TEXT.zh.employee,
+  tool: TEXT.zh.tool,
+  human_review: TEXT.zh.human_review,
 };
 
 const W = 168;
@@ -18,6 +36,8 @@ const GY = 28;
  * marked and described for screen readers. Layout columns follow distance from the trigger.
  */
 export function SopGraphView({ graph, issues = [], selected, onSelect }: { graph: SopGraph; issues?: SopGraphIssue[]; selected?: string; onSelect?: (id: string) => void }) {
+  const [lang] = useLang();
+  const t = (key: keyof typeof TEXT.en, vars?: Record<string, string>) => translate(TEXT, lang, key, vars);
   const pos = layoutSopGraph(graph);
   const cols = Math.max(1, ...[...pos.values()].map((p) => p.col + 1));
   const rows = Math.max(1, ...[...pos.values()].map((p) => p.row + 1));
@@ -27,9 +47,9 @@ export function SopGraphView({ graph, issues = [], selected, onSelect }: { graph
   const bad = new Map<string, string[]>();
   for (const i of issues) if (i.nodeId) bad.set(i.nodeId, [...(bad.get(i.nodeId) ?? []), i.message]);
 
-  if (!graph.nodes.length) return <p className="helper">草稿里还没有节点。</p>;
+  if (!graph.nodes.length) return <p className="helper">{t('empty')}</p>;
   return (
-    <div className="sop-graph" role="group" aria-label="流程图">
+    <div className="sop-graph" role="group" aria-label={t('graph')}>
       <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true" className="sop-edges">
         {graph.edges.map((e, i) => {
           const a = at(e.from);
@@ -52,10 +72,10 @@ export function SopGraphView({ graph, issues = [], selected, onSelect }: { graph
             style={{ left: p.col * (W + GX), top: p.row * (H + GY), width: W, height: H }}
             onClick={() => onSelect?.(n.id)}
             aria-pressed={selected === n.id}
-            aria-label={`${KIND_LABEL[n.kind]}：${n.label}${problems ? `。问题：${problems.join('；')}` : ''}`}
+            aria-label={t('nodeLabel', { kind: kindLabel(n.kind, lang), label: n.label }) + (problems ? t('problems', { list: problems.join(t('problemSep')) }) : '')}
             data-node={n.id}
           >
-            <small>{KIND_LABEL[n.kind]}</small>
+            <small>{kindLabel(n.kind, lang)}</small>
             <span>{n.label}</span>
           </button>
         );
