@@ -3,6 +3,7 @@ import { SOP_NODE_KINDS, validateSopGraph, type SopGraph, type SopGraphContext, 
 import { api } from '../api';
 import { KIND_LABEL, SopGraphView } from '../components/SopGraphView';
 import { graphFromPack, knowledgeImpact, packFromRecommendation, unconfirmedItems, validationState, type KnowledgeEvidence, type SopPack } from './sop-workflow';
+import { VeraKnowledge } from './VeraKnowledge';
 import { ExecutionsPanel } from './ExecutionsPanel';
 import './SuperAgentPage.css';
 
@@ -97,7 +98,8 @@ export function employeeContext(rows: EmployeeRow[]): SopGraphContext['employees
 }
 
 export function SuperAgentPage() {
-  const [tab, setTab] = useState<'sop' | 'ontology'>('sop');
+  const [tab, setTab] = useState<'sop' | 'ontology' | 'crm'>(() =>
+    typeof window !== 'undefined' && window.location.hash === '#brain?tab=crm' ? 'crm' : 'sop');
   return (
     <>
       <div className="page-head">
@@ -107,8 +109,9 @@ export function SuperAgentPage() {
       <div className="tabs" role="tablist" aria-label="超级智能体">
         <button role="tab" type="button" aria-selected={tab === 'sop'} className="tab" onClick={() => setTab('sop')}>流程</button>
         <button role="tab" type="button" aria-selected={tab === 'ontology'} className="tab" onClick={() => setTab('ontology')}>本体关系</button>
+        <button role="tab" type="button" aria-selected={tab === 'crm'} className="tab" onClick={() => setTab('crm')}>CRM 知识</button>
       </div>
-      {tab === 'sop' ? <SopWorkspace /> : <OntologyView />}
+      {tab === 'sop' ? <SopWorkspace /> : tab === 'ontology' ? <OntologyView /> : <VeraKnowledge />}
     </>
   );
 }

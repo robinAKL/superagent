@@ -23,6 +23,29 @@ const tools = [
     annotations: { readOnlyHint: true },
   },
 ];
+const liveTools = [
+  {
+    name: 'list_vera_knowledge',
+    description: 'Discover live VERA CRM knowledge available through the signed-in user’s connection, including documents, resource templates and read-only queries. Use the returned schemas to select a query.',
+    inputSchema: { type: 'object', additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'read_vera_knowledge',
+    description: 'Read a live CRM document such as an operating guide. Use the URI from list_vera_knowledge or a URI expanded from one of its resource templates.',
+    inputSchema: { type: 'object', required: ['uri'], additionalProperties: false, properties: { uri: { type: 'string', maxLength: 1500 } } },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'query_vera_knowledge',
+    description: 'Run a read-only query on VERA CRM for current information such as pricing knowledge or order details. Use the name and input schema from list_vera_knowledge.',
+    inputSchema: {
+      type: 'object', required: ['name', 'arguments'], additionalProperties: false,
+      properties: { name: { type: 'string', maxLength: 128 }, arguments: { type: 'object' } },
+    },
+    annotations: { readOnlyHint: true },
+  },
+];
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -73,7 +96,11 @@ export function mountKnowledgeMcp(app: FastifyInstance, service: KnowledgeServic
           });
         }
         case 'ping': return success({});
-        case 'tools/list': return success({ tools });
+        case 'tools/list': {
+          const vera = service.deps.veraMcp;
+          const connected = vera?.status(await service.deps.repo.read(req.user!), req.user!).connected;
+          return success({ tools: connected ? [...tools, ...liveTools] : tools });
+        }
         case 'tools/call': {
           const args = record(params?.arguments);
           if (!args) return fail(-32602, 'Tool arguments are required');
@@ -91,6 +118,10 @@ export function mountKnowledgeMcp(app: FastifyInstance, service: KnowledgeServic
               }
               return success(toolResult(await service.preview(req.user!, sourceId, version, { confirmedOnly: true })));
             }
+            const vera = service.deps.veraMcp;
+            if (vera && params?.name === 'list_vera_knowledge') return success(toolResult(await vera.catalog(req.user!)));
+            if (vera && params?.name === 'read_vera_knowledge') return success(toolResult(await vera.read(req.user!, args.uri)));
+            if (vera && params?.name === 'query_vera_knowledge') return success(toolResult(await vera.call(req.user!, args.name, args.arguments)));
             return fail(-32602, 'Unknown tool');
           } catch (error) {
             if (!(error instanceof KnowledgeError)) {
@@ -98,7 +129,8 @@ export function mountKnowledgeMcp(app: FastifyInstance, service: KnowledgeServic
             }
             const message = error.code === 'version_changed'
               ? 'The source version has changed. Search again for the current version.'
-              : 'The requested knowledge could not be read.';
+              : error.code === 'vera_reauthorize' ? 'Connect or reauthorize VERA CRM in Knowledge sources.'
+                : 'The requested knowledge could not be read.';
             return success({ isError: true, content: [{ type: 'text', text: message }] });
           }
         }

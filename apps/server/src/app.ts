@@ -9,6 +9,7 @@ import type { SetupDeps } from './modules/setup/service.js';
 import type { KnowledgeDeps } from './modules/knowledge/service.js';
 import { longWorkModule, mailWebhook, type LongWorkDeps } from './modules/longwork/http.js';
 import { workerLinkModule } from './modules/workers/index.js';
+import { VERA_CALLBACK_PATH } from './modules/knowledge/vera-mcp.js';
 
 export interface ReadinessCheck {
   name: string;
@@ -34,6 +35,19 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   });
 
   app.get('/healthz', async () => ({ ok: true }));
+  if (opts.knowledgeDeps?.veraMcp) {
+    // The SPA completes the exchange using the signed-in user's Super Agent credentials.
+    app.get<{ Querystring: Record<string, unknown> }>(VERA_CALLBACK_PATH, (req, reply) => {
+      const fragment = new URLSearchParams();
+      for (const key of ['state', 'code', 'iss']) {
+        const value = req.query[key];
+        if (typeof value === 'string' && value.length <= 2048) fragment.set('vera_' + key, value);
+      }
+      fragment.set('vera_return', '1');
+      return reply.header('Cache-Control', 'no-store').header('Referrer-Policy', 'no-referrer')
+        .redirect('/#knowledge?' + fragment.toString());
+    });
+  }
 
   // Public sign-in configuration for the browser (no secrets: tenant and client ids are not credentials).
   app.get('/auth/config', async () =>

@@ -15,7 +15,7 @@ export function isPublicMcpScope(scope: Record<string, unknown>): scope is Publi
   return typeof scope.publicMcpEndpoint === 'string' && Array.isArray(scope.mcpResources);
 }
 
-async function withClient<T>(endpoint: string, networkFetch: typeof fetch, callback: (client: Client) => Promise<T>, authorization?: string): Promise<T> {
+export async function withMcpClient<T>(endpoint: string, networkFetch: typeof fetch, callback: (client: Client) => Promise<T>, authorization?: string): Promise<T> {
   const client = new Client({ name: 'superagent-knowledge', version: '1.0.0' });
   const deadline = AbortSignal.timeout(15_000);
   const headers = authorization ? { Authorization: `Bearer ${authorization}` } : undefined;
@@ -60,7 +60,7 @@ function resourcePlugin(
   secrets?: Pick<SecretStore, 'get'>,
 ): KnowledgeSourcePlugin {
   async function request<T>(scope: McpResourceScope, callback: (client: Client) => Promise<T>) {
-    return withClient(scope.endpoint, networkFetch, callback, scope.secret ? await secrets!.get(scope.secret) : undefined);
+    return withMcpClient(scope.endpoint, networkFetch, callback, scope.secret ? await secrets!.get(scope.secret) : undefined);
   }
   return {
     manifest: { id: 'mcp', version: '1.0.0', name: 'MCP', capabilities: { incremental: false, attachments: false, liveQuery: false, acl: true }, permissions: [] },
@@ -111,7 +111,7 @@ export function createPublicMcp(networkFetch: typeof fetch = publicMcpFetch) {
     }, networkFetch),
     async discover(endpoint: string) {
       try {
-        return await withClient(endpoint, networkFetch, async client => {
+        return await withMcpClient(endpoint, networkFetch, async client => {
           const resources = new Map<string, string>();
           let cursor: string | undefined;
           if (client.getServerCapabilities()?.resources) {
