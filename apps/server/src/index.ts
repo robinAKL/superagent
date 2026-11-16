@@ -3,6 +3,7 @@ import { buildApp } from './app.js';
 import { dispatchBound, runWorker } from './worker.js';
 import { bindRuntimeDb, runtimeState } from './modules/runtime/index.js';
 import { bindRoomStore, hydrateRoom } from './modules/room/index.js';
+import { bindWorkersDb } from './modules/workers/index.js';
 import { bindSopStore, hydrateSop } from './modules/sop/index.js';
 import { bindGatewayStore, hydrateGateway } from './modules/gateway/index.js';
 import { bindInboxStore, hydrateInbox } from './modules/humanwork/index.js';
@@ -33,6 +34,7 @@ if (role === 'web') {
     const db = { query: async <T>(text: string, params: readonly unknown[]) => ({ rows: (await pool.query(text, params as unknown[])).rows as T[] }) };
     bindRoomStore(db);
     bindRuntimeDb(db);
+    bindWorkersDb(db);
     bindSopStore(db);
     bindGatewayStore(db);
     bindInboxStore(db);

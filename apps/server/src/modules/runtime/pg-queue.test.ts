@@ -49,6 +49,7 @@ it('treats a heartbeat with no updated row as a lost lease', async () => {
     { async query() { return { rows: [] }; } },
     'task-1',
     'worker-a',
+    2,
     30_000,
   );
   expect(renewed).toBe(false);
@@ -56,12 +57,13 @@ it('treats a heartbeat with no updated row as a lost lease', async () => {
     {
       async query<T>(sql: string, params: readonly unknown[]): Promise<{ rows: T[] }> {
         expect(sql).toBe(HEARTBEAT_TASK_SQL);
-        expect(params).toEqual(['task-1', 'worker-a', 30_000]);
+        expect(params).toEqual(['task-1', 'worker-a', 2, 30_000]);
         return { rows: [{ id: 'task-1' } as T] };
       },
     },
     'task-1',
     'worker-a',
+    2,
     30_000,
   );
   expect(held).toBe(true);
@@ -75,23 +77,25 @@ it('dead-letter inserts one exception item and a retry release stops at the ceil
       return { rows: [{ task_id: 'task-1' }] as T[] };
     },
   };
-  expect(await deadLetterTask(db, 'task-1', 'worker-a', 3, 'boom')).toBe(true);
+  expect(await deadLetterTask(db, 'task-1', 'worker-a', 3, 3, 'boom')).toBe(true);
   expect(calls[0]?.sql).toBe(DEAD_LETTER_SQL);
   expect(calls[0]?.sql).toMatch(/INSERT INTO human_work_items/);
   expect(calls[0]?.sql).toMatch(/exception_ruling/);
-  expect(calls[0]?.params).toEqual(['task-1', 'worker-a', 3, 'boom']);
+  expect(calls[0]?.params).toEqual(['task-1', 'worker-a', 3, 3, 'boom']);
 
   const released = await releaseTask(
     {
       async query(sql, params) {
         expect(sql).toBe(RELEASE_TASK_SQL);
-        expect(sql).toMatch(/attempt < \$3/);
-        expect(params).toEqual(['task-1', 'worker-a', 3]);
+        expect(sql).toMatch(/attempt = \$3/);
+        expect(sql).toMatch(/attempt < \$4/);
+        expect(params).toEqual(['task-1', 'worker-a', 2, 3]);
         return { rows: [] };
       },
     },
     'task-1',
     'worker-a',
+    2,
     3,
   );
   expect(released).toBe(false);
@@ -108,13 +112,14 @@ it('reports a leased task only while the holder still owns the lease', async () 
     },
     'task-1',
     'worker-a',
+    2,
   );
   expect(ok).toBe(true);
   expect(calls[0]?.sql).toBe(SUCCEED_TASK_SQL);
   expect(calls[0]?.sql).toMatch(/status = 'reported'/);
   expect(calls[0]?.sql).toMatch(/lease_until > now\(\)/);
-  expect(calls[0]?.params).toEqual(['task-1', 'worker-a']);
-  const lost = await succeedTask({ async query() { return { rows: [] }; } }, 'task-1', 'worker-b');
+  expect(calls[0]?.params).toEqual(['task-1', 'worker-a', 2]);
+  const lost = await succeedTask({ async query() { return { rows: [] }; } }, 'task-1', 'worker-b', 2);
   expect(lost).toBe(false);
 });
 

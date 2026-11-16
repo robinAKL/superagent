@@ -165,11 +165,11 @@ it('a bound database claim and heartbeat use the Postgres statements', async () 
   const beat = await app.inject({
     method: 'POST',
     url: '/api/v1/runtime/tasks/pg-1/heartbeat',
-    payload: { workerId: 'worker-a' },
+    payload: { workerId: 'worker-a', attempt: 1 },
   });
   expect(beat.json().ok).toBe(true);
   expect(calls[1]?.sql).toBe(HEARTBEAT_TASK_SQL);
-  expect(calls[1]?.params).toEqual(['pg-1', 'worker-a', 60_000]);
+  expect(calls[1]?.params).toEqual(['pg-1', 'worker-a', 1, 60_000]);
 
   const filtered = await app.inject({
     method: 'POST',
@@ -202,21 +202,21 @@ it('a bound database finishes a lease by reporting it, or dead-letters only at t
   const done = await app.inject({
     method: 'POST',
     url: '/api/v1/runtime/tasks/pg-1/succeed',
-    payload: { workerId: 'worker-a' },
+    payload: { workerId: 'worker-a', attempt: 1 },
   });
   expect(done.json()).toEqual({ id: 'pg-1', status: 'reported' });
 
   const dead = await app.inject({
     method: 'POST',
     url: '/api/v1/runtime/tasks/pg-1/fail',
-    payload: { workerId: 'worker-a', reason: 'boom', maxAttempts: 3 },
+    payload: { workerId: 'worker-a', reason: 'boom', maxAttempts: 3, attempt: 3 },
   });
   expect(dead.json().deadLettered).toBe(true);
 
   const lost = await app.inject({
     method: 'POST',
     url: '/api/v1/runtime/tasks/pg-1/fail',
-    payload: { workerId: 'worker-b', reason: 'boom', maxAttempts: 3 },
+    payload: { workerId: 'worker-b', reason: 'boom', maxAttempts: 3, attempt: 3 },
   });
   expect(lost.statusCode).toBe(409);
   expect(calls).toEqual([SUCCEED_TASK_SQL, RELEASE_TASK_SQL, DEAD_LETTER_SQL, RELEASE_TASK_SQL, DEAD_LETTER_SQL]);
