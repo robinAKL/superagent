@@ -20,6 +20,7 @@ test('command room defaults to English and switches system copy live', async ({ 
   await expect(room.getByRole('heading', { name: 'Agent confirmations' })).toBeVisible();
   await expect(room.getByRole('heading', { name: 'Conversation' })).toBeVisible();
   await expect(room.getByRole('heading', { name: 'Tasks' })).toBeVisible();
+  await expect(room.getByRole('link', { name: 'Configure Super Agent' })).toBeVisible();
   await expect(room.getByText('No tasks yet')).toBeVisible();
   await expect(room.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
   const textbox = room.getByRole('textbox', { name: 'Message the command room' });
@@ -45,4 +46,9 @@ test('command room defaults to English and switches system copy live', async ({ 
   await expect(page.getByRole('heading', { name: 'Agent Room 指挥室' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '共享协作记录' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '待确认的 agent 操作' })).toBeVisible();
+  await page.getByRole('button', { name: 'EN', exact: true }).click();
+  await expect(room.getByRole('heading', { name: 'Conversation' })).toBeVisible();
+  await expect(room.getByText('请保留这条原始消息', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(textbox).toHaveAttribute('placeholder', 'Write a message or @mention a digital employee to assign work.');
 });

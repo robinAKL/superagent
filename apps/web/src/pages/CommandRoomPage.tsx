@@ -777,7 +777,7 @@ export function CommandRoomPage() {
                   {openTask.status === 'completed' || openTask.status === 'reviewed' || openTask.status === 'reported' ? <p>{t('已回报完成。')}</p> : null}
                   {openTask.verification === 'failed' ? <p>{t('证据核验未通过，不能算完成。')}</p> : null}
                   {unsentDraftBoundary(openTask) ? <p data-boundary>{t(unsentDraftBoundary(openTask) ?? '')}</p> : null}
-                  {openTask.hold ? <p data-blocker>{t('负责人：')}{openTask.hold.responsible}</p> : null}
+                  {openTask.hold ? <p data-blocker>{t('负责人：')}{t(openTask.hold.responsible)}</p> : null}
                 </dd>
               </div>
             </dl>
