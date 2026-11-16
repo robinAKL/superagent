@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './execution.css';
 import { authHeaders } from '../api';
+import { useLang, type Lang } from '../i18n';
+import { roomMessage, roomText } from './command-room-copy';
 import { WorkerApprovals } from './WorkerApprovals';
 
 /**
@@ -59,20 +61,24 @@ const RUN_STATUS: Record<string, string> = {
 };
 
 /** Whether an approval still authorises anything. A retired one is closed with no decision. */
-export function approvalLine(approval: TaskOutcome['approvals'][number]): string {
-  if (approval.standing) return '批准有效';
-  return approval.status === 'closed' || approval.status === 'withdrawn' ? '批准已作废' : '尚未批准';
+export function approvalLine(approval: TaskOutcome['approvals'][number], lang: Lang = 'zh'): string {
+  if (approval.standing) return roomText('批准有效', lang);
+  return roomText(approval.status === 'closed' || approval.status === 'withdrawn' ? '批准已作废' : '尚未批准', lang);
 }
 
 /** The external attempts the gateway recorded for the run, and what the read-back said. */
-export function attemptsLine(outcome: Pick<TaskOutcome, 'attempts' | 'actions'>): string {
+export function attemptsLine(outcome: Pick<TaskOutcome, 'attempts' | 'actions'>, lang: Lang = 'zh'): string {
   const statuses = outcome.actions.map((action) => action.status);
+  if (lang === 'en') {
+    const read = statuses.includes('outcome_unknown') ? ' Outcome unknown.' : statuses.includes('confirmed') ? ' Readback verified.' : '';
+    return 'External attempts: ' + outcome.attempts + '.' + read + ' Editing the acceptance criteria will not resubmit.';
+  }
   const read = statuses.includes('outcome_unknown') ? '，结果未知' : statuses.includes('confirmed') ? '，回读一致' : '';
   return `外部提交 ${outcome.attempts} 次${read}。修改验收契约不会重新提交。`;
 }
 
-export function runStatusLabel(status: string): string {
-  return RUN_STATUS[status] ?? status;
+export function runStatusLabel(status: string, lang: Lang = 'zh'): string {
+  return roomText(RUN_STATUS[status] ?? status, lang);
 }
 
 
@@ -167,21 +173,21 @@ const EMPLOYEE_STATE: Record<RosterEmployee['status'], string> = {
   unconnected: '未连接',
 };
 
-export function employeeName(employees: readonly RosterEmployee[], employeeId: string | undefined): string {
-  return employees.find((employee) => employee.id === employeeId)?.name ?? '数字员工';
+export function employeeName(employees: readonly RosterEmployee[], employeeId: string | undefined, lang: Lang = 'zh'): string {
+  return employees.find((employee) => employee.id === employeeId)?.name ?? roomText('数字员工', lang);
 }
 
-export function taskStatusLabel(task: Pick<ApiTask, 'status' | 'waitingReason'>): string {
-  if (task.status === 'completed' || task.status === 'reviewed' || task.status === 'reported') return '已完成';
-  if (task.status === 'cancelled') return '已取消';
-  if (task.status === 'rejected') return '已退回';
-  if (task.status === 'outcome_unknown') return '结果未知';
-  if (task.status === 'waiting') return task.waitingReason ?? '等待';
-  return '进行中';
+export function taskStatusLabel(task: Pick<ApiTask, 'status' | 'waitingReason'>, lang: Lang = 'zh'): string {
+  if (task.status === 'completed' || task.status === 'reviewed' || task.status === 'reported') return roomText('已完成', lang);
+  if (task.status === 'cancelled') return roomText('已取消', lang);
+  if (task.status === 'rejected') return roomText('已退回', lang);
+  if (task.status === 'outcome_unknown') return roomText('结果未知', lang);
+  if (task.status === 'waiting') return roomText(task.waitingReason ?? '等待', lang);
+  return roomText('进行中', lang);
 }
 
-export function taskLine(task: ApiTask, employees: readonly RosterEmployee[]): string {
-  return `${taskStatusLabel(task)} · ${employeeName(employees, task.employeeId)}`;
+export function taskLine(task: ApiTask, employees: readonly RosterEmployee[], lang: Lang = 'zh'): string {
+  return `${taskStatusLabel(task, lang)} · ${employeeName(employees, task.employeeId, lang)}`;
 }
 
 /** An unsent draft says so. The evidence object itself is never printed. */
@@ -192,8 +198,9 @@ export function unsentDraftBoundary(task: Pick<ApiTask, 'title' | 'evidence'>): 
 }
 
 /** Drawer overview: the title and, for an unsent draft, the boundary. No implementation JSON. */
-export function resultOverview(task: Pick<ApiTask, 'title' | 'evidence'>): string {
+export function resultOverview(task: Pick<ApiTask, 'title' | 'evidence'>, lang: Lang = 'zh'): string {
   const boundary = unsentDraftBoundary(task);
+  if (boundary && lang === 'en') return task.title + ' (' + roomText(boundary, lang) + ')';
   return boundary ? `${task.title}。${boundary}` : task.title;
 }
 
@@ -234,24 +241,24 @@ export function taskActions(task: ApiTask, viewer: RoomViewer | null): TaskActio
   };
 }
 
-export function messageKindLabel(message: ApiMessage, tasks: readonly ApiTask[]): string {
-  if (message.kind === 'report') return '回报';
-  if (message.kind === 'review') return '复核';
-  if (message.kind === 'cancel') return '取消';
-  if (message.kind === 'hold') return '等待连接';
-  if (message.kind === 'resume') return '恢复';
-  if (message.kind === 'contract') return '验收契约';
-  if (message.kind === 'reply') return message.taskIds.length > 0 ? '任务' : '回复';
-  return tasks.some((task) => task.messageId === message.id) ? '派活' : '消息';
+export function messageKindLabel(message: ApiMessage, tasks: readonly ApiTask[], lang: Lang = 'zh'): string {
+  if (message.kind === 'report') return roomText('回报', lang);
+  if (message.kind === 'review') return roomText('复核', lang);
+  if (message.kind === 'cancel') return roomText('取消', lang);
+  if (message.kind === 'hold') return roomText('等待连接', lang);
+  if (message.kind === 'resume') return roomText('恢复', lang);
+  if (message.kind === 'contract') return roomText('验收契约', lang);
+  if (message.kind === 'reply') return roomText(message.taskIds.length > 0 ? '任务' : '回复', lang);
+  return roomText(tasks.some((task) => task.messageId === message.id) ? '派活' : '消息', lang);
 }
 
-export function actorLabel(message: ApiMessage, viewer: RoomViewer | null, tasks: readonly ApiTask[], employees: readonly RosterEmployee[]): string {
-  if (message.authorUserId === 'super-agent') return '超级智能体';
+export function actorLabel(message: ApiMessage, viewer: RoomViewer | null, tasks: readonly ApiTask[], employees: readonly RosterEmployee[], lang: Lang = 'zh'): string {
+  if (message.authorUserId === 'super-agent') return roomText('超级智能体', lang);
   if (message.kind === 'report') {
     const task = tasks.find((item) => message.taskIds.includes(item.id));
-    return employeeName(employees, task?.employeeId);
+    return employeeName(employees, task?.employeeId, lang);
   }
-  return viewer && message.authorUserId === viewer.userId ? '我' : '同事';
+  return roomText(viewer && message.authorUserId === viewer.userId ? '我' : '同事', lang);
 }
 
 const REFUSALS: Record<string, string> = {
@@ -557,24 +564,26 @@ export function CommandRoomPage() {
   const reports = openTask ? taskReports(openTask, messages) : [];
   const may = openTask ? taskActions(openTask, viewer) : null;
   const employeeView = viewer !== null && !viewer.owner;
+  const [lang] = useLang();
+  const t = (copy: string) => roomText(copy, lang);
 
   return (
-    <section className="exec-room" aria-label="Agent Room 指挥室" data-view={viewer ? (viewer.owner ? 'owner' : 'employee') : 'loading'}>
+    <section className="exec-room" aria-label={t('Agent Room 指挥室')} data-view={viewer ? (viewer.owner ? 'owner' : 'employee') : 'loading'}>
       <div className="page-head">
-        <h1>Agent Room 指挥室</h1>
+        <h1>{t('Agent Room 指挥室')}</h1>
         <p>
           {employeeView
-            ? '跟进自己负责的数字员工：交给它的任务、它的回报和追问都在这里。'
-            : '同一件工作里，企业负责人、超级智能体和数字员工共享目标、上下文、任务与回报。'}
+            ? t('跟进自己负责的数字员工：交给它的任务、它的回报和追问都在这里。')
+            : t('同一件工作里，企业负责人、超级智能体和数字员工共享目标、上下文、任务与回报。')}
         </p>
-        {viewer?.owner ? <a className="exec-action" href="#brain">配置超级智能体</a> : null}
+        {viewer?.owner ? <a className="exec-action" href="#brain">{t('配置超级智能体')}</a> : null}
       </div>
       {viewer?.owner ? <WorkerApprovals key={viewer.userId} /> : null}
       <div className="exec-grid">
-        <section className="panel exec-pane" aria-label="共享协作记录">
+        <section className="panel exec-pane" aria-label={t('共享协作记录')}>
           <div className="exec-pane-head">
-            <h2>共享协作记录</h2>
-            <span>展示任务理由与结果摘要，不展示隐藏思维链</span>
+            <h2>{t('共享协作记录')}</h2>
+            <span>{t('展示任务理由与结果摘要，不展示隐藏思维链')}</span>
           </div>
           <div
             className="exec-scroll exec-stream"
@@ -585,7 +594,7 @@ export function CommandRoomPage() {
             }}
           >
             {messages.length === 0 ? (
-              <p className="exec-empty">{roster ? '还没有对话。闲聊只会得到回复；要派活请 @数字员工 并说清楚要做的事。' : offline ? '暂时连不上指挥室，稍后会自动重试。' : '正在读取指挥室…'}</p>
+              <p className="exec-empty">{roster ? t('还没有对话。闲聊只会得到回复；要派活请 @数字员工 并说清楚要做的事。') : offline ? t('暂时连不上指挥室，稍后会自动重试。') : t('正在读取指挥室…')}</p>
             ) : messages.map((message) => (
               <article
                 key={message.id}
@@ -595,22 +604,22 @@ export function CommandRoomPage() {
                 className={`exec-message${focusMessageId === message.id ? ' exec-message-focus' : ''}`}
               >
                 <header>
-                  <strong>{actorLabel(message, viewer, tasks, employees)}</strong>
-                  <span>{messageKindLabel(message, tasks)}</span>
+                  <strong>{actorLabel(message, viewer, tasks, employees, lang)}</strong>
+                  <span>{messageKindLabel(message, tasks, lang)}</span>
                 </header>
-                <p>{message.body}</p>
+                <p>{message.authorUserId === 'super-agent' ? roomMessage(message.body, lang) : message.body}</p>
                 {message.taskIds.filter((id) => tasks.some((task) => task.id === id)).slice(-1).map((id) => (
-                  <button type="button" className="exec-link" key={id} data-open-task={id} onClick={() => openTaskDrawer(id)}>查看任务</button>
+                  <button type="button" className="exec-link" key={id} data-open-task={id} onClick={() => openTaskDrawer(id)}>{t('查看任务')}</button>
                 ))}
               </article>
             ))}
           </div>
           <form className="exec-composer" onSubmit={(event) => { event.preventDefault(); void sendDraft(); }}>
-            <label htmlFor="room-draft">发给指挥室</label>
+            <label htmlFor="room-draft">{t('发给指挥室')}</label>
             {followupTask ? (
               <p className="exec-followup" data-followup={followupTask.id}>
-                <span>追问：{followupTask.title}</span>
-                <button type="button" onClick={() => setFollowupId(null)}>不追问了</button>
+                <span>{t('追问：')}{followupTask.title}</span>
+                <button type="button" onClick={() => setFollowupId(null)}>{t('不追问了')}</button>
               </p>
             ) : null}
             <textarea
@@ -628,35 +637,35 @@ export function CommandRoomPage() {
                 event.preventDefault();
                 void sendDraft();
               }}
-              placeholder={followupTask ? '写下要追问的内容，原任务的员工和上下文会带上。' : '闲聊只会得到回复。要派活请 @数字员工。'}
+              placeholder={followupTask ? t('写下要追问的内容，原任务的员工和上下文会带上。') : t('闲聊只会得到回复。要派活请 @数字员工。')}
             />
             {mentionOpen ? (
-              <div className="exec-mentions" role="listbox" aria-label="选择数字员工">
+              <div className="exec-mentions" role="listbox" aria-label={t('选择数字员工')}>
                 {employees.length === 0 ? (
-                  <p>还没有可以指派的数字员工。</p>
+                  <p>{t('还没有可以指派的数字员工。')}</p>
                 ) : employees.map((employee) => (
                   <button type="button" role="option" aria-selected="false" key={employee.id} data-mention={employee.id} onClick={() => pickMention(employee.name)}>
                     <strong>@{employee.name}</strong>
-                    <span>{[employee.duty, EMPLOYEE_STATE[employee.status]].filter(Boolean).join(' · ')}</span>
+                    <span>{[employee.duty, t(EMPLOYEE_STATE[employee.status])].filter(Boolean).join(' · ')}</span>
                   </button>
                 ))}
               </div>
             ) : null}
             <div className="exec-composer-actions">
-              <button type="submit" disabled={sending || !viewer}>发送</button>
-              <button type="button" aria-haspopup="listbox" aria-expanded={mentionOpen} disabled={!viewer} onClick={() => setMentionOpen((open) => !open)}>@ 提及</button>
-              <span>Enter 发送，Shift+Enter 换行。同事的新消息不会清掉这里的草稿</span>
+              <button type="submit" disabled={sending || !viewer}>{t('发送')}</button>
+              <button type="button" aria-haspopup="listbox" aria-expanded={mentionOpen} disabled={!viewer} onClick={() => setMentionOpen((open) => !open)}>{t('@ 提及')}</button>
+              <span>{t('Enter 发送，Shift+Enter 换行。同事的新消息不会清掉这里的草稿')}</span>
             </div>
-            <p className="exec-notice" role="status" aria-label="指挥室提示">{notice}</p>
+            <p className="exec-notice" role="status" aria-label={t('指挥室提示')}>{t(notice)}</p>
           </form>
         </section>
-        <aside className="panel exec-pane" aria-label="任务列表">
+        <aside className="panel exec-pane" aria-label={t('任务列表')}>
           <div className="exec-pane-head">
-            <h2>任务</h2>
-            <span>由对话产生，链回原消息</span>
+            <h2>{t('任务')}</h2>
+            <span>{t('由对话产生，链回原消息')}</span>
           </div>
           <div data-outcome="summary">
-            {tasks.length === 0 ? <p>暂无事项</p> : (
+            {tasks.length === 0 ? <p>{t('暂无事项')}</p> : (
               <ul>
                 {tasks.map((task) => (
                   <li key={task.id}>
@@ -675,134 +684,136 @@ export function CommandRoomPage() {
           </div>
           <div className="exec-scroll">
             {tasks.length === 0 ? (
-              <p className="exec-empty">当前没有由对话产生的任务。</p>
+              <p className="exec-empty">{t('当前没有由对话产生的任务。')}</p>
             ) : tasks.map((task) => (
               <button type="button" className="exec-task" key={task.id} data-task={task.id} data-status={task.status} onClick={() => openTaskDrawer(task.id)}>
                 <strong>{task.title}</strong>
-                <span>{taskLine(task, employees)}</span>
+                <span>{taskLine(task, employees, lang)}</span>
               </button>
             ))}
           </div>
         </aside>
         {openTask && may ? (
-          <aside className="panel exec-drawer" aria-label="任务详情" data-task-detail={openTask.id}>
+          <aside className="panel exec-drawer" aria-label={t('任务详情')} data-task-detail={openTask.id}>
             <div className="exec-pane-head">
-              <h2>任务详情</h2>
-              <button type="button" onClick={() => openTaskDrawer(null)}>关闭</button>
+              <h2>{t('任务详情')}</h2>
+              <button type="button" onClick={() => openTaskDrawer(null)}>{t('关闭')}</button>
             </div>
             <dl>
-              <div><dt>概览</dt><dd data-overview>{resultOverview(openTask)}</dd></div>
-              <div><dt>状态</dt><dd data-status>{taskStatusLabel(openTask)}</dd></div>
-              <div><dt>指派</dt><dd data-assignee>@{employeeName(employees, openTask.employeeId)}{openTask.assigneeUserId === viewerId ? '（由你负责）' : ''}</dd></div>
+              <div><dt>{t('概览')}</dt><dd data-overview>{resultOverview(openTask, lang)}</dd></div>
+              <div><dt>{t('状态')}</dt><dd data-status>{taskStatusLabel(openTask, lang)}</dd></div>
+              <div><dt>{t('指派')}</dt><dd data-assignee>@{employeeName(employees, openTask.employeeId, lang)}{openTask.assigneeUserId === viewerId ? t('（由你负责）') : ''}</dd></div>
               <div>
-                <dt>来源消息</dt>
+                <dt>{t('来源消息')}</dt>
                 <dd data-source>
-                  {source ? source.body : '原消息不在当前可见的记录里。'}
-                  {source ? <button type="button" className="exec-link" onClick={() => jumpTo(source.id)}>回到原消息</button> : null}
+                  {source ? source.body : t('原消息不在当前可见的记录里。')}
+                  {source ? <button type="button" className="exec-link" onClick={() => jumpTo(source.id)}>{t('回到原消息')}</button> : null}
                 </dd>
               </div>
               {openTask.followupTo ? (
                 <div>
-                  <dt>追问自</dt>
+                  <dt>{t('追问自')}</dt>
                   <dd data-followup-of>
-                    {original ? original.title : '原任务不在当前可见的列表里。'}
-                    {original ? <button type="button" className="exec-link" onClick={() => openTaskDrawer(original.id)}>打开原任务</button> : null}
+                    {original ? original.title : t('原任务不在当前可见的列表里。')}
+                    {original ? <button type="button" className="exec-link" onClick={() => openTaskDrawer(original.id)}>{t('打开原任务')}</button> : null}
                   </dd>
                 </div>
               ) : null}
               <div>
-                <dt>提示词快照</dt>
+                <dt>{t('提示词快照')}</dt>
                 <dd data-snapshot>
                   {openTask.promptSnapshot
-                    ? `提示词第 ${openTask.promptSnapshot.promptVersion ?? '?'} 版 · 模型档位 ${openTask.promptSnapshot.modelTier ?? '未记录'} · 交办于 ${openTask.promptSnapshot.takenAt}`
-                    : '这条任务没有记录提示词快照。'}
+                    ? lang === 'en'
+                    ? 'Prompt version ' + (openTask.promptSnapshot.promptVersion ?? '?') + ' · Model tier ' + (openTask.promptSnapshot.modelTier ?? 'Unknown') + ' · Assigned ' + openTask.promptSnapshot.takenAt
+                    : `提示词第 ${openTask.promptSnapshot.promptVersion ?? '?'} 版 · 模型档位 ${openTask.promptSnapshot.modelTier ?? '未记录'} · 交办于 ${openTask.promptSnapshot.takenAt}`
+                    : t('这条任务没有记录提示词快照。')}
                 </dd>
               </div>
               <div>
-                <dt>依据与权限</dt>
+                <dt>{t('依据与权限')}</dt>
                 <dd data-approval>
                   {openTask.approval === 'required'
-                    ? '这是对外动作：执行前要在「待我处理」里批准，这里交办不等于授权。'
-                    : '只读或起草，不需要动作审批。只使用该员工被授权的来源。'}
+                    ? t('这是对外动作：执行前要在「待我处理」里批准，这里交办不等于授权。')
+                    : t('只读或起草，不需要动作审批。只使用该员工被授权的来源。')}
                 </dd>
               </div>
               <div>
-                <dt>验收契约</dt>
+                <dt>{t('验收契约')}</dt>
                 <dd data-contract>
-                  {openTask.contract ? `第 ${openTask.contract.version} 版：${openTask.contract.criteria}` : '还没有写验收契约。'}
+                  {openTask.contract ? (lang === 'en' ? 'Version ' + openTask.contract.version + ': ' + openTask.contract.criteria : `第 ${openTask.contract.version} 版：${openTask.contract.criteria}`) : t('还没有写验收契约。')}
                 </dd>
               </div>
               {openTask.runId ? (
                 <div>
-                  <dt>执行与外部动作</dt>
+                  <dt>{t('执行与外部动作')}</dt>
                   <dd data-outcome>
                     {openOutcome ? (
                       <>
-                        <p data-run={openOutcome.runId}>事件 {openOutcome.eventId} · {runStatusLabel(openOutcome.runStatus)}</p>
+                        <p data-run={openOutcome.runId}>{t('事件 ')}{openOutcome.eventId} · {runStatusLabel(openOutcome.runStatus, lang)}</p>
                         <ul>
                           {openOutcome.approvals.map((approval) => (
-                            <li key={approval.id} data-approval-item={approval.id} data-standing={approval.standing ? 'yes' : 'no'}>{approvalLine(approval)}</li>
+                            <li key={approval.id} data-approval-item={approval.id} data-standing={approval.standing ? 'yes' : 'no'}>{approvalLine(approval, lang)}</li>
                           ))}
                         </ul>
-                        <p data-attempts={openOutcome.attempts}>{attemptsLine(openOutcome)}</p>
+                        <p data-attempts={openOutcome.attempts}>{attemptsLine(openOutcome, lang)}</p>
                       </>
-                    ) : '正在读取执行记录…'}
+                    ) : t('正在读取执行记录…')}
                   </dd>
                 </div>
               ) : null}
               <div>
-                <dt>结果与证据</dt>
+                <dt>{t('结果与证据')}</dt>
                 <dd data-evidence>
-                  {reports.length === 0 ? '还没有回报。' : (
+                  {reports.length === 0 ? t('还没有回报。') : (
                     <ul>
                       {reports.map((report) => (
                         <li key={report.id}>
                           {report.body}
-                          <button type="button" className="exec-link" onClick={() => jumpTo(report.id)}>在对话里看</button>
+                          <button type="button" className="exec-link" onClick={() => jumpTo(report.id)}>{t('在对话里看')}</button>
                         </li>
                       ))}
                     </ul>
                   )}
-                  {openTask.status === 'completed' || openTask.status === 'reviewed' || openTask.status === 'reported' ? <p>已回报完成。</p> : null}
-                  {openTask.verification === 'failed' ? <p>证据核验未通过，不能算完成。</p> : null}
-                  {unsentDraftBoundary(openTask) ? <p data-boundary>{unsentDraftBoundary(openTask)}</p> : null}
-                  {openTask.hold ? <p data-blocker>负责人：{openTask.hold.responsible}</p> : null}
+                  {openTask.status === 'completed' || openTask.status === 'reviewed' || openTask.status === 'reported' ? <p>{t('已回报完成。')}</p> : null}
+                  {openTask.verification === 'failed' ? <p>{t('证据核验未通过，不能算完成。')}</p> : null}
+                  {unsentDraftBoundary(openTask) ? <p data-boundary>{t(unsentDraftBoundary(openTask) ?? '')}</p> : null}
+                  {openTask.hold ? <p data-blocker>{t('负责人：')}{t(openTask.hold.responsible)}</p> : null}
                 </dd>
               </div>
             </dl>
             {openTask.waitingReason === '等待补充' ? (
               <div className="exec-report">
-                <label htmlFor="outcome-input">补充资料</label>
+                <label htmlFor="outcome-input">{t('补充资料')}</label>
                 <input id="outcome-input" value={supplementDraft} onChange={(event) => setSupplementDraft(event.target.value)} />
-                <p id="outcome-input-help">{supplementHelp}</p>
-                <button type="button" data-outcome="save-input" disabled={acting} onClick={() => void saveSupplement(openTask)}>保存补充</button>
+                <p id="outcome-input-help">{t(supplementHelp)}</p>
+                <button type="button" data-outcome="save-input" disabled={acting} onClick={() => void saveSupplement(openTask)}>{t('保存补充')}</button>
               </div>
             ) : null}
             {may.contract ? (
               <div className="exec-report">
-                <label htmlFor="room-contract">{openTask.contract ? '修改验收契约' : '写验收契约'}</label>
+                <label htmlFor="room-contract">{openTask.contract ? t('修改验收契约') : t('写验收契约')}</label>
                 <textarea
                   id="room-contract"
                   value={contractDraft ?? openTask.contract?.criteria ?? ''}
                   onChange={(event) => setContractDraft(event.target.value)}
-                  placeholder="怎样才算完成，例如：必须核对金额、供应商和产品编号"
+                  placeholder={t('怎样才算完成，例如：必须核对金额、供应商和产品编号')}
                 />
-                {openTask.contract ? <p className="exec-empty">保存新版本后，之前的完成状态和动作批准作废；已有的外部提交和回读证据保留。</p> : null}
-                <button type="button" disabled={acting || (contractDraft ?? '').trim() === ''} onClick={() => void saveContract(openTask)}>保存契约</button>
+                {openTask.contract ? <p className="exec-empty">{t('保存新版本后，之前的完成状态和动作批准作废；已有的外部提交和回读证据保留。')}</p> : null}
+                <button type="button" disabled={acting || (contractDraft ?? '').trim() === ''} onClick={() => void saveContract(openTask)}>{t('保存契约')}</button>
               </div>
             ) : null}
             {may.report ? (
               <div className="exec-report">
-                <label htmlFor="room-report">回报内容</label>
+                <label htmlFor="room-report">{t('回报内容')}</label>
                 <textarea id="room-report" value={reportDraft} onChange={(event) => setReportDraft(event.target.value)} />
-                <button type="button" disabled={acting || reportDraft.trim() === ''} onClick={() => void act(openTask, 'report', reportDraft.trim())}>提交回报</button>
+                <button type="button" disabled={acting || reportDraft.trim() === ''} onClick={() => void act(openTask, 'report', reportDraft.trim())}>{t('提交回报')}</button>
               </div>
             ) : null}
             <div className="exec-composer-actions">
-              {may.review ? <button type="button" data-review disabled={acting || openTask.verification === 'failed'} onClick={() => void act(openTask, 'review')}>复核通过</button> : null}
-              {may.followup ? <button type="button" onClick={() => startFollowup(openTask)}>追问</button> : null}
-              {may.resume ? <button type="button" disabled={acting} onClick={() => void act(openTask, 'resume')}>恢复任务</button> : null}
-              {may.cancel ? <button type="button" disabled={acting} onClick={() => void act(openTask, 'cancel')}>取消任务</button> : null}
+              {may.review ? <button type="button" data-review disabled={acting || openTask.verification === 'failed'} onClick={() => void act(openTask, 'review')}>{t('复核通过')}</button> : null}
+              {may.followup ? <button type="button" onClick={() => startFollowup(openTask)}>{t('追问')}</button> : null}
+              {may.resume ? <button type="button" disabled={acting} onClick={() => void act(openTask, 'resume')}>{t('恢复任务')}</button> : null}
+              {may.cancel ? <button type="button" disabled={acting} onClick={() => void act(openTask, 'cancel')}>{t('取消任务')}</button> : null}
             </div>
           </aside>
         ) : null}
