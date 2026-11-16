@@ -15,7 +15,7 @@ export function isPublicMcpScope(scope: Record<string, unknown>): scope is Publi
   return typeof scope.publicMcpEndpoint === 'string' && Array.isArray(scope.mcpResources);
 }
 
-export async function withMcpClient<T>(endpoint: string, networkFetch: typeof fetch, callback: (client: Client) => Promise<T>, authorization?: string): Promise<T> {
+export async function withMcpClient<T>(endpoint: string, networkFetch: typeof fetch, callback: (client: Client) => Promise<T>, authorization?: string, onChallenge?: (response: Response) => void): Promise<T> {
   const client = new Client({ name: 'superagent-knowledge', version: '1.0.0' });
   const deadline = AbortSignal.timeout(15_000);
   const headers = authorization ? { Authorization: `Bearer ${authorization}` } : undefined;
@@ -26,6 +26,7 @@ export async function withMcpClient<T>(endpoint: string, networkFetch: typeof fe
     reconnectionOptions: { maxRetries: 0, initialReconnectionDelay: 0, maxReconnectionDelay: 0, reconnectionDelayGrowFactor: 1 },
     fetch: async (url, init) => {
       const response = await networkFetch(url, { ...init, redirect: 'error', signal: init?.signal ? AbortSignal.any([deadline, init.signal]) : deadline });
+      if (response.status === 401 && init?.method === 'POST' && !client.getServerVersion()) onChallenge?.(response);
       if (response.status === 401 || response.status === 403) needsAuthorization = true;
       if (response.status === 404 && init?.method === 'POST' && !client.getServerVersion()) endpointNotFound = true;
       if (!response.body) return response;
