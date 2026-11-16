@@ -51,6 +51,7 @@ const TEXT = {
     mcpAuthRequired: 'This MCP server requires authorization. Use an approved configuration with credentials.',
     mcpNoResources: 'The server has no resources available to import.',
     mcpConnectionFailed: 'Could not verify this MCP URL. Check that the server is reachable over HTTPS.',
+    mcpEndpointNotFound: 'The server returned 404. Check the MCP path or confirm that MCP is enabled on that server.',
     connectionTestFailed: 'The source did not pass its connection test.',
     automaticLocal: 'Created automatically when you upload a file.',
     addMaterials: 'Add materials',
@@ -243,6 +244,7 @@ const TEXT = {
     mcpAuthRequired: '此 MCP 服务器需要授权，请选择已配置凭据的来源。',
     mcpNoResources: '此服务器没有可导入的资源。',
     mcpConnectionFailed: '无法验证 MCP 地址，请检查地址和服务器是否可访问。',
+    mcpEndpointNotFound: '目标服务器返回 404。请检查 MCP 路径，或确认对方已经启用 MCP。',
     connectionTestFailed: '来源连接测试未通过。',
     automaticLocal: '首次上传时自动创建。',
     addMaterials: '添加资料',
@@ -598,6 +600,7 @@ export function KnowledgePage() {
       const mcpErrors: Record<string, TextKey> = {
         mcp_invalid_url: 'mcpInvalidUrl', mcp_auth_required: 'mcpAuthRequired',
         mcp_no_resources: 'mcpNoResources', mcp_connection_failed: 'mcpConnectionFailed',
+        mcp_endpoint_not_found: 'mcpEndpointNotFound',
       };
       const mcpError = response.body.error && mcpErrors[response.body.error];
       if (mcpError) throw new Error(t(mcpError));

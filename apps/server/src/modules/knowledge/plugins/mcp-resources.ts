@@ -20,12 +20,14 @@ async function withClient<T>(endpoint: string, networkFetch: typeof fetch, callb
   const deadline = AbortSignal.timeout(15_000);
   const headers = authorization ? { Authorization: `Bearer ${authorization}` } : undefined;
   let needsAuthorization = false;
+  let endpointNotFound = false;
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
     requestInit: { headers, redirect: 'error' },
     reconnectionOptions: { maxRetries: 0, initialReconnectionDelay: 0, maxReconnectionDelay: 0, reconnectionDelayGrowFactor: 1 },
     fetch: async (url, init) => {
       const response = await networkFetch(url, { ...init, redirect: 'error', signal: init?.signal ? AbortSignal.any([deadline, init.signal]) : deadline });
       if (response.status === 401 || response.status === 403) needsAuthorization = true;
+      if (response.status === 404 && init?.method === 'POST' && !client.getServerVersion()) endpointNotFound = true;
       if (!response.body) return response;
       let size = 0;
       const bounded = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
@@ -44,6 +46,7 @@ async function withClient<T>(endpoint: string, networkFetch: typeof fetch, callb
   } catch (error) {
     if (error instanceof KnowledgeError) throw error;
     if (needsAuthorization) throw new SourceError('auth', 'This MCP server requires authorization.');
+    if (endpointNotFound) throw new KnowledgeError('mcp_endpoint_not_found', '目标服务器返回 404。请检查 MCP 路径，或确认对方已经启用 MCP。', 422);
     throw new SourceError('transient', 'The approved MCP server did not return a readable response.');
   } finally {
     await transport.terminateSession().catch(() => undefined);
