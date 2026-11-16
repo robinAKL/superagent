@@ -122,7 +122,8 @@ export function startPgListener(connect: () => Promise<ListenClient>, opts: List
         signal.wakeAll();
       } catch (error) {
         signal.listening = false;
-        current = null;
+        // A connection borrowed before the failure (e.g. LISTEN rejected) goes back destroyed, or the pool leaks it.
+        if (current) { try { current.release(true); } catch { /* already gone */ } current = null; }
         if (stopped) break;
         log({ msg: 'worker listen connect failed; retrying', error: error instanceof Error ? error.message : String(error), backoffMs: backoff });
       }
@@ -136,9 +137,8 @@ export function startPgListener(connect: () => Promise<ListenClient>, opts: List
     done,
     stop: async () => {
       stopped = true;
-      wakeStop();
+      wakeStop(); // the loop sees it, releases its connection exactly once, and exits
       signal.listening = false;
-      if (current) { try { current.release(true); } catch { /* already gone */ } current = null; }
       await done;
     },
   };

@@ -125,6 +125,30 @@ it('listener: LISTENs on both channels, delivers notifications, and reconnects a
   expect(s.listening).toBe(false);
 });
 
+it('listener: a LISTEN that fails after connect releases that connection and reconnects', async () => {
+  for (const failing of [1, 2]) {
+    const s = new WorkSignal();
+    const clients: FakeClient[] = [];
+    const listener = startPgListener(async () => {
+      const c = new FakeClient();
+      // The first connection rejects its first or second LISTEN; later ones work.
+      if (clients.length === 0) {
+        let n = 0;
+        c.query = async (sql: string) => { c.queries.push(sql); if (++n === failing) throw new Error('permission denied'); };
+      }
+      clients.push(c);
+      return c;
+    }, { signal: s, log: () => undefined, minMs: 1, delay: async () => undefined });
+    for (let i = 0; i < 50 && !s.listening; i++) await new Promise((r) => setTimeout(r, 1));
+    expect(clients[0]!.queries).toHaveLength(failing);
+    expect(clients[0]!.released).toBe(1); // returned to the pool, not leaked
+    expect(clients).toHaveLength(2);
+    expect(s.listening).toBe(true);
+    await listener.stop();
+    expect(clients[1]!.released).toBe(1);
+  }
+});
+
 it('listener: a failing connect backs off (doubling, capped) and recovers', async () => {
   const s = new WorkSignal();
   let attempts = 0;
