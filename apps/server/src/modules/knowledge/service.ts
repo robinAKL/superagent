@@ -14,6 +14,8 @@ import type { DatabaseGateway } from './database.js';
 import { CATEGORIES, type Category } from './profile.js';
 import { createPublicMcp, isPublicMcpScope } from './plugins/mcp-resources.js';
 import { publicMcpEndpoint } from './plugins/mcp-public-http.js';
+import type { VeraMcpKnowledge } from './vera-mcp.js';
+import type { AnalysisGateway } from '../analysis/gateway-model.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
   plugins?: Record<string, KnowledgeSourcePlugin>;
@@ -23,6 +25,8 @@ export interface KnowledgeDeps {
   binary?: BinaryDeps;
   database?: DatabaseGateway;
   publicMcp?: ReturnType<typeof createPublicMcp>;
+  veraMcp?: VeraMcpKnowledge;
+  veraAnswerGateway?: AnalysisGateway;
   close?: () => Promise<void>;
   audit?: AuditSink;
 }
@@ -93,6 +97,7 @@ export class KnowledgeService {
     const visibleRecs=recs.filter(r=>r.kind!=='relation'||r.relation&&objectKeys.has(r.relation.from)&&objectKeys.has(r.relation.to));
     return {
       spaceName: s.spaceName,
+      veraMcp: this.deps.veraMcp?.status(s, ctx),
       sourceResources: (this.deps.sourceResources ?? []).filter(r => r.audience.includes(ctx.userId) && r.projectIds.every(p => ctx.projectScopes.includes(p))).map(({ audience: _, ...r }) => ({ ...r, scope: publicSourceScope(r) })),
       plugins: MANIFESTS.map(m => ({ ...m, installed: true, builtIn: true, enabled: !s.disabledPlugins.includes(m.id), configured: m.id === 'local-file' || m.id === 'mcp' || (m.id === 'database' && !!this.deps.database?.list(ctx).length) || !!this.deps.plugins?.[m.id] })),
       databaseResources: this.deps.database?.list(ctx) ?? [],

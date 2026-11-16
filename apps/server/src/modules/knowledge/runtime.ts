@@ -7,19 +7,24 @@ import { GatewayAnalysisModel, type AnalysisGateway } from '../analysis/gateway-
 import { configuredDatabases } from './database-config.js';
 import { managedSourcePlugins } from './sources.js';
 import { PgKnowledgeAudit } from './audit.js';
+import { VeraMcpKnowledge } from './vera-mcp.js';
 /** All identity/endpoints/pools originate from the fail-closed platform bootstrap. */
 export function createKnowledgeDeps(runtime: Runtime & { llm?: AnalysisGateway }): KnowledgeDeps {
   const sourceResources = runtime.config.sourceResources ?? [], plugins = managedSourcePlugins(sourceResources, runtime.app.setupDeps.secrets);
   const model = runtime.llm ? new GatewayAnalysisModel(runtime.llm) : undefined;
   const database = configuredDatabases(runtime.config.sourceDatabases ?? [], runtime.app.setupDeps.secrets);
-  if (runtime.config.mode === 'dev') return { repo: new MemoryKnowledgeRepository(), sourceResources, plugins, model, database: database.gateway, close: database.close, enqueue: async () => undefined };
-  if (!runtime.pool || !runtime.config.blobUrl || !runtime.config.docIntelEndpoint) throw Error('Knowledge requires persistent runtime dependencies');
+  const { config, pool } = runtime;
+  const repo = config.mode === 'dev' ? new MemoryKnowledgeRepository() : pool && new PgKnowledgeRepository(pool);
+  if (!repo) throw Error('Knowledge requires persistent runtime dependencies');
+  const veraMcp = new VeraMcpKnowledge(repo, runtime.app.setupDeps.secrets);
+  if (config.mode === 'dev') return { repo, veraMcp, veraAnswerGateway: runtime.llm, sourceResources, plugins, model, database: database.gateway, close: database.close, enqueue: async () => undefined };
+  if (!pool || !config.blobUrl || !config.docIntelEndpoint) throw Error('Knowledge requires persistent runtime dependencies');
   return {
-    repo: new PgKnowledgeRepository(runtime.pool), sourceResources, plugins,
-    audit: new PgKnowledgeAudit(runtime.pool),
+    repo, veraMcp, veraAnswerGateway: runtime.llm, sourceResources, plugins,
+    audit: new PgKnowledgeAudit(pool),
     model,
     database: database.gateway, close: database.close,
-    binary: { blobs: new AzureBinaryStore(runtime.config.blobUrl), parser: new DocumentIntelligenceAdapter({ endpoint: runtime.config.docIntelEndpoint }) },
+    binary: { blobs: new AzureBinaryStore(config.blobUrl), parser: new DocumentIntelligenceAdapter({ endpoint: config.docIntelEndpoint }) },
     // The same PG document contains the durable analysis job; enqueue is an optional wake-up notification.
     enqueue: async () => undefined,
   };

@@ -3,6 +3,7 @@ import type { UserContext } from '@superagent/shared';
 import { KnowledgeStore, type Connection, type Item, type Chunk } from './store.js';
 import type { StoredQueryTemplate } from './database.js';
 import { ruleProfile, shingles, similarity, SIMILAR_THRESHOLD, type ItemProfile } from './profile.js';
+import type { VeraMcpState } from './vera-mcp.js';
 export class KnowledgeError extends Error { constructor(public code: string, message: string, public statusCode = 400) { super(message); } }
 export interface Snapshot { connections: Connection[]; items: Item[]; chunks: Chunk[]; citations: [string, string[]][]; flagged: [string, string][] }
 export interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string }
@@ -27,8 +28,9 @@ export interface KnowledgeState {
   revision: number; source: Snapshot; connectionMeta: Record<string, ConnectionMeta>; confirmations: Record<string, Confirmation>;
   analyses: AnalysisRun[]; recommendations: Recommendation[]; uploads: Upload[]; disabledPlugins: string[]; parseJobs: ParseJob[]; queryTemplates: StoredQueryTemplate[];
   profiles: Record<string, ItemProfile>;
+  veraMcp: Record<string, VeraMcpState>;
 }
-export const emptyState = (): KnowledgeState => ({ spaceName: '企业知识', installedPlugins: ['local-file'], revision: 0, source: { connections: [], items: [], chunks: [], citations: [], flagged: [] }, connectionMeta: {}, confirmations: {}, analyses: [], recommendations: [], uploads: [], disabledPlugins: [], parseJobs: [], queryTemplates: [], profiles: {} });
+export const emptyState = (): KnowledgeState => ({ spaceName: '企业知识', installedPlugins: ['local-file'], revision: 0, source: { connections: [], items: [], chunks: [], citations: [], flagged: [] }, connectionMeta: {}, confirmations: {}, analyses: [], recommendations: [], uploads: [], disabledPlugins: [], parseJobs: [], queryTemplates: [], profiles: {}, veraMcp: {} });
 export const stamp = () => new Date().toISOString();
 export const id = () => randomUUID();
 export const hash = (s: string) => createHash('sha256').update(s).digest('hex');

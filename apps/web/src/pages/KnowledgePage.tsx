@@ -4,6 +4,7 @@ import { useLang, useT, type Dict } from '../i18n';
 import './KnowledgePage.css';
 import { DatabaseSourcePanel } from './DatabaseSourcePanel';
 import { MaterialReview, type Material } from './MaterialReview';
+import type { VeraConnection } from './VeraKnowledge';
 
 interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string }
 interface Plugin { id: string; name: string; enabled: boolean; configured: boolean; capabilities: string[] }
@@ -23,6 +24,7 @@ interface Overview {
   plugins: Plugin[]; connections: Connection[]; items: Item[];
   analyses: { id: string; status: string; stage: string }[]; recommendations: Recommendation[];
   canConfirm: boolean;
+  veraMcp?: VeraConnection;
   parseJobs: { id: string; name: string; status: string; error: string | null }[];
   databaseResources?: { id: string; name: string; tables: Record<string, { columns: string[]; sensitive?: string[] }>; maxRows: number }[];
 }
@@ -45,7 +47,15 @@ const TEXT = {
     badgeConnected: 'Connected',
     badgeNeedsSetup: 'Needs setup',
     mcpEndpointLabel: 'MCP URL',
-    mcpEndpointHint: 'Enter a public HTTPS Streamable HTTP endpoint with resources to import.',
+    mcpEndpointHint: 'Enter the HTTPS MCP URL. VERA CRM opens its staff sign-in to authorize access.',
+    veraConnect: 'Sign in to VERA CRM',
+    veraReconnect: 'Reauthorize VERA CRM',
+    veraDisconnect: 'Disconnect',
+    veraConnected: 'VERA CRM is connected. You can ask the Brain about CRM knowledge.',
+    veraOpenBrain: 'Ask the Brain',
+    veraDisconnected: 'VERA CRM was disconnected.',
+    veraCallbackError: 'VERA CRM authorization was cancelled or expired. Try connecting again.',
+    veraRegistrationError: 'VERA CRM has not allowed this Super Agent callback URL. Ask the CRM administrator to enable it.',
     mcpApprovedTitle: 'Use an approved MCP configuration',
     mcpInvalidUrl: 'Enter a public HTTPS MCP URL.',
     mcpAuthRequired: 'This MCP server requires authorization. Use an approved configuration with credentials.',
@@ -238,7 +248,15 @@ const TEXT = {
     badgeConnected: '已连接',
     badgeNeedsSetup: '待配置',
     mcpEndpointLabel: 'MCP 地址',
-    mcpEndpointHint: '填写提供可导入资源的公开 HTTPS Streamable HTTP 地址。',
+    mcpEndpointHint: '填写 HTTPS MCP 地址。VERA CRM 会打开员工登录页以授权访问。',
+    veraConnect: '登录 VERA CRM',
+    veraReconnect: '重新授权 VERA CRM',
+    veraDisconnect: '断开连接',
+    veraConnected: 'VERA CRM 已连接，可以在大脑中询问 CRM 知识。',
+    veraOpenBrain: '问大脑',
+    veraDisconnected: '已断开 VERA CRM 连接。',
+    veraCallbackError: 'VERA CRM 授权已取消或已过期，请重新连接。',
+    veraRegistrationError: 'VERA CRM 尚未允许当前 Super Agent 的回调地址，请联系 CRM 管理员配置。',
     mcpApprovedTitle: '使用已授权的 MCP 配置',
     mcpInvalidUrl: '请输入公开可访问的 HTTPS MCP 地址。',
     mcpAuthRequired: '此 MCP 服务器需要授权，请选择已配置凭据的来源。',
@@ -601,6 +619,7 @@ export function KnowledgePage() {
         mcp_invalid_url: 'mcpInvalidUrl', mcp_auth_required: 'mcpAuthRequired',
         mcp_no_resources: 'mcpNoResources', mcp_connection_failed: 'mcpConnectionFailed',
         mcp_endpoint_not_found: 'mcpEndpointNotFound',
+        vera_oauth_callback: 'veraCallbackError', vera_oauth_registration: 'veraRegistrationError',
       };
       const mcpError = response.body.error && mcpErrors[response.body.error];
       if (mcpError) throw new Error(t(mcpError));
@@ -615,8 +634,9 @@ export function KnowledgePage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState('');
-  const [activeSourceCard, setActiveSourceCard] = useState<string | null>(null);
-  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [activeSourceCard, setActiveSourceCard] = useState<string | null>(() =>
+    window.location.hash === '#knowledge?source=mcp' ? 'mcp' : null);
+  const [sourcesOpen, setSourcesOpen] = useState(() => window.location.hash.startsWith('#knowledge?'));
   const [dragging, setDragging] = useState(false);
   const [fileSubmissions, setFileSubmissions] = useState<FileSubmission[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -650,6 +670,27 @@ export function KnowledgePage() {
     } finally { if (sequence === refreshSequence.current) setLoading(false); }
   }, []);
   useEffect(() => { void load(); return () => { refreshSequence.current++; searchSequence.current++; }; }, [load]);
+  useEffect(() => {
+    const fragment = new URLSearchParams(window.location.hash.split('?')[1]);
+    if (!fragment.has('vera_return')) return;
+    window.history.replaceState(null, '', '/#knowledge');
+    actionInFlight.current = true;
+    setSourcesOpen(true);
+    setActiveSourceCard('mcp');
+    setBusy('mcp-connection');
+    void api<{ error?: string; message?: string }>(ROOT + '/connections/mcp/vera/finish', {
+      method: 'POST', body: JSON.stringify({ state: fragment.get('vera_state'), code: fragment.get('vera_code'), iss: fragment.get('vera_iss') }),
+    }).then(async response => {
+      if (response.status !== 200) {
+        setSourceFeedback({ text: response.body.error === 'vera_oauth_callback' ? t('veraCallbackError') :
+          (lang === 'zh' ? response.body.message : undefined) ?? t('reqFailedHttp', { status: response.status }), error: true });
+      } else {
+        setSourceFeedback({ text: t('veraConnected') });
+        await load();
+      }
+    }).catch(() => setSourceFeedback({ text: t('reqFailed'), error: true }))
+      .finally(() => { setBusy(''); actionInFlight.current = false; });
+  }, [lang, load, t]);
   useEffect(() => {
     setSpaceName(overview?.spaceName === DEFAULT_SPACE_NAME ? '' : overview?.spaceName ?? '');
   }, [overview?.spaceName]);
@@ -716,12 +757,24 @@ export function KnowledgePage() {
     setSourceFeedback(null);
   }
 
-  async function connectMcp(event: FormEvent) {
-    event.preventDefault();
-    if (await action('mcp-connection', '/connections/mcp', { endpoint: mcpEndpoint.trim() }, t('connCreatedNotice'))) {
+  async function connectMcp(endpoint: string) {
+    if (actionInFlight.current) return;
+    actionInFlight.current = true;
+    setBusy('mcp-connection');
+    setSourceFeedback(null);
+    try {
+      const result = await request<{ authorizationUrl?: string }>('/connections/mcp', { method: 'POST', body: JSON.stringify({ endpoint }) });
+      if (result.authorizationUrl) {
+        window.location.assign(result.authorizationUrl);
+        return;
+      }
+      setSourceFeedback({ text: t('connCreatedNotice') });
       setMcpEndpoint('');
       setActiveSourceCard(null);
-    }
+      await load();
+    } catch (caught) {
+      setSourceFeedback({ text: errorMessage(caught), error: true });
+    } finally { setBusy(''); actionInFlight.current = false; }
   }
 
   async function createConnection(event: FormEvent) {
@@ -883,25 +936,31 @@ export function KnowledgePage() {
             return <div key={plugin.id} data-testid={`plugin-${plugin.id}`} className={`knowledge-source-card ${isSelected ? 'is-selected' : ''}`}>
               <div className="knowledge-source-card-top">
                 <strong>{pluginDisplay(plugin).name}</strong>
-                <span className="knowledge-badge">{!plugin.enabled ? t('badgePaused') : plugin.id === 'local-file' ? t('badgeAutomatic') : externalConnections.some(connection => connection.pluginId === plugin.id && connection.status === 'confirmed') ? t('badgeConnected') : t('badgeNeedsSetup')}</span>
+                <span className="knowledge-badge">{!plugin.enabled ? t('badgePaused') : plugin.id === 'local-file' ? t('badgeAutomatic') : (plugin.id === 'mcp' && overview.veraMcp?.connected) || externalConnections.some(connection => connection.pluginId === plugin.id && connection.status === 'confirmed') ? t('badgeConnected') : t('badgeNeedsSetup')}</span>
               </div>
               <small>{plugin.id === 'local-file' ? t('automaticLocal') : pluginDisplay(plugin).capabilities.join(' · ') || t('capsFallback')}</small>
               <div className="knowledge-source-card-actions">
-                {overview.canConfirm && plugin.enabled && plugin.id !== 'local-file' ? <button className="btn" type="button" onClick={() => selectSourceCard(plugin.id)}>{isSelected && plugin.id !== 'database' ? t('hideConfigBtn') : t('configureCardBtn')}</button> : null}
+                {(overview.canConfirm || (plugin.id === 'mcp' && overview.veraMcp)) && plugin.enabled && plugin.id !== 'local-file' ? <button className="btn" type="button" onClick={() => selectSourceCard(plugin.id)}>{isSelected && plugin.id !== 'database' ? t('hideConfigBtn') : t('configureCardBtn')}</button> : null}
                 {overview.canConfirm && (!plugin.enabled || externalConnections.some(connection => connection.pluginId === plugin.id)) ? <button className="btn" type="button" disabled={!!busy} onClick={() => void action(`plugin:${plugin.id}`, `/plugins/${encodeURIComponent(plugin.id)}`, { enabled: !plugin.enabled }, plugin.enabled ? t('pluginPausedNotice') : t('pluginEnabledNotice'))}>{plugin.enabled ? t('pausePluginBtn', { name: pluginDisplay(plugin).name }) : t('enablePluginBtn', { name: pluginDisplay(plugin).name })}</button> : null}
               </div>
             </div>;
           })}
         </div>
         {sourceFeedback ? <div className={sourceFeedback.error ? 'knowledge-alert knowledge-inset' : 'knowledge-notice knowledge-inset'} role={sourceFeedback.error ? 'alert' : 'status'}>{sourceFeedback.text}</div> : null}
-        {selectedPlugin === 'mcp' ? <form onSubmit={connectMcp} className="knowledge-form knowledge-inset">
+        {selectedPlugin === 'mcp' ? <form onSubmit={event => { event.preventDefault(); void connectMcp(mcpEndpoint.trim()); }} className="knowledge-form knowledge-inset">
           <h3>{t('connFormTitle', { name: 'MCP' })}</h3>
+          {overview.veraMcp ? <div className="knowledge-actions">
+            <button className="btn" type="button" disabled={!!busy} onClick={() => void connectMcp(overview.veraMcp!.endpoint)}>{t(overview.veraMcp.connected ? 'veraReconnect' : 'veraConnect')}</button>
+            {overview.veraMcp.connected ? <button className="btn" type="button" disabled={!!busy} onClick={() => void action('vera-disconnect', '/connections/mcp/vera', {}, t('veraDisconnected'), 'DELETE')}>{t('veraDisconnect')}</button> : null}
+          </div> : null}
+          {overview.canConfirm ? <>
           <label className="field"><span>{t('mcpEndpointLabel')}</span><input type="url" required maxLength={1000} value={mcpEndpoint} placeholder="https://example.com/mcp" onChange={event => setMcpEndpoint(event.target.value)} /></label>
           <p className="helper">{t('mcpEndpointHint')}</p>
           <button className="btn" disabled={!!busy || !mcpEndpoint.trim()}>{busy === 'mcp-connection' ? t('creatingConn') : t('createConnBtn')}</button>
+          </> : null}
         </form> : null}
 
-        {activeCardPlugin && ['email', 'sharepoint', 'mcp'].includes(selectedPlugin) && (selectedPlugin !== 'mcp' || sourceResources.length > 0) ? <form onSubmit={createConnection} className="knowledge-form knowledge-inset">
+        {overview.canConfirm && activeCardPlugin && ['email', 'sharepoint', 'mcp'].includes(selectedPlugin) && (selectedPlugin !== 'mcp' || sourceResources.length > 0) ? <form onSubmit={createConnection} className="knowledge-form knowledge-inset">
           <h3>{selectedPlugin === 'mcp' ? t('mcpApprovedTitle') : t('connFormTitle', { name: pluginDisplay(activeCardPlugin).name })}</h3>
           <label className="field"><span>{t('connNameLabel')}</span><input required maxLength={160} value={connectionName} placeholder={t('connNamePlaceholder')} onChange={event => setConnectionName(event.target.value)} /></label>
           <label className="field"><span>{t('approvedResourceLabel')}</span><select value={selectedResource?.id ?? ''} disabled={!sourceResources.length || !!busy} onChange={event => { setResourceId(event.target.value); setReadOnlyAcknowledged(false); }}>{!sourceResources.length ? <option value="">{t('noApprovedResource')}</option> : sourceResources.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}</select></label>
@@ -911,7 +970,13 @@ export function KnowledgePage() {
           <button className="btn" disabled={!!busy || !selectedPlugin || !connectionName.trim() || !selectedResource || !readOnlyAcknowledged}>{busy === 'connection' ? t('creatingConn') : t('createConnBtn')}</button>
         </form> : null}
 
-        {externalConnections.length ? <ul className="knowledge-source-list">{externalConnections.map(connection => <li key={connection.id}>
+        {externalConnections.length || overview.veraMcp?.connected ? <ul className="knowledge-source-list">
+          {overview.veraMcp?.connected ? <li>
+            <div><strong>VERA CRM</strong><small>{overview.veraMcp.endpoint}</small></div>
+            <span className="knowledge-badge is-green">{t('badgeConnected')}</span>
+            <a className="btn" href="/#brain?tab=crm">{t('veraOpenBrain')}</a>
+          </li> : null}
+          {externalConnections.map(connection => <li key={connection.id}>
           <div><strong>{connection.name}</strong><small>{connection.scope?.publicMcpEndpoint ?? pluginName(connection.pluginId, overview.plugins)}</small></div>
           <span className={`knowledge-badge ${connection.status === 'confirmed' ? 'is-green' : ''}`}>{label(connection.status)}</span>
           {overview.canConfirm && ['draft', 'tested', 'pending_confirmation', 'sync_failed', 'needs_reauth'].includes(connection.status) ? <button className="btn" disabled={!!busy} onClick={() => void action(`confirm:${connection.id}`, `/connections/${encodeURIComponent(connection.id)}/confirm`, {}, t('connConfirmedNotice'))}>{connection.status === 'draft' ? t('confirmConnBtn') : t('retestConfirmBtn')}</button> : null}

@@ -2,6 +2,8 @@ import type { FastifyPluginAsync } from 'fastify';
 import { KnowledgeError } from './domain.js';
 import { KnowledgeService, type KnowledgeDeps } from './service.js';
 import { mountKnowledgeMcp } from './mcp.js';
+import { VERA_MCP_URL } from './vera-mcp.js';
+import { answerFromVera } from './vera-answer.js';
 export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = async (app, opts) => {
   const service = opts.deps ? new KnowledgeService(opts.deps) : null;
   await app.register(async mcp => { mountKnowledgeMcp(mcp, service); });
@@ -16,7 +18,46 @@ export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = asy
   app.post<{ Params: { id: string } }>('/connections/:id/import', async (req, reply) => { const result = await service!.importSelection(req.user!, req.params.id, body(req)); return result.error ? reply.code(502).send({ error: 'source_sync_failed', message: result.error }) : result; });
   app.get<{ Params: { id: string }; Querystring: { templateId?: string; revision?: string } }>('/connections/:id/fact-freshness', req => service!.factFreshness(req.user!, req.params.id, req.query.templateId ?? '', req.query.revision ?? ''));
   app.get('/overview', req => service!.overview(req.user!));
-  app.post('/connections/mcp', (req, reply) => { reply.code(201); return service!.connectPublicMcp(req.user!, body(req)); });
+  const vera = () => {
+    if (!opts.deps?.veraMcp) throw new KnowledgeError('vera_mcp_unavailable', 'VERA CRM 知识连接尚未配置。', 503);
+    return opts.deps.veraMcp;
+  };
+  app.post('/connections/mcp', (req, reply) => {
+    const input = body(req);
+    if (input.endpoint === VERA_MCP_URL && opts.deps?.veraMcp) {
+      reply.header('Cache-Control', 'no-store');
+      return vera().start(req.user!, req.headers.origin, req.headers.host);
+    }
+    reply.code(201);
+    return service!.connectPublicMcp(req.user!, input);
+  });
+  app.post('/connections/mcp/vera/finish', (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return vera().finish(req.user!, body(req));
+  });
+  app.delete('/connections/mcp/vera', (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return vera().disconnect(req.user!);
+  });
+  app.get('/connections/mcp/vera/catalog', (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return vera().catalog(req.user!);
+  });
+  app.post('/connections/mcp/vera/read', (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return vera().read(req.user!, body(req).uri);
+  });
+  app.post('/connections/mcp/vera/query', { bodyLimit: 16 * 1024 }, (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const input = body(req);
+    return vera().call(req.user!, input.name, input.arguments);
+  });
+  app.post('/connections/mcp/vera/ask', { bodyLimit: 8 * 1024 }, (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const gateway = opts.deps?.veraAnswerGateway;
+    if (!gateway) throw new KnowledgeError('vera_model_unavailable', '大脑模型尚未配置。', 503);
+    return answerFromVera(req.user!, body(req).question, vera(), gateway);
+  });
   app.post('/connections', (req, reply) => { reply.code(201); return service!.createConnection(req.user!, body(req)); });
   app.post<{ Params: { id: string } }>('/connections/:id/confirm', req => service!.confirmConnection(req.user!, req.params.id));
   app.post<{ Params: { id: string } }>('/connections/:id/sync', async (req,reply) => { const result=await service!.sync(req.user!,req.params.id); return result.error ? reply.code(502).send({...result,message:result.error,error:'source_sync_failed'}) : result; });

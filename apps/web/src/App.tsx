@@ -106,7 +106,7 @@ function useRoles(): string[] | null {
 }
 
 function useHashPage(): string {
-  const read = () => window.location.hash.slice(1) || 'room';
+  const read = () => window.location.hash.slice(1).split('?')[0] || 'room';
   const [page, setPage] = useState(read);
   useEffect(() => {
     const onChange = () => setPage(read());
