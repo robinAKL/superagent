@@ -112,6 +112,7 @@ it('discovers fresh documents, templates and tools on different MCP servers duri
     expect(queued.statusCode, queued.body).toBe(202);
     expect(used).toHaveLength(0);
     expect(await tickKnowledge(knowledgeDeps, 'test')).toBe(true);
+    expect(chat.mock.calls.map(([, , request]) => request.taskId)).toEqual([queued.json().id, queued.json().id]);
     expect(used).toHaveLength(3);
     expect(used).toEqual(expect.arrayContaining([
       [handbook, 'resources/read', resourceUri],

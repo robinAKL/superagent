@@ -69,7 +69,7 @@ export async function runAnalysis(
       return true;
     });
     if (!active) return;
-    const result = validateProposals(await model.recommend({ tenantId: ctx.tenantId, runId, evidence, maxOutputTokens: 4096, focus: input.run.focus }));
+    const result = validateProposals(await model.recommend({ tenantId: ctx.tenantId, runId, evidence, maxOutputTokens: 8192, focus: input.run.focus }));
     await repo.transact(ctx, s => {
       const run = s.analyses.find(r => r.id === runId)!;
       if (run.status !== 'running' || run.leaseToken !== leaseToken || !snapshotCurrent(s, ctx, run)) return;
