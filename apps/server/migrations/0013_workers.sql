@@ -19,4 +19,20 @@ CREATE TABLE IF NOT EXISTS workers (
 CREATE UNIQUE INDEX IF NOT EXISTS workers_token_hash ON workers (token_hash);
 CREATE INDEX IF NOT EXISTS workers_tenant ON workers (tenant_id);
 
+-- Instructions addressed to one worker (wake / cancel / message). seq is the poll cursor, per worker: a
+-- reconnecting worker asks for everything after the last seq it saw. seq is max+1 under the primary key, so two
+-- concurrent appends cannot both take the same number and a row can never commit "behind" a cursor already read
+-- (a global bigserial could: a lower value may commit after a higher one was delivered). Append-only for the app.
+CREATE TABLE IF NOT EXISTS worker_events (
+  worker_id uuid NOT NULL REFERENCES workers (id),
+  seq bigint NOT NULL,
+  tenant_id uuid NOT NULL,
+  kind text NOT NULL CHECK (kind IN ('wake', 'cancel', 'message')),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_by text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (worker_id, seq)
+);
+
 GRANT SELECT, INSERT, UPDATE ON workers TO superagent_app;
+GRANT SELECT, INSERT ON worker_events TO superagent_app;

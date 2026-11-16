@@ -91,7 +91,7 @@ it('long poll with nothing queued returns an empty result after the wait, and co
   const started = clock;
   const res = await a.inject({ method: 'POST', url: '/api/v1/worker-link/poll', headers: auth(token), payload: { waitMs: 5_000 } });
   expect(res.statusCode).toBe(200);
-  expect(res.json()).toEqual({ task: null, retryAfterMs: 0 });
+  expect(res.json()).toEqual({ task: null, events: [], cursor: 0, retryAfterMs: 0 });
   expect(clock - started).toBe(5_000);
   const list = (await a.inject({ method: 'GET', url: '/api/v1/workers' })).json();
   expect(list.workers[0].status).toBe('registered');
@@ -143,6 +143,93 @@ it('after 30 minutes offline, every task queued meanwhile is claimed on reconnec
   }
   expect(seen).toEqual(['a', 'b', 'c', 'd', 'e']);
   expect((await a.inject({ method: 'GET', url: '/api/v1/workers' })).json().workers[0].status).toBe('registered');
+});
+
+const send = (a: FastifyInstance, id: string, kind: string, payload: unknown = {}, user?: string) =>
+  a.inject({ method: 'POST', url: `/api/v1/workers/${id}/events`, headers: user ? { 'x-test-user': user } : {}, payload: { kind, payload } });
+const poll = (a: FastifyInstance, token: string, since?: number, waitMs = 0) =>
+  a.inject({ method: 'POST', url: '/api/v1/worker-link/poll', headers: auth(token), payload: since === undefined ? { waitMs } : { since, waitMs } });
+
+it('events sent during 30 minutes offline are all delivered after the cursor on reconnect, in order', async () => {
+  const a = await app();
+  const { worker, token } = await register(a, []);
+  const first = (await poll(a, token)).json();
+  expect(first).toMatchObject({ events: [], cursor: 0 });
+
+  clock += 30 * 60_000;
+  expect((await a.inject({ method: 'GET', url: '/api/v1/workers' })).json().workers[0].status).toBe('offline');
+  for (const n of [1, 2, 3]) expect((await send(a, worker.id, 'wake', { projectId: 'p1', n })).statusCode).toBe(201);
+
+  const back = (await poll(a, token, first.cursor)).json();
+  expect(back.events.map((e: { seq: number; payload: { n: number } }) => [e.seq, e.payload.n])).toEqual([[1, 1], [2, 2], [3, 3]]);
+  expect(back.cursor).toBe(3);
+
+  // Nothing new after the cursor: an empty, re-callable poll that keeps the cursor.
+  expect((await poll(a, token, back.cursor)).json()).toMatchObject({ task: null, events: [], cursor: 3 });
+  await send(a, worker.id, 'cancel', { runId: 'r9' });
+  const next = (await poll(a, token, 3)).json();
+  expect(next.events).toHaveLength(1);
+  expect(next.events[0]).toMatchObject({ seq: 4, kind: 'cancel', payload: { runId: 'r9' }, createdBy: 'admin-1' });
+  // A worker that lost its acknowledgement resends an older cursor and gets the rest again (at-least-once).
+  expect((await poll(a, token, 1)).json().events.map((e: { seq: number }) => e.seq)).toEqual([2, 3, 4]);
+});
+
+it('a held poll returns as soon as an event is addressed to the worker', async () => {
+  const a = await app();
+  const { worker, token } = await register(a, []);
+  let steps = 0;
+  workersState.sleep = async (ms) => {
+    clock += ms;
+    if (++steps === 2) await workersState.registry.appendEvent(TENANT, worker.id, 'wake', { projectId: 'p1' }, 'super-agent', clock);
+  };
+  const res = (await poll(a, token, 0, 20_000)).json();
+  expect(res.events[0]).toMatchObject({ seq: 1, kind: 'wake' });
+  expect(res.cursor).toBe(1);
+  expect(steps).toBe(2);
+});
+
+it('events: bad kind, bad payload, bad cursor, another tenant, and a revoked worker are refused', async () => {
+  const a = await app();
+  const { worker, token } = await register(a, []);
+  expect((await send(a, worker.id, 'rm -rf')).statusCode).toBe(400);
+  expect((await send(a, worker.id, 'message', ['x'])).statusCode).toBe(400);
+  expect((await send(a, worker.id, 'message', { big: 'x'.repeat(20_000) })).statusCode).toBe(400);
+  expect((await send(a, worker.id, 'wake', {}, `admin-2|admin|${OTHER}`)).statusCode).toBe(404);
+  expect((await poll(a, token, -1)).statusCode).toBe(400);
+  await a.inject({ method: 'POST', url: `/api/v1/workers/${worker.id}/revoke` });
+  expect((await send(a, worker.id, 'wake')).statusCode).toBe(404);
+});
+
+it('a token revoked after the preHandler read it cannot renew, report, or fail a lease', async () => {
+  const a = await app();
+  const { worker, token } = await register(a);
+  enqueue('race');
+  const task = (await poll(a, token)).json().task;
+  // The preHandler sees the pre-revoke record; the revoke lands before the handler runs.
+  const stale = (await workersState.registry.get(TENANT, worker.id))!;
+  await a.inject({ method: 'POST', url: `/api/v1/workers/${worker.id}/revoke` });
+  workersState.registry.byTokenHash = async () => ({ ...stale });
+  for (const [path, payload] of [['heartbeat', {}], ['succeed', {}], ['fail', { reason: 'x' }]] as const) {
+    const res = await a.inject({ method: 'POST', url: `/api/v1/worker-link/tasks/${task.id}/${path}`, headers: auth(token), payload });
+    expect(res.statusCode).toBe(401);
+  }
+  // The lease is untouched: it is still held and running.
+  expect(runtimeState.queue.heartbeat(task.id, worker.id, clock)).toBe(true);
+});
+
+it('a stale task call does not clear busy for the run that holds the lease', async () => {
+  const a = await app();
+  const { token } = await register(a);
+  enqueue('one');
+  const task = (await poll(a, token)).json().task;
+  expect((await a.inject({ method: 'POST', url: `/api/v1/worker-link/tasks/${task.id}/heartbeat`, headers: auth(token), payload: {} })).json().ok).toBe(true);
+  const status = async () => (await a.inject({ method: 'GET', url: '/api/v1/workers' })).json().workers[0].status;
+  expect(await status()).toBe('live');
+  const stale = await a.inject({ method: 'POST', url: '/api/v1/worker-link/tasks/not-mine/succeed', headers: auth(token), payload: {} });
+  expect(stale.statusCode).toBe(409);
+  const staleFail = await a.inject({ method: 'POST', url: '/api/v1/worker-link/tasks/not-mine/fail', headers: auth(token), payload: { reason: 'x' } });
+  expect(staleFail.statusCode).toBe(409);
+  expect(await status()).toBe('live');
 });
 
 it('a worker only claims its own tenant and its granted kinds', async () => {

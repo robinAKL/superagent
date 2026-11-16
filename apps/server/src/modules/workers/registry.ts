@@ -70,6 +70,26 @@ export interface HeartbeatInput {
   waitingAuthReason?: string | null;
 }
 
+/**
+ * Instructions addressed to one worker (wake it for a project, cancel a run, a message from the super agent).
+ * Durable and ordered by a monotonic cursor: a worker that was offline reconnects with the last cursor it saw
+ * and gets every event after it, so nothing sent while it slept is lost. Delivery is at-least-once; the worker
+ * de-duplicates by event id.
+ */
+export const WORKER_EVENT_KINDS = ['wake', 'cancel', 'message'] as const;
+export type WorkerEventKind = (typeof WORKER_EVENT_KINDS)[number];
+export const EVENTS_PAGE = 100;
+
+export interface WorkerEvent {
+  /** The cursor: 1, 2, 3, ... per worker, in commit order, so "after cursor N" never skips a later commit. */
+  seq: number;
+  workerId: string;
+  kind: WorkerEventKind;
+  payload: Record<string, unknown>;
+  createdBy: string;
+  createdAt: number;
+}
+
 export interface WorkerRegistry {
   insert(record: WorkerRecord): Promise<void>;
   byTokenHash(tokenHash: string): Promise<WorkerRecord | null>;
@@ -77,6 +97,9 @@ export interface WorkerRegistry {
   list(tenantId: string): Promise<WorkerRecord[]>;
   heartbeat(id: string, at: number, input: HeartbeatInput): Promise<boolean>;
   revoke(tenantId: string, id: string, at: number): Promise<boolean>;
+  appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number): Promise<WorkerEvent | null>;
+  /** Oldest first, at most `limit`, strictly after `since`. */
+  eventsAfter(workerId: string, since: number, limit: number): Promise<WorkerEvent[]>;
 }
 
 export function hashToken(token: string): string {
@@ -155,6 +178,20 @@ export async function authenticateWorker(registry: WorkerRegistry, token: string
 
 export class MemoryWorkerRegistry implements WorkerRegistry {
   private readonly rows = new Map<string, WorkerRecord>();
+  private readonly events: WorkerEvent[] = [];
+
+  async appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number): Promise<WorkerEvent | null> {
+    const row = this.rows.get(workerId);
+    if (!row || row.tenantId !== tenantId || row.revokedAt !== null) return null;
+    const seq = this.events.filter((e) => e.workerId === workerId).length + 1;
+    const event: WorkerEvent = { seq, workerId, kind, payload: structuredClone(payload), createdBy, createdAt: at };
+    this.events.push(event);
+    return structuredClone(event);
+  }
+
+  async eventsAfter(workerId: string, since: number, limit: number): Promise<WorkerEvent[]> {
+    return this.events.filter((e) => e.workerId === workerId && e.seq > since).slice(0, limit).map((e) => structuredClone(e));
+  }
 
   async insert(record: WorkerRecord): Promise<void> {
     this.rows.set(record.id, { ...record });

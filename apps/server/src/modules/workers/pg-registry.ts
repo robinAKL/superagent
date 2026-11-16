@@ -1,5 +1,5 @@
 import type { Queryable } from '../runtime/pg-queue.js';
-import type { HeartbeatInput, WorkerCapabilities, WorkerKind, WorkerRecord, WorkerRegistry } from './registry.js';
+import type { HeartbeatInput, WorkerCapabilities, WorkerEvent, WorkerEventKind, WorkerKind, WorkerRecord, WorkerRegistry } from './registry.js';
 
 interface Row {
   id: string;
@@ -46,6 +46,44 @@ WHERE id = $2::uuid
   AND revoked_at IS NULL
 RETURNING id;
 `.trim();
+
+/**
+ * seq = max + 1 for this worker. A concurrent append that picks the same seq hits the primary key and is retried,
+ * so seq order is commit order. Only a live (unrevoked) worker of the same tenant can be addressed.
+ */
+export const APPEND_EVENT_SQL = `
+INSERT INTO worker_events (worker_id, seq, tenant_id, kind, payload, created_by, created_at)
+SELECT w.id,
+       coalesce((SELECT max(e.seq) FROM worker_events e WHERE e.worker_id = w.id), 0) + 1,
+       w.tenant_id, $3, $4::jsonb, $5, to_timestamp($6::double precision / 1000)
+FROM workers w
+WHERE w.id = $2::uuid
+  AND w.tenant_id = $1::uuid
+  AND w.revoked_at IS NULL
+RETURNING worker_id, seq, kind, payload, created_by, created_at;
+`.trim();
+
+export const EVENTS_AFTER_SQL = `
+SELECT worker_id, seq, kind, payload, created_by, created_at
+FROM worker_events
+WHERE worker_id = $1::uuid
+  AND seq > $2::bigint
+ORDER BY seq
+LIMIT $3;
+`.trim();
+
+interface EventRow {
+  worker_id: string;
+  seq: string | number;
+  kind: WorkerEventKind;
+  payload: Record<string, unknown> | null;
+  created_by: string;
+  created_at: Date | string;
+}
+
+function fromEventRow(r: EventRow): WorkerEvent {
+  return { seq: Number(r.seq), workerId: r.worker_id, kind: r.kind, payload: r.payload ?? {}, createdBy: r.created_by, createdAt: ms(r.created_at)! };
+}
 
 function ms(value: Date | string | null): number | null {
   if (value === null) return null;
@@ -100,5 +138,23 @@ export class PgWorkerRegistry implements WorkerRegistry {
   async revoke(tenantId: string, id: string, at: number): Promise<boolean> {
     const { rows } = await this.db.query<{ id: string }>(REVOKE_WORKER_SQL, [tenantId, id, at]);
     return rows.length === 1;
+  }
+
+  async appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number): Promise<WorkerEvent | null> {
+    for (let tries = 0; ; tries++) {
+      try {
+        const { rows } = await this.db.query<EventRow>(APPEND_EVENT_SQL, [tenantId, workerId, kind, JSON.stringify(payload), createdBy, at]);
+        return rows[0] ? fromEventRow(rows[0]) : null;
+      } catch (error) {
+        // 23505 unique_violation: another append took this seq first. Read max again. Each round lets at least
+        // one concurrent append through, so N concurrent appends need at most N-1 retries.
+        if ((error as { code?: string }).code !== '23505' || tries >= 25) throw error;
+      }
+    }
+  }
+
+  async eventsAfter(workerId: string, since: number, limit: number): Promise<WorkerEvent[]> {
+    const { rows } = await this.db.query<EventRow>(EVENTS_AFTER_SQL, [workerId, since, limit]);
+    return rows.map(fromEventRow);
   }
 }

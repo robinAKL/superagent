@@ -5,7 +5,10 @@ import { PgWorkerRegistry } from './pg-registry.js';
 import {
   authenticateWorker,
   cleanCapabilities,
+  EVENTS_PAGE,
   MemoryWorkerRegistry,
+  WORKER_EVENT_KINDS,
+  type WorkerEventKind,
   registerWorker,
   toView,
   WORKER_KINDS,
@@ -79,6 +82,23 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return { workers: (await workersState.registry.list(tenantId)).map((w) => toView(w, now)) };
   });
 
+  /** Address an instruction to one worker. It is delivered on the worker's next poll, however long it was away. */
+  app.post('/:id/events', async (req, reply) => {
+    const user = req.user;
+    if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
+    const { id } = req.params as { id: string };
+    if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
+    const body = (req.body ?? {}) as { kind?: unknown; payload?: unknown };
+    if (!WORKER_EVENT_KINDS.includes(body.kind as WorkerEventKind)) return reply.code(400).send({ error: 'bad_kind' });
+    const payload = body.payload === undefined ? {} : body.payload;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || JSON.stringify(payload).length > 16_384) {
+      return reply.code(400).send({ error: 'bad_payload' });
+    }
+    const event = await workersState.registry.appendEvent(user.tenantId, id, body.kind as WorkerEventKind, payload as Record<string, unknown>, user.userId, workersState.now());
+    if (!event) return reply.code(404).send({ error: 'not_found' });
+    return reply.code(201).send({ event });
+  });
+
   app.post('/:id/revoke', async (req, reply) => {
     const tenantId = req.user?.tenantId;
     if (!tenantId) return reply.code(401).send({ error: 'unauthenticated' });
@@ -134,51 +154,71 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
   });
 
   /**
-   * Long poll. Returns a claimed task as soon as one is available, or { task: null } after waitMs.
-   * The queue itself is the durable backlog: work enqueued while the worker was offline is still there and
-   * comes back on the next poll, oldest first. Each poll also counts as a heartbeat.
+   * Long poll. Two durable backlogs, both survive the worker being offline:
+   *   - events addressed to this worker, after the cursor `since` it sends (0 = from the beginning);
+   *   - queue work of its granted kinds, claimed oldest first.
+   * Returns as soon as either has something, or { task: null, events: [] } after waitMs. The returned `cursor` is
+   * what to send as `since` next time; a worker that was away resends its last cursor and loses nothing.
+   * Each poll also counts as a heartbeat.
    */
   app.post('/poll', async (req, reply) => {
     const worker = req.worker!;
-    const body = (req.body ?? {}) as { waitMs?: unknown };
+    const body = (req.body ?? {}) as { waitMs?: unknown; since?: unknown };
     const waitMs = typeof body.waitMs === 'number' && Number.isFinite(body.waitMs) ? Math.min(Math.max(0, body.waitMs), LONG_POLL_MAX_MS) : LONG_POLL_MAX_MS;
+    if (body.since !== undefined && !(typeof body.since === 'number' && Number.isSafeInteger(body.since) && body.since >= 0)) {
+      return reply.code(400).send({ error: 'bad_cursor' });
+    }
+    const since = (body.since as number | undefined) ?? 0;
     let closed = false;
     req.raw.once('close', () => { closed = true; });
     const start = workersState.now();
     for (;;) {
       const now = workersState.now();
       if (!(await workersState.registry.heartbeat(worker.id, now, {}))) return reply.code(401).send({ error: 'bad_worker_token' });
+      const events = await workersState.registry.eventsAfter(worker.id, since, EVENTS_PAGE);
       const task = await claimFor(worker, now);
-      if (task) return { task, leaseMs: LEASE_MS };
-      if (closed || now - start >= waitMs) return { task: null, retryAfterMs: 0 };
+      const cursor = events.length ? events[events.length - 1]!.seq : since;
+      if (task || events.length) return { task, events, cursor, ...(task ? { leaseMs: LEASE_MS } : {}) };
+      if (closed || now - start >= waitMs) return { task: null, events, cursor, retryAfterMs: 0 };
       await workersState.sleep(Math.min(workersState.pollStepMs, waitMs - (now - start)));
     }
   });
 
-  app.post('/tasks/:id/heartbeat', async (req) => {
+  /**
+   * Task routes re-check the worker before touching the lease: a token revoked after the preHandler read it
+   * must not renew or report. busy is updated only after the lease operation succeeded, so a stale call
+   * cannot clear the status of the run that currently holds the lease.
+   */
+  async function stillValid(worker: WorkerRecord, now: number): Promise<boolean> {
+    return workersState.registry.heartbeat(worker.id, now, {});
+  }
+
+  app.post('/tasks/:id/heartbeat', async (req, reply) => {
     const { id } = req.params as { id: string };
     const worker = req.worker!;
     const now = workersState.now();
-    await workersState.registry.heartbeat(worker.id, now, { busy: true });
-    if (runtimeState.db) return { ok: await heartbeatTask(runtimeState.db, id, worker.id, LEASE_MS) };
-    return { ok: runtimeState.queue.heartbeat(id, worker.id, now) };
+    if (!(await stillValid(worker, now))) return reply.code(401).send({ error: 'bad_worker_token' });
+    const ok = runtimeState.db ? await heartbeatTask(runtimeState.db, id, worker.id, LEASE_MS) : runtimeState.queue.heartbeat(id, worker.id, now);
+    if (ok) await workersState.registry.heartbeat(worker.id, now, { busy: true });
+    return { ok };
   });
 
   app.post('/tasks/:id/succeed', async (req, reply) => {
     const { id } = req.params as { id: string };
     const worker = req.worker!;
     const now = workersState.now();
-    await workersState.registry.heartbeat(worker.id, now, { busy: false });
+    if (!(await stillValid(worker, now))) return reply.code(401).send({ error: 'bad_worker_token' });
     if (runtimeState.db) {
       if (!(await succeedTask(runtimeState.db, id, worker.id))) return reply.code(409).send({ error: 'lease_lost' });
-      return { id, status: 'reported' };
+    } else {
+      try {
+        runtimeState.queue.succeed(id, worker.id, now);
+      } catch (error) {
+        return reply.code(409).send({ error: (error as Error).message });
+      }
     }
-    try {
-      runtimeState.queue.succeed(id, worker.id, now);
-      return { id, status: 'reported' };
-    } catch (error) {
-      return reply.code(409).send({ error: (error as Error).message });
-    }
+    await workersState.registry.heartbeat(worker.id, now, { busy: false });
+    return { id, status: 'reported' };
   });
 
   app.post('/tasks/:id/fail', async (req, reply) => {
@@ -188,16 +228,20 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     if (!reason) return reply.code(400).send({ error: 'missing_reason' });
     const worker = req.worker!;
     const now = workersState.now();
-    await workersState.registry.heartbeat(worker.id, now, { busy: false });
+    if (!(await stillValid(worker, now))) return reply.code(401).send({ error: 'bad_worker_token' });
+    let deadLettered: boolean;
     if (runtimeState.db) {
-      if (await releaseTask(runtimeState.db, id, worker.id, MAX_ATTEMPTS)) return { deadLettered: false };
-      if (await deadLetterTask(runtimeState.db, id, worker.id, MAX_ATTEMPTS, reason)) return { deadLettered: true };
-      return reply.code(409).send({ error: 'lease_lost' });
+      if (await releaseTask(runtimeState.db, id, worker.id, MAX_ATTEMPTS)) deadLettered = false;
+      else if (await deadLetterTask(runtimeState.db, id, worker.id, MAX_ATTEMPTS, reason)) deadLettered = true;
+      else return reply.code(409).send({ error: 'lease_lost' });
+    } else {
+      try {
+        deadLettered = runtimeState.queue.fail(id, worker.id, now, reason).deadLettered;
+      } catch (error) {
+        return reply.code(409).send({ error: (error as Error).message });
+      }
     }
-    try {
-      return { deadLettered: runtimeState.queue.fail(id, worker.id, now, reason).deadLettered };
-    } catch (error) {
-      return reply.code(409).send({ error: (error as Error).message });
-    }
+    await workersState.registry.heartbeat(worker.id, now, { busy: false });
+    return { deadLettered };
   });
 };
