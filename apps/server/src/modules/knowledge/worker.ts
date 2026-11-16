@@ -7,13 +7,14 @@ import { managedSource, sourceScope } from './sources.js';
 import { mayRead, positionedChunks } from './domain.js';
 import { CATEGORIES, validateProfile } from './profile.js';
 import { isPublicMcpScope } from './plugins/mcp-resources.js';
+import { readMcpForAnalysis } from './mcp-analysis.js';
 /** The persisted parseJobs/analyses ledger is the authoritative queue; no process-local launch is required. */
 export async function tickKnowledge(deps: KnowledgeDeps, tenantId: string): Promise<boolean> {
   const internal: UserContext = { tenantId, userId: 'knowledge-worker', roles: [], projectScopes: [] };
   const state = await deps.repo.read(internal);
   const job = state.parseJobs.find(j => j.actor.tenantId === tenantId && ['queued', 'running'].includes(j.status) && j.notBefore <= Date.now() && j.leaseUntil <= Date.now());
   if (job && deps.binary) { await runParseJob(deps.repo, deps.binary, job.actor, job.id); return true; }
-  const run = state.analyses.find(r => r.actor.tenantId === tenantId && ['queued', 'running'].includes(r.status) && ((r as typeof r & { leaseUntil?: number }).leaseUntil ?? 0) <= Date.now());
+  const run = state.analyses.find(r => r.actor.tenantId === tenantId && ['queued', 'running'].includes(r.status) && (r.leaseUntil ?? 0) <= Date.now());
   if (run && deps.model) {
     const denied = state.source.items.some(item => {
       if (!mayRead(state, run.actor, item)) return false;
@@ -23,7 +24,9 @@ export async function tickKnowledge(deps: KnowledgeDeps, tenantId: string): Prom
       try { return !deps.database?.scope(run.actor, conn.scope); } catch { return true; }
     });
     if (denied) { await deps.repo.transact(run.actor, s => { const r = s.analyses.find(r => r.id === run.id)!; r.status = 'stale'; r.error = 'source_scope_changed'; }); return true; }
-    await runAnalysis(deps.repo, deps.model, run.actor, run.id); return true;
+    const mcp = deps.liveMcp;
+    await runAnalysis(deps.repo, deps.model, run.actor, run.id, mcp && (analysis => readMcpForAnalysis(run.actor, analysis, mcp, deps.mcpAnswerGateway)));
+    return true;
   }
   if (deps.model?.profile && await refineOneProfile(deps, tenantId)) return true;
   return false;

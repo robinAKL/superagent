@@ -6,7 +6,7 @@ import { DatabaseSourcePanel } from './DatabaseSourcePanel';
 import { MaterialReview, type Material } from './MaterialReview';
 import type { McpConnection } from './McpKnowledge';
 
-interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string }
+interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string; retrievedAt?: string }
 interface Plugin { id: string; name: string; enabled: boolean; configured: boolean; capabilities: string[] }
 interface SourceScope { resourceId?: string; mailbox?: string; folder?: string; receivedSince?: string; driveId?: string; folderPath?: string; projectIds?: string[]; mcpResourceCount?: number; publicMcpEndpoint?: string }
 interface SourceResource { id: string; name: string; pluginId: string; scope: SourceScope; projectIds: string[] }
@@ -22,7 +22,9 @@ interface Recommendation {
 interface Overview {
   spaceName: string; sourceResources: SourceResource[];
   plugins: Plugin[]; connections: Connection[]; items: Item[];
-  analyses: { id: string; status: string; stage: string; error?: string | null }[]; recommendations: Recommendation[];
+  analyses: { id: string; status: string; stage: string; error?: string | null; mcpSources?: string[] }[];
+  recommendations: Recommendation[];
+  mcpRecommendations?: Recommendation[];
   analysisReadiness?: { ready: true } | { ready: false; code: string };
   canConfirm: boolean;
   mcpConnections?: McpConnection[];
@@ -32,6 +34,7 @@ interface Overview {
 interface SearchResult { answer: string; hits: Evidence[] }
 interface FileSubmission { name: string; status: 'uploading' | 'submitted' | 'failed'; error?: string }
 const ROOT = '/api/v1/knowledge';
+const MAX_MCP_ANALYSIS_SOURCES = 5;
 const DEFAULT_SPACE_NAME = '企业知识';
 const ENGLISH_PLUGINS: Record<string, { name: string; capabilities: string[] }> = {
   'local-file': { name: 'Local files', capabilities: ['File import', 'Version and line references'] },
@@ -105,6 +108,7 @@ const TEXT = {
     status_stale: 'Evidence changed',
     stage_parse: 'Parse',
     stage_extract: 'Extract',
+    stage_read_mcp: 'Reading MCP sources',
     stage_recommend: 'Recommend',
     stage_complete: 'Complete',
     kind_employee: 'Employee',
@@ -243,7 +247,17 @@ const TEXT = {
     analysisInvalidOutput: 'The model did not return suggestions that could be verified against the materials.',
     analysisRunFailed: 'The analysis failed. Try again.',
     analysisPermission: 'An owner or administrator can start an analysis.',
-    needConfirmedHint: 'Confirm at least one authorized material version first.',
+    needConfirmedHint: 'Add a material or select a connected MCP source.',
+    analysisMcpSources: 'MCP sources to analyze',
+    analysisMcpLimit: 'Select up to 5 MCP sources.',
+    analysisMcpFocus: 'Analysis focus (optional)',
+    analysisMcpFocusPlaceholder: 'e.g. Order handling guide or pricing policy',
+    analysisMcpScopeChanged: 'An MCP connection changed. Select the sources again and restart the analysis.',
+    analysisMcpEmpty: 'The MCP source returned no readable knowledge. If it serves guides through tools, reconnect with read-only queries enabled.',
+    analysisMcpUnavailable: 'An MCP source could not be read. Check the connection and try again.',
+    analysisMcpReauthorize: 'Reconnect and authorize the MCP source before running the analysis again.',
+    analysisMcpDraft: 'Private MCP analysis draft',
+    analysisMcpRetrieved: 'Read from MCP on {date}',
     noAnalyses: 'No analyses run yet. Source permissions and versions are re-checked before analysis starts.',
     noRecommendations: 'No draft recommendations yet. Only analysis results with valid current citations appear here.',
     advancedSummary: 'Advanced',
@@ -323,6 +337,7 @@ const TEXT = {
     status_stale: '依据已变化',
     stage_parse: '解析',
     stage_extract: '提取',
+    stage_read_mcp: '正在读取 MCP 来源',
     stage_recommend: '生成建议',
     stage_complete: '完成',
     kind_employee: '员工',
@@ -461,7 +476,17 @@ const TEXT = {
     analysisInvalidOutput: '模型返回的建议无法根据资料验证。',
     analysisRunFailed: '分析失败，请重试。',
     analysisPermission: '所有者或管理员可以开始分析。',
-    needConfirmedHint: '请先确认至少一份有权限的资料版本。',
+    needConfirmedHint: '请添加资料或选择已连接的 MCP 来源。',
+    analysisMcpSources: '纳入分析的 MCP 来源',
+    analysisMcpLimit: '每次最多选择 5 个 MCP 来源。',
+    analysisMcpFocus: '分析重点（可选）',
+    analysisMcpFocusPlaceholder: '例如订单处理指南或定价规则',
+    analysisMcpScopeChanged: 'MCP 连接已变化，请重新选择来源并开始分析。',
+    analysisMcpEmpty: 'MCP 来源未返回可读知识。如果指南通过工具提供，请重新连接并启用只读查询。',
+    analysisMcpUnavailable: 'MCP 来源读取失败，请检查连接后重试。',
+    analysisMcpReauthorize: '请重新连接并授权 MCP 来源，然后再次分析。',
+    analysisMcpDraft: '仅自己可见的 MCP 分析草案',
+    analysisMcpRetrieved: 'MCP 读取时间 {date}',
     noAnalyses: '尚未运行分析。分析开始前会再次检查来源权限和版本。',
     noRecommendations: '暂无建议草案。只有带当前有效引用的分析结果才会出现在这里。',
     advancedSummary: '高级',
@@ -497,6 +522,16 @@ const ANALYSIS_MESSAGES: Record<string, TextKey> = {
   unsupported_relation: 'analysisInvalidOutput',
   no_evidence: 'needConfirmedHint',
   analysis_active: 'analyzingBtn',
+  mcp_analysis_scope_changed: 'analysisMcpScopeChanged',
+  mcp_analysis_sources_invalid: 'analysisMcpLimit',
+  mcp_analysis_no_evidence: 'analysisMcpEmpty',
+  mcp_analysis_plan_invalid: 'analysisInvalidOutput',
+  mcp_unavailable: 'analysisMcpUnavailable',
+  mcp_model_unavailable: 'analysisUnavailable',
+  mcp_reauthorize: 'analysisMcpReauthorize',
+  mcp_query_failed: 'analysisMcpUnavailable',
+  mcp_query_unavailable: 'analysisMcpEmpty',
+  mcp_resource_unavailable: 'analysisMcpUnavailable',
 };
 const ANALYSIS_SETTINGS_CODES = new Set(['llm_not_configured', 'llm_key_invalid', 'model_not_selected', 'price_unknown', 'budget_not_set', 'budget_exhausted']);
 
@@ -512,7 +547,7 @@ const STATUS_KEYS: Record<string, TextKey> = {
   deleted: 'status_deleted', parse_failed: 'status_parse_failed', parsed: 'status_parsed',
   queued: 'status_queued', running: 'status_running', completed: 'status_completed',
   failed: 'status_failed', stale: 'status_stale', outcome_unknown: 'status_outcome_unknown',
-  parse: 'stage_parse', extract: 'stage_extract', recommend: 'stage_recommend', complete: 'stage_complete',
+  parse: 'stage_parse', extract: 'stage_extract', read_mcp: 'stage_read_mcp', recommend: 'stage_recommend', complete: 'stage_complete',
   employee: 'kind_employee', tool: 'kind_tool', sop: 'kind_sop', object: 'kind_object', relation: 'kind_relation',
 };
 
@@ -522,8 +557,10 @@ function EvidenceList({ evidence, t }: { evidence: Evidence[]; t: Translate }) {
   return evidence.length ? <ol className="knowledge-evidence">
     {evidence.map((entry, index) => <li key={`${entry.sourceId}:${entry.version}:${entry.start}:${index}`}>
       <blockquote>{entry.quote}</blockquote>
-      <p>{entry.locator} <span>· {t('evidenceLocator', { version: entry.version, start: entry.start, end: entry.end })}</span></p>
-      <small>{t('evidenceSource', { sourceId: entry.sourceId })}</small>
+      {entry.retrievedAt ? <><p>{entry.locator}</p><small>{t('analysisMcpRetrieved', { date: new Date(entry.retrievedAt).toLocaleString() })}</small></> : <>
+        <p>{entry.locator} <span>· {t('evidenceLocator', { version: entry.version, start: entry.start, end: entry.end })}</span></p>
+        <small>{t('evidenceSource', { sourceId: entry.sourceId })}</small>
+      </>}
     </li>)}
   </ol> : <p className="knowledge-empty">{t('noEvidence')}</p>;
 }
@@ -613,8 +650,8 @@ function ItemPreview({ item, request, errorMessage, t }: {
   </details>;
 }
 
-function RecommendationCard({ recommendation: r, disabled, onAction, label, t }: {
-  recommendation: Recommendation; disabled: boolean;
+function RecommendationCard({ recommendation: r, privateMcp, disabled, onAction, label, t }: {
+  recommendation: Recommendation; privateMcp?: boolean; disabled: boolean;
   onAction: (key: string, path: string, body: unknown, success: string) => Promise<boolean>;
   label: (value: string) => string;
   t: Translate;
@@ -631,7 +668,7 @@ function RecommendationCard({ recommendation: r, disabled, onAction, label, t }:
       <span className="knowledge-kind">{t('recDraftKind', { kind: label(r.kind) })}</span>
       <span className={`knowledge-badge ${r.humanLocked ? 'is-gold' : ''}`}>{r.humanLocked ? t('recHumanLocked') : t('recPendingReview')}</span>
     </div>
-    <p className="helper">{r.origin === 'manual' ? t('recOriginManual') : t('recOriginInferred')}</p>
+    <p className="helper">{privateMcp ? t('analysisMcpDraft') : r.origin === 'manual' ? t('recOriginManual') : t('recOriginInferred')}</p>
     {r.stale ? <p className="knowledge-alert">{t('recStaleAlert')}</p> : null}
     {r.relation ? <p className="helper">{r.relation.from} → {r.relation.to} · {r.relation.label}</p> : null}
     <form onSubmit={save} className="knowledge-form">
@@ -708,6 +745,8 @@ export function KnowledgePage() {
   const [mcpScope, setMcpScope] = useState('');
   const [sourceFeedback, setSourceFeedback] = useState<{ text: string; error?: boolean } | null>(null);
   const [analysisFeedback, setAnalysisFeedback] = useState<{ code?: string; message: string } | null>(null);
+  const [analysisSourceIds, setAnalysisSourceIds] = useState<string[]>();
+  const [analysisFocus, setAnalysisFocus] = useState('');
   const [resourceId, setResourceId] = useState('');
   const [readOnlyAcknowledged, setReadOnlyAcknowledged] = useState(false);
   const [spaceName, setSpaceName] = useState('');
@@ -774,6 +813,11 @@ export function KnowledgePage() {
   const activeCardPlugin = overview?.plugins.find(plugin => plugin.id === activeSourceCard && plugin.enabled);
   const selectedPlugin = activeCardPlugin?.id ?? '';
   const liveConnections = overview?.mcpConnections ?? [];
+  const liveAnalysisSources = liveConnections.filter(connection => connection.enabled);
+  const selectedAnalysisSources = analysisSourceIds
+    ? liveAnalysisSources.filter(connection => analysisSourceIds.includes(connection.id))
+    : liveAnalysisSources.slice(0, MAX_MCP_ANALYSIS_SOURCES);
+  const mcpSourceIds = selectedAnalysisSources.map(source => source.id);
   const externalConnections = overview?.connections.filter(connection => connection.pluginId !== 'local-file') ?? [];
   const standaloneConnections = externalConnections.filter(connection => !liveConnections.some(live => connection.scope?.publicMcpEndpoint === live.endpoint));
   const sourceResources = overview?.sourceResources?.filter(resource => resource.pluginId === selectedPlugin) ?? [];
@@ -783,6 +827,7 @@ export function KnowledgePage() {
   const canUpload = !!overview?.canConfirm && overview.plugins.some(plugin => plugin.id === 'local-file' && plugin.enabled);
   const confirmedCount = overview?.items.filter(item => item.confirmed).length ?? 0;
   const recommendations = overview?.recommendations.filter(recommendation => !recommendation.deleted) ?? [];
+  const mcpRecommendations = overview?.mcpRecommendations ?? [];
   const selectedResourceScope = JSON.stringify({ scope: selectedResource?.scope, projects: selectedResource?.projectIds });
   useEffect(() => { setReadOnlyAcknowledged(false); }, [selectedPlugin, selectedResource?.id, selectedResourceScope]);
 
@@ -1078,20 +1123,39 @@ export function KnowledgePage() {
       <section className="panel knowledge-section" aria-labelledby="knowledge-analysis-heading">
         <div className="knowledge-section-head">
           <div><h2 id="knowledge-analysis-heading">{t('sec3Title')}</h2><p className="helper">{t('sec3Sub')}</p></div>
-          <button className="btn" disabled={!!busy || analysisActive || !confirmedCount || !!analysisBlock || !overview.canConfirm}
-            onClick={() => void action('analysis', '/analyses', {}, t('analysisSubmittedNotice'))}>{busy === 'analysis' ? t('submitting') : analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}</button>
+          <button className="btn" disabled={!!busy || analysisActive || (!confirmedCount && !mcpSourceIds.length) || !!analysisBlock || !overview.canConfirm}
+            onClick={() => void action('analysis', '/analyses', { mcpSourceIds, ...(mcpSourceIds.length && analysisFocus.trim() && { focus: analysisFocus.trim() }) }, t('analysisSubmittedNotice'))}>{busy === 'analysis' ? t('submitting') : analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}</button>
         </div>
         {overview.canConfirm && analysisMessage ? <div className="knowledge-alert knowledge-analysis-status" role="status">
           <p>{analysisMessage}</p>
           {analysisIssue && ANALYSIS_SETTINGS_CODES.has(analysisIssue) ? <a className="btn" href="#settings">{t('analysisSettings')}</a> : null}
         </div> : null}
         {!overview.canConfirm ? <p className="helper">{t('analysisPermission')}</p> : null}
-        {!confirmedCount ? <p className="helper">{t('needConfirmedHint')}</p> : null}
+        {overview.canConfirm && liveAnalysisSources.length > 0 ? <fieldset className="knowledge-analysis-sources" disabled={!!busy || analysisActive}>
+          <legend>{t('analysisMcpSources')}</legend>
+          <div className="knowledge-analysis-source-list">{liveAnalysisSources.map(source => {
+            const checked = mcpSourceIds.includes(source.id);
+            return <label className="knowledge-check" key={source.id}>
+              <input type="checkbox" checked={checked} disabled={!checked && mcpSourceIds.length >= MAX_MCP_ANALYSIS_SOURCES}
+                onChange={event => setAnalysisSourceIds(event.target.checked ? [...mcpSourceIds, source.id] : mcpSourceIds.filter(id => id !== source.id))} />
+              <span>{source.name}</span>
+            </label>;
+          })}</div>
+          {liveAnalysisSources.length > MAX_MCP_ANALYSIS_SOURCES ? <p className="helper">{t('analysisMcpLimit')}</p> : null}
+          {mcpSourceIds.length > 0 ? <label className="field"><span>{t('analysisMcpFocus')}</span>
+            <input maxLength={1000} value={analysisFocus} onChange={event => setAnalysisFocus(event.target.value)} placeholder={t('analysisMcpFocusPlaceholder')} />
+          </label> : null}
+        </fieldset> : null}
+        {!confirmedCount && !mcpSourceIds.length ? <p className="helper">{t('needConfirmedHint')}</p> : null}
         {overview.analyses.length ? <ul className="knowledge-runs">{overview.analyses.slice(-5).reverse().map(run => <li key={run.id}>
           <span className={`knowledge-badge ${run.status === 'completed' ? 'is-green' : ''}`}>{label(run.status)}</span><span>{label(run.stage)}</span><small>{run.id}</small>
-          {run.error && ['failed', 'outcome_unknown'].includes(run.status) ? <small className="knowledge-job-error">{t(ANALYSIS_MESSAGES[run.error] ?? 'analysisRunFailed')}</small> : null}
+          {run.mcpSources?.length ? <small>{run.mcpSources.join(' · ')}</small> : null}
+          {run.error ? <small className="knowledge-job-error">{t(ANALYSIS_MESSAGES[run.error] ?? 'analysisRunFailed')}</small> : null}
         </li>)}</ul> : <p className="knowledge-empty">{t('noAnalyses')}</p>}
-        {recommendations.length ? <div className="knowledge-recommendations">{recommendations.map(recommendation => <RecommendationCard key={recommendation.id} recommendation={recommendation} disabled={!!busy} onAction={action} label={label} t={t} />)}</div> : <p className="knowledge-empty">{t('noRecommendations')}</p>}
+        {recommendations.length || mcpRecommendations.length ? <div className="knowledge-recommendations">
+          {mcpRecommendations.map(recommendation => <RecommendationCard key={recommendation.id} recommendation={recommendation} privateMcp disabled={!!busy} onAction={action} label={label} t={t} />)}
+          {recommendations.map(recommendation => <RecommendationCard key={recommendation.id} recommendation={recommendation} disabled={!!busy} onAction={action} label={label} t={t} />)}
+        </div> : <p className="knowledge-empty">{t('noRecommendations')}</p>}
       </section>
 
       <section className="panel knowledge-section" aria-labelledby="knowledge-search-heading">

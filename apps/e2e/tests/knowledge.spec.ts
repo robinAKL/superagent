@@ -126,6 +126,29 @@ test.beforeEach(async ({ page }) => {
   await openAdvanced(page);
 });
 
+test('Start analysis reads connected MCP knowledge before any files are uploaded', async ({ page }) => {
+  const { id } = await response<{ id: string }>(page.request.post('/__test/knowledge/seed-live-mcp', { data: {} }));
+  await page.reload();
+  const source = page.getByRole('checkbox', { name: '退货手册 MCP' });
+  const start = page.getByRole('button', { name: '开始分析', exact: true });
+  await expect(source).toBeChecked();
+  await expect(start).toBeEnabled();
+  await source.uncheck();
+  await expect(start).toBeDisabled();
+  await source.check();
+  const request = page.waitForRequest(req => req.url().endsWith('/analyses') && req.method() === 'POST');
+  await start.click();
+  expect((await request).postDataJSON()).toEqual({ mcpSourceIds: [id] });
+  await expect(page.getByRole('button', { name: '分析进行中', exact: true })).toBeDisabled();
+  await response(page.request.post('/__test/knowledge/advance', { data: {} }));
+  await page.reload();
+  const draft = card(page, '退货专员');
+  await expect(draft.getByText('仅自己可见的 MCP 分析草案')).toBeVisible();
+  await draft.locator('summary').click();
+  await expect(draft.getByText('退货手册 MCP / handbook://procedures/returns')).toBeVisible();
+  await expect(draft.locator('blockquote')).toHaveText('角色：退货专员；责任：核对收货记录后登记退款。');
+});
+
 test('[qa-enablement#1] New company begins without invented knowledge', async ({ page }) => {
   await test.step('real empty tenant has no sources, candidates or analyses', async () => {
     const overview = await getOverview(page); expect(overview.items).toEqual([]); expect(overview.recommendations).toEqual([]); expect(overview.analyses).toEqual([]);

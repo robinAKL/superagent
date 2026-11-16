@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { type Client, UriTemplate } from '@modelcontextprotocol/client';
 import { SourceError, type UserContext } from '@superagent/shared';
 import type { SecretStore, SecretVersion } from '../setup/secrets.js';
-import { hash, KnowledgeError, type KnowledgeState } from './domain.js';
+import { hash, id as newId, KnowledgeError, type KnowledgeState } from './domain.js';
 import type { KnowledgeRepository } from './repository.js';
 import { exchangeMcpToken, mcpOAuth, reauthorize, type OAuthConnection, type McpTokens } from './mcp-oauth.js';
 import { publicMcpEndpoint, publicMcpFetch } from './plugins/mcp-public-http.js';
@@ -14,6 +14,7 @@ export interface LiveMcpSource {
   endpoint: string;
   name: string;
   allowTools: boolean;
+  revision?: string;
   oauth?: OAuthConnection;
   grant?: Grant;
 }
@@ -60,6 +61,16 @@ function updateEntries(state: UserEntries, user: string) {
   state.liveMcp[user] = current;
   delete state.veraMcp[user];
   return current;
+}
+
+function sourceRevision(source: LiveMcpSource) {
+  return source.revision ?? hash(JSON.stringify([source.id, source.oauth?.clientId, source.allowTools]));
+}
+
+export function liveMcpSelection(state: KnowledgeState, ctx: UserContext, id: string) {
+  const source = entries(state, hash(ctx.userId)).sources[id];
+  if (!source || state.disabledPlugins.includes('mcp')) return undefined;
+  return { id, name: source.name, revision: sourceRevision(source) };
 }
 
 async function collect<T>(fetchPage: (cursor?: string) => Promise<{ items: T[]; nextCursor?: string }>): Promise<T[]> {
@@ -118,7 +129,7 @@ export class LiveMcpKnowledge {
         enabled(state);
         const entry = updateEntries(state, user);
         const previous = entry.sources[id]?.grant?.secret;
-        entry.sources[id] = { id, endpoint, name: catalog.name, allowTools };
+        entry.sources[id] = { id, endpoint, name: catalog.name, allowTools, revision: newId() };
         return previous;
       });
       await this.disable(old);
@@ -185,7 +196,7 @@ export class LiveMcpKnowledge {
       if (entry.completing !== attempt.key) throw invalidCallback();
       const previous = entry.sources[id]?.grant?.secret;
       const grant = await this.saveGrant(ctx, id, reply);
-      entry.sources[id] = { id, endpoint, name: catalog.name, allowTools, oauth, grant };
+      entry.sources[id] = { id, endpoint, name: catalog.name, allowTools, oauth, grant, revision: newId() };
       delete entry.completing;
       return previous;
     });
@@ -204,14 +215,14 @@ export class LiveMcpKnowledge {
     return { connected: false };
   }
 
-  async catalog(ctx: UserContext, id: unknown) {
-    const { source, token } = await this.access(ctx, id);
+  async catalog(ctx: UserContext, id: unknown, revision?: string) {
+    const { source, token } = await this.access(ctx, id, revision);
     return this.request(source.endpoint, token, client => discover(client, source.endpoint, source.allowTools));
   }
 
-  async read(ctx: UserContext, id: unknown, uri: unknown) {
+  async read(ctx: UserContext, id: unknown, uri: unknown, revision?: string) {
     if (typeof uri !== 'string' || uri.length > 1500 || !/^[a-z][a-z0-9+.-]*:[^\s\x00-\x1f]+$/i.test(uri)) throw new KnowledgeError('invalid_input', 'MCP 资料地址无效。');
-    const { source, token } = await this.access(ctx, id);
+    const { source, token } = await this.access(ctx, id, revision);
     return this.request(source.endpoint, token, async client => {
       const [items, patterns] = await Promise.all([resources(client), templates(client)]);
       if (!items.some(item => item.uri === uri) && !patterns.some(({ uriTemplate }) => {
@@ -222,9 +233,9 @@ export class LiveMcpKnowledge {
     });
   }
 
-  async call(ctx: UserContext, id: unknown, name: unknown, args: unknown) {
+  async call(ctx: UserContext, id: unknown, name: unknown, args: unknown, revision?: string) {
     if (typeof name !== 'string' || !/^[\w.-]{1,128}$/.test(name) || !args || typeof args !== 'object' || Array.isArray(args)) throw new KnowledgeError('invalid_input', 'MCP 查询参数无效。');
-    const { source, token } = await this.access(ctx, id);
+    const { source, token } = await this.access(ctx, id, revision);
     if (!source.allowTools) throw new KnowledgeError('mcp_query_unavailable', '此来源未启用只读 MCP 查询。', 403);
     return this.request(source.endpoint, token, async client => {
       if (!(await readOnlyTools(client)).some(tool => tool.name === name)) throw new KnowledgeError('mcp_query_unavailable', '该 MCP 服务未公开此只读查询。', 403);
@@ -259,8 +270,15 @@ export class LiveMcpKnowledge {
     return source;
   }
 
-  private async access(ctx: UserContext, id: unknown) {
-    const user = hash(ctx.userId), source = this.source(await this.repo.read(ctx), user, id);
+  private async access(ctx: UserContext, id: unknown, revision?: string) {
+    const user = hash(ctx.userId);
+    const selected = (state: KnowledgeState) => {
+      if (revision && (typeof id !== 'string' || liveMcpSelection(state, ctx, id)?.revision !== revision)) {
+        throw new KnowledgeError('mcp_analysis_scope_changed', 'MCP 授权已变化，请重新选择来源。', 409);
+      }
+      return this.source(state, user, id);
+    };
+    const source = selected(await this.repo.read(ctx));
     if (!source.oauth) return { source, token: undefined };
     if (!source.grant) throw reauthorize();
     if (source.grant.deadline === null || source.grant.deadline > Date.now() + 30_000) {
@@ -268,7 +286,7 @@ export class LiveMcpKnowledge {
       catch { /* A concurrent refresh can retire this version. Recheck under the tenant lock. */ }
     }
     const refreshed = await this.repo.transact(ctx, async store => {
-      const current = this.source(store, user, id);
+      const current = selected(store);
       if (!current.oauth || !current.grant) throw reauthorize();
       let tokens: McpTokens;
       try { tokens = JSON.parse(await this.secrets.get(current.grant.secret)) as McpTokens; } catch { throw reauthorize(); }

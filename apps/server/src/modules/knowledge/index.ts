@@ -16,7 +16,10 @@ export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = asy
   app.get<{ Params: { id: string } }>('/connections/:id/preview', req => service!.previewConnection(req.user!, req.params.id));
   app.post<{ Params: { id: string } }>('/connections/:id/import', async (req, reply) => { const result = await service!.importSelection(req.user!, req.params.id, body(req)); return result.error ? reply.code(502).send({ error: 'source_sync_failed', message: result.error }) : result; });
   app.get<{ Params: { id: string }; Querystring: { templateId?: string; revision?: string } }>('/connections/:id/fact-freshness', req => service!.factFreshness(req.user!, req.params.id, req.query.templateId ?? '', req.query.revision ?? ''));
-  app.get('/overview', req => service!.overview(req.user!));
+  app.get('/overview', (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return service!.overview(req.user!);
+  });
   const mcp = () => {
     if (!opts.deps?.liveMcp) throw new KnowledgeError('mcp_unavailable', 'MCP 知识连接尚未配置。', 503);
     return opts.deps.liveMcp;
@@ -80,7 +83,7 @@ export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = asy
   app.post<{ Params: { id: string } }>('/items/:id/confirm', req => service!.confirm(req.user!, req.params.id, String(body(req).version ?? '')));
   app.get<{ Params: { id: string }; Querystring: { version?: string } }>('/items/:id/preview', req => service!.preview(req.user!, req.params.id, req.query.version ?? ''));
   app.get<{ Querystring: { q?: string } }>('/search', req => service!.search(req.user!, req.query.q ?? ''));
-  app.post('/analyses', (req, reply) => { reply.code(202); return service!.startAnalysis(req.user!); });
+  app.post('/analyses', { bodyLimit: 8 * 1024 }, (req, reply) => { reply.code(202); return service!.startAnalysis(req.user!, req.body === undefined ? {} : body(req)); });
   app.post<{ Params: { id: string } }>('/recommendations/:id/lock', req => service!.editRecommendation(req.user!, req.params.id, body(req)));
   app.post<{ Params: { id: string } }>('/recommendations/:id/delete', req => service!.editRecommendation(req.user!, req.params.id, {}, true));
   app.post<{ Params: { id: string } }>('/recommendations/:id/adopt', req => service!.adoptRecommendation(req.user!, req.params.id));

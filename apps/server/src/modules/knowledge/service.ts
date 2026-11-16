@@ -1,5 +1,5 @@
 import type { KnowledgeSourcePlugin, SourceContent, UserContext } from '@superagent/shared';
-import { confirmSource, evidenceValid, hash, hydrate, id, invalidateAnalyses, KnowledgeError, mayRead, positionedChunks, selectedItem, requireManager, signature, snapshot, stamp, type KnowledgeState, type Evidence } from './domain.js';
+import { confirmSource, evidenceValid, hash, hydrate, id, invalidateAnalyses, KnowledgeError, mayRead, positionedChunks, selectedItem, requireManager, signature, snapshot, stamp, type KnowledgeState, type Evidence, type Recommendation } from './domain.js';
 import { managedSource, publicSourceScope, sourceScope, type SourceResource } from './sources.js';
 import type { Connection, Item } from './store.js';
 import type { AuditSink } from '../audit/audit.js';
@@ -14,7 +14,8 @@ import type { DatabaseGateway } from './database.js';
 import { CATEGORIES, type Category } from './profile.js';
 import { createPublicMcp, isPublicMcpScope } from './plugins/mcp-resources.js';
 import { publicMcpEndpoint } from './plugins/mcp-public-http.js';
-import type { LiveMcpKnowledge } from './live-mcp.js';
+import { liveMcpSelection, type LiveMcpKnowledge } from './live-mcp.js';
+import { MAX_MCP_ANALYSIS_SOURCES, mcpEvidenceValid, mcpSelectionsCurrent } from './mcp-analysis.js';
 import type { AnalysisGateway } from '../analysis/gateway-model.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
@@ -57,8 +58,14 @@ export class KnowledgeService {
     try { return !!this.deps.database?.scope(ctx, conn.scope); } catch { return false; }
   }
   private valid(state: KnowledgeState, ctx: UserContext, evidence: Evidence): boolean {
+    if (evidence.retrievedAt) return mcpEvidenceValid(state, ctx, evidence);
     const item = state.source.items.find(i => i.id === evidence.sourceId);
     return !!item && this.allowed(state, ctx, item) && evidenceValid(state, ctx, evidence);
+  }
+  private draftAllowed(state: KnowledgeState, ctx: UserContext, draft: Recommendation) {
+    if (!draft.mcpScope) return true;
+    const run = state.analyses.find(candidate => candidate.id === draft.mcpRunId);
+    return !!run && mcpSelectionsCurrent(state, ctx, run);
   }
   private connectionAllowed(state: KnowledgeState, ctx: UserContext, connectionId: string): boolean {
     const conn = state.source.connections.find(c => c.id === connectionId), meta = state.connectionMeta[connectionId];
@@ -85,7 +92,7 @@ export class KnowledgeService {
     const analysisReadiness = this.deps.enqueue ? modelReadiness : { ready: false as const, code: 'analysis_unavailable' };
     const refining = !!this.deps.model?.profile && modelReadiness.ready;
     const items = s.source.items.filter(i => this.allowed(s, ctx, i, false));
-    const recs = s.recommendations.filter(r => !r.deleted).flatMap(r => {
+    const recs = s.recommendations.filter(r => !r.deleted && this.draftAllowed(s, ctx, r)).flatMap(r => {
       const valid = r.origin === 'manual' || r.evidence.length > 0 && r.evidence.every(e => this.valid(s, ctx, e));
       const identityAllowed = r.humanLocked && r.evidence.length > 0 && r.evidence.every(e => {
         const old = s.source.items.find(i => i.id === e.sourceId);
@@ -95,8 +102,9 @@ export class KnowledgeService {
       if (!valid && !identityAllowed) return [];
       return [{ ...r, stale: !valid, evidence: valid ? r.evidence : [], proposedChange: r.proposedChange?.evidence.every(e => this.valid(s, ctx, e)) ? r.proposedChange : undefined }];
     });
-    const objectKeys=new Set(recs.filter(r=>r.kind==='object').map(r=>r.key));
-    const visibleRecs=recs.filter(r=>r.kind!=='relation'||r.relation&&objectKeys.has(r.relation.from)&&objectKeys.has(r.relation.to));
+    const objectKey = (scope: string | undefined, key: string) => JSON.stringify([scope, key]);
+    const objectKeys = new Set(recs.filter(r => r.kind === 'object').map(r => objectKey(r.mcpScope, r.key)));
+    const visibleRecs = recs.filter(r => r.kind !== 'relation' || r.relation && objectKeys.has(objectKey(r.mcpScope, r.relation.from)) && objectKeys.has(objectKey(r.mcpScope, r.relation.to)));
     return {
       spaceName: s.spaceName,
       mcpConnections: this.deps.liveMcp?.list(s, ctx),
@@ -106,7 +114,12 @@ export class KnowledgeService {
       databaseResources: this.deps.database?.list(ctx) ?? [],
       connections: s.source.connections.filter(c => this.connectionAllowed(s, ctx, c.id)).map(c => ({ id: c.id, name: s.connectionMeta[c.id]!.name, pluginId: c.pluginId, status: c.status, scope: this.connectionScopeSummary(c.scope) })),
       items: items.map(i => ({ id: hash(i.id), title: i.title, version: i.version, status: i.status, confirmed: this.allowed(s, ctx, i), locator: i.locator, pluginId: s.source.connections.find(c => c.id === i.connectionId)!.pluginId, profile: this.profileView(s, ctx, i, refining) })),
-      analyses: s.analyses.filter(r => r.actor.userId === ctx.userId).map(({ actor: _, ...run }) => run), recommendations: visibleRecs,
+      analyses: s.analyses.filter(r => r.actor.userId === ctx.userId).map(run => ({
+        id: run.id, status: run.status, stage: run.stage, signature: run.signature, createdAt: run.createdAt, error: run.error,
+        mcpSources: run.mcpSources?.map(source => source.name),
+      })),
+      recommendations: visibleRecs.filter(r => !r.mcpScope),
+      mcpRecommendations: visibleRecs.filter(r => r.mcpScope).map(({ mcpScope: _, mcpRunId: _run, ...draft }) => draft),
       canConfirm: ctx.roles.some(role => role === 'owner' || role === 'admin'),
       parseJobs: s.parseJobs.filter(j => j.actor.userId === ctx.userId && s.connectionMeta[j.connectionId]?.audience.includes(ctx.userId) && s.connectionMeta[j.connectionId]!.projectIds.every(p => ctx.projectScopes.includes(p))).map(j => ({ id: j.id, name: j.name, status: j.status, error: j.error })),
     };
@@ -431,15 +444,26 @@ export class KnowledgeService {
     }
     return { answer: valid.length ? valid.map(e => `${e.quote}\n[${e.locator}]`).join('\n\n') : '无依据', hits: valid };
   }
-  async startAnalysis(ctx: UserContext) {
+  async startAnalysis(ctx: UserContext, input: Record<string, unknown> = {}) {
     requireManager(ctx);
     const { enqueue } = this.deps;
     if (!enqueue) throw new KnowledgeError('analysis_unavailable', '分析工作队列暂时不可用。', 503);
+    const ids = input.mcpSourceIds ?? [];
+    if (!Array.isArray(ids) || ids.length > MAX_MCP_ANALYSIS_SOURCES || ids.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id))) {
+      throw new KnowledgeError('mcp_analysis_sources_invalid', '每次可选择最多 5 个 MCP 来源。');
+    }
+    const focus = input.focus === undefined ? undefined : bounded(input.focus, 1000, '分析重点').trim();
+    if (ids.length && !this.deps.liveMcp) throw new KnowledgeError('mcp_unavailable', 'MCP 知识连接暂时不可用。', 503);
     await this.requireModelReady(ctx);
     const run = await this.deps.repo.transact(ctx, s => {
-      if (!s.source.items.some(i => this.allowed(s, ctx, i))) throw new KnowledgeError('no_evidence', '无依据：先确认有权限的企业资料。', 409);
+      const mcpSources = [...new Set<string>(ids)].map(id => {
+        const source = liveMcpSelection(s, ctx, id);
+        if (!source) throw new KnowledgeError('mcp_analysis_scope_changed', 'MCP 来源已变化，请重新选择。', 409);
+        return source;
+      });
+      if (!mcpSources.length && !s.source.items.some(i => this.allowed(s, ctx, i))) throw new KnowledgeError('no_evidence', '请添加资料或连接 MCP 来源。', 409);
       if (s.analyses.some(r => r.actor.userId === ctx.userId && ['queued', 'running'].includes(r.status))) throw new KnowledgeError('analysis_active', '已有分析任务正在运行。', 409);
-      const run = { id: id(), actor: ctx, status: 'queued' as const, stage: 'parse' as const, signature: signature(s, ctx), createdAt: stamp(), error: null };
+      const run = { id: id(), actor: ctx, status: 'queued' as const, stage: 'parse' as const, signature: signature(s, ctx), createdAt: stamp(), error: null, ...(mcpSources.length && { mcpSources }), focus };
       s.analyses.push(run); return run;
     });
     await enqueue(ctx, run.id); return { id: run.id, status: 'queued', stage: run.stage };
@@ -447,7 +471,7 @@ export class KnowledgeService {
   async editRecommendation(ctx: UserContext, recId: string, input: Record<string, unknown>, remove = false) {
     requireManager(ctx);
     return this.deps.repo.transact(ctx, s => {
-      const r = s.recommendations.find(r => r.id === recId && !r.deleted && (remove || (r.origin === 'manual' || r.evidence.length > 0 && r.evidence.every(e => this.valid(s, ctx, e)))));
+      const r = s.recommendations.find(r => r.id === recId && !r.deleted && this.draftAllowed(s, ctx, r) && (remove || (r.origin === 'manual' || r.evidence.length > 0 && r.evidence.every(e => this.valid(s, ctx, e)))));
       if (!r) throw new KnowledgeError('not_found', '当前有效建议不存在。', 404);
       if (remove) r.deleted = true; else { r.name = bounded(input.name, 160, '名称'); r.description = bounded(input.description, 4000, '说明'); r.humanLocked = true; }
       return { id: r.id, deleted: r.deleted, humanLocked: r.humanLocked };
@@ -455,7 +479,7 @@ export class KnowledgeService {
   }
   async adoptRecommendation(ctx: UserContext, recId: string) {
     requireManager(ctx); return this.deps.repo.transact(ctx, s => {
-      const r = s.recommendations.find(r => r.id === recId && !r.deleted), proposal = r?.proposedChange;
+      const r = s.recommendations.find(r => r.id === recId && !r.deleted && this.draftAllowed(s, ctx, r)), proposal = r?.proposedChange;
       if (!r || !proposal?.evidence.length || !proposal.evidence.every(e => this.valid(s, ctx, e))) throw new KnowledgeError('proposal_unavailable', '修改草案的依据已变化，请重新分析并核对。', 409);
       Object.assign(r, proposal, { humanLocked: true }); delete r.proposedChange; return { id: r.id, humanLocked: true };
     });

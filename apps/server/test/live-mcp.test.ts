@@ -6,6 +6,9 @@ import { LiveMcpKnowledge } from '../src/modules/knowledge/live-mcp.js';
 import { MCP_CALLBACK } from '../src/modules/knowledge/mcp-oauth.js';
 import { hash } from '../src/modules/knowledge/domain.js';
 import { InMemorySecretStore } from '../src/modules/setup/secrets.js';
+import { tickKnowledge } from '../src/modules/knowledge/worker.js';
+import { GatewayAnalysisModel, type AnalysisGateway } from '../src/modules/analysis/gateway-model.js';
+import type { Evidence } from '../src/modules/knowledge/domain.js';
 
 const endpoint = 'https://data.example.com/api/mcp';
 const issuer = 'https://authorization.example.com/tenant';
@@ -41,6 +44,104 @@ it('keeps more than one public source and requires opt-in before executing a too
   expect((await live.catalog(ctx, hash(second))).tools.map(tool => tool.name)).toEqual(['lookup']);
   const colleague = { ...ctx, userId: 'bob' };
   expect(live.list(await repo.read(colleague), colleague)).toEqual([]);
+});
+
+it('discovers fresh documents, templates and tools on different MCP servers during analysis', async () => {
+  const handbook = 'https://policies.example.net/mcp';
+  const reference = 'https://reference.example.org/mcp';
+  const resourceUri = 'policy://travel/current';
+  const templateUri = 'reference://guide/returns';
+  const used: [string, string, string][] = [];
+  const network: typeof fetch = async (input, init) => {
+    const url = String(input);
+    if (init?.method !== 'POST') return new Response(null, { status: 405 });
+    const { id, method, params } = JSON.parse(String(init.body));
+    if (method === 'notifications/initialized') return new Response(null, { status: 202 });
+    let result: unknown;
+    switch (method) {
+      case 'initialize': result = {
+        protocolVersion: params.protocolVersion,
+        serverInfo: { name: new URL(url).hostname, version: '1' },
+        capabilities: url === handbook ? { resources: {} } : { resources: {}, tools: {} },
+      }; break;
+      case 'resources/list': result = { resources: url === handbook ? [{ uri: resourceUri, name: 'Travel policy' }] : [] }; break;
+      case 'resources/templates/list': result = { resourceTemplates: url === reference ? [{ uriTemplate: 'reference://guide/{topic}', name: 'Guides by topic' }] : [] }; break;
+      case 'tools/list': result = { tools: [
+        { name: 'fetch_return_policy', inputSchema: schemas, annotations: { readOnlyHint: true } },
+        { name: 'change_policy', inputSchema: schemas, annotations: { readOnlyHint: false } },
+      ] }; break;
+      case 'resources/read':
+        used.push([url, method, params.uri]);
+        result = { contents: [{ uri: params.uri, text: url === handbook ? 'Manager approval is required before booking.' : 'Log the return before issuing a refund.' }] };
+        break;
+      case 'tools/call':
+        used.push([url, method, params.name]);
+        result = { content: [{ type: 'text', text: 'Refunds must use the original payment method.' }] };
+        break;
+      default: throw new Error(method);
+    }
+    return Response.json({ jsonrpc: '2.0', id, result });
+  };
+  const repo = new MemoryKnowledgeRepository();
+  const liveMcp = new LiveMcpKnowledge(repo, new InMemorySecretStore(), network);
+  const chat = vi.fn<AnalysisGateway['chat']>(async (_tenant, _tier, req) => {
+    const input = JSON.parse(req.messages[1]!.content);
+    const result = input.catalog
+      ? [{ source: 0, uri: templateUri }, { source: 0, name: 'fetch_return_policy', arguments: {} }]
+      : [{ kind: 'sop', key: 'approvals', name: 'Approvals guide', description: 'Review approvals and refunds.', evidence: [1, 2, 3] }];
+    if (input.catalog) {
+      expect(input.catalog[0].tools.map((tool: {name: string}) => tool.name)).toEqual(['fetch_return_policy']);
+      expect(input.catalog[0].resourceTemplates).toMatchObject([{ uriTemplate: 'reference://guide/{topic}' }]);
+    }
+    return { text: JSON.stringify(result), toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'end' };
+  });
+  const gateway: AnalysisGateway = { check: async () => ({ ok: true, model: 'test' }), chat };
+  const knowledgeDeps = { repo, liveMcp, mcpAnswerGateway: gateway, model: new GatewayAnalysisModel(gateway), enqueue: async () => {} };
+  const app = await buildApp({ auth: { mode: 'dev', platformTenantId: 'test' }, knowledgeDeps });
+  const actor = { tenantId: 'test', userId: 'alice', roles: ['owner'] as ['owner'], projectScopes: [] };
+  const send = (path: string, payload?: object, user = 'alice|owner|') => app.inject({
+    method: payload ? 'POST' : 'GET', url: root + path, headers: { 'x-dev-user': user }, payload,
+  });
+  try {
+    await liveMcp.connect(actor, { endpoint: handbook });
+    await liveMcp.connect(actor, { endpoint: reference, allowTools: true });
+    expect((await send('/overview')).json().items).toEqual([]);
+    const selections = { mcpSourceIds: [hash(handbook), hash(reference)] };
+    expect((await send('/analyses', selections, 'bob|owner|')).statusCode).toBe(409);
+    const queued = await send('/analyses', selections);
+    expect(queued.statusCode, queued.body).toBe(202);
+    expect(used).toHaveLength(0);
+    expect(await tickKnowledge(knowledgeDeps, 'test')).toBe(true);
+    expect(used).toHaveLength(3);
+    expect(used).toEqual(expect.arrayContaining([
+      [handbook, 'resources/read', resourceUri],
+      [reference, 'resources/read', templateUri],
+      [reference, 'tools/call', 'fetch_return_policy'],
+    ]));
+    const result = (await send('/overview')).json();
+    expect(result.analyses).toMatchObject([{ status: 'completed', mcpSources: ['policies.example.net', 'reference.example.org'] }]);
+    expect(result.analyses[0]).not.toHaveProperty('mcpEvidence');
+    expect(result.recommendations).toEqual([]);
+    const draft = result.mcpRecommendations[0];
+    expect(draft.evidence.map(({ quote }: Evidence) => quote)).toEqual([
+      'Manager approval is required before booking.',
+      'Log the return before issuing a refund.',
+      'Refunds must use the original payment method.',
+    ]);
+    expect(draft.evidence[0]).toMatchObject({ locator: `policies.example.net / ${resourceUri}`, retrievedAt: expect.any(String) });
+    expect((await send('/overview', undefined, 'bob|owner|')).json().mcpRecommendations).toEqual([]);
+    expect((await send(`/recommendations/${draft.id}/delete`, {}, 'bob|owner|')).statusCode).toBe(404);
+    expect((await send('/search?q=refund')).json().hits).toEqual([]);
+
+    expect((await send('/analyses', selections)).statusCode).toBe(202);
+    await liveMcp.disconnect(actor, hash(reference));
+    await liveMcp.connect(actor, { endpoint: reference, allowTools: true });
+    expect(await tickKnowledge(knowledgeDeps, 'test')).toBe(true);
+    const afterReconnect = (await send('/overview')).json();
+    expect(afterReconnect.analyses.at(-1)).toMatchObject({ status: 'stale', error: 'mcp_analysis_scope_changed' });
+    expect(afterReconnect.mcpRecommendations).toEqual([]);
+    expect(used).toHaveLength(3);
+  } finally { await app.close(); }
 });
 
 it('preserves an existing CRM OAuth grant without advertising a default provider', async () => {
@@ -128,11 +229,13 @@ it('discovers OAuth on a different host and lets the Brain read knowledge under 
   });
   const repo = new MemoryKnowledgeRepository();
   const liveMcp = new LiveMcpKnowledge(repo, new InMemorySecretStore(), network);
-  const chat = vi.fn().mockResolvedValueOnce({ text: '[{"name":"get_crm_guide","arguments":{}}]', toolCalls: [] })
-    .mockResolvedValueOnce({ text: 'Verify receipt first. [1]', toolCalls: [] });
+  const chat = vi.fn<AnalysisGateway['chat']>().mockResolvedValueOnce({ text: '[{"name":"get_crm_guide","arguments":{}}]', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'end' })
+    .mockResolvedValueOnce({ text: 'Verify receipt first. [1]', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'end' });
+  const gateway: AnalysisGateway = { check: async () => ({ ok: true, model: 'test' }), chat };
+  const knowledgeDeps = { repo, liveMcp, mcpAnswerGateway: gateway, model: new GatewayAnalysisModel(gateway), enqueue: async () => {} };
   const app = await buildApp({
     auth: { mode: 'dev', platformTenantId: 'test' },
-    knowledgeDeps: { repo, liveMcp, mcpAnswerGateway: { check: async () => ({ ok: true, model: 'test' }), chat } },
+    knowledgeDeps,
   });
   const send = (path: string, payload?: object, user = 'alice|employee|') => app.inject({
     method: payload ? 'POST' : 'GET', url: path, headers: { 'x-dev-user': user, host, ...(path.endsWith('/connections/mcp') ? { origin } : {}) }, payload,
@@ -177,6 +280,25 @@ it('discovers OAuth on a different host and lets the Brain read knowledge under 
 
     const state = JSON.stringify(await repo.read({ tenantId: 'test', userId: 'alice', roles: ['employee'], projectScopes: [] }));
     for (const value of ['rotated-access', 'rotated-refresh', 'first-refresh', 'Verify receipt']) expect(state).not.toContain(value);
+
+    chat.mockImplementation(async (_tenant, _tier, req) => {
+      const input = JSON.parse(req.messages[1]!.content);
+      expect(input.focus).toBe('Deposit procedure');
+      const result = input.catalog
+        ? [{ source: 0, name: 'get_crm_guide', arguments: {} }]
+        : [{ kind: 'sop', key: 'deposit', name: 'Record a deposit', description: 'Verify the receipt first.', evidence: [1] }];
+      return { text: JSON.stringify(result), toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'end' };
+    });
+    const analysis = await send(root + '/analyses', { mcpSourceIds: [hash(endpoint)], focus: 'Deposit procedure' }, 'alice|owner|');
+    expect(analysis.statusCode, analysis.body).toBe(202);
+    expect(await tickKnowledge(knowledgeDeps, 'test')).toBe(true);
+    const overview = (await send(root + '/overview', undefined, 'alice|owner|')).json();
+    expect(overview.analyses[0]).toMatchObject({ status: 'completed' });
+    expect(overview.mcpRecommendations[0].evidence[0]).toMatchObject({
+      locator: 'VERA CRM / get_crm_guide', quote: expect.stringContaining('Verify receipt before recording a deposit.'),
+    });
+    expect(usedTools).toEqual(['get_crm_guide', 'get_crm_guide']);
+
     await app.inject({ method: 'DELETE', url: connection, headers: { 'x-dev-user': 'alice|employee|' } });
     expect((await send(connection + '/catalog')).statusCode).toBe(404);
   } finally { await app.close(); }
