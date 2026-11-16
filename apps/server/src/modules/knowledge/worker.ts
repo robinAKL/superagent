@@ -4,7 +4,8 @@ import type { KnowledgeDeps } from './service.js';
 import { runParseJob } from './binary.js';
 import { runAnalysis } from '../analysis/service.js';
 import { managedSource, sourceScope } from './sources.js';
-import { mayRead } from './domain.js';
+import { mayRead, positionedChunks } from './domain.js';
+import { CATEGORIES, validateProfile } from './profile.js';
 /** The persisted parseJobs/analyses ledger is the authoritative queue; no process-local launch is required. */
 export async function tickKnowledge(deps: KnowledgeDeps, tenantId: string): Promise<boolean> {
   const internal: UserContext = { tenantId, userId: 'knowledge-worker', roles: [], projectScopes: [] };
@@ -23,7 +24,28 @@ export async function tickKnowledge(deps: KnowledgeDeps, tenantId: string): Prom
     if (denied) { await deps.repo.transact(run.actor, s => { const r = s.analyses.find(r => r.id === run.id)!; r.status = 'stale'; r.error = 'source_scope_changed'; }); return true; }
     await runAnalysis(deps.repo, deps.model, run.actor, run.id); return true;
   }
+  if (deps.model?.profile && await refineOneProfile(deps, tenantId)) return true;
   return false;
+}
+/** One model label pass per tick. Failures keep the rule profile; a changed version discards the result. */
+export async function refineOneProfile(deps: KnowledgeDeps, tenantId: string): Promise<boolean> {
+  const internal: UserContext = { tenantId, userId: 'knowledge-worker', roles: [], projectScopes: [] };
+  const claim = await deps.repo.transact(internal, s => {
+    const item = s.source.items.find(i => i.current && i.status === 'parsed' && s.profiles?.[i.id]?.version === i.version && s.profiles[i.id]!.refine === 'pending');
+    if (!item) return null;
+    const profile = s.profiles[item.id]!; profile.refine = 'failed'; // claimed; a crash mid-call never retries a billed request
+    const excerpt = positionedChunks(s, item).map(c => c.text).join('\n').slice(0, 6000);
+    return { itemId: item.id, version: item.version, name: item.externalId.split('/').pop() ?? item.title, excerpt };
+  });
+  if (!claim) return false;
+  let labels: ReturnType<typeof validateProfile> = null;
+  try { labels = validateProfile(await deps.model!.profile!({ tenantId, taskId: `profile:${claim.itemId}`, name: claim.name, excerpt: claim.excerpt, categories: CATEGORIES, maxOutputTokens: 400 })); }
+  catch { labels = null; }
+  if (labels) await deps.repo.transact(internal, s => {
+    const profile = s.profiles?.[claim.itemId];
+    if (profile && profile.version === claim.version && profile.origin === 'rules') Object.assign(profile, labels, { origin: 'model', refine: 'done' });
+  });
+  return true;
 }
 export async function runKnowledgeWorker(deps: KnowledgeDeps, tenantId: string, signal: AbortSignal) {
   while (!signal.aborted) {

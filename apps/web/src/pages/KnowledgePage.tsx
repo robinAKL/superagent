@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useLang, useT, type Dict } from '../i18n';
 import './KnowledgePage.css';
 import { DatabaseSourcePanel } from './DatabaseSourcePanel';
+import { MaterialReview, type Material } from './MaterialReview';
 
 interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string }
 interface Plugin { id: string; name: string; installed: boolean; builtIn: boolean; enabled: boolean; configured: boolean; capabilities: string[] }
@@ -10,7 +11,7 @@ interface SourceScope { resourceId?: string; mailbox?: string; folder?: string; 
 interface SourceResource { id: string; name: string; pluginId: string; scope: SourceScope; projectIds: string[] }
 interface Connection { id: string; name: string; pluginId: string; status: string; scope?: SourceScope }
 interface ConnectionPreview { connectionId: string; name: string; pluginId: string; status: string; scope: SourceScope; items: { id: string; title: string; version: string; locator: string; selected: boolean }[]; blocked: number }
-interface Item { id: string; title: string; version: string; status: string; confirmed: boolean; locator: string; pluginId: string }
+type Item = Material;
 interface Recommendation {
   id: string; kind: string; name: string; description: string; humanLocked: boolean; deleted: boolean; stale?: boolean;
   proposedChange?: { name: string; description: string; evidence?: Evidence[] }; evidence: Evidence[];
@@ -638,11 +639,12 @@ export function KnowledgePage() {
   const analysisActive = overview?.analyses.some(run => run.status === 'queued' || run.status === 'running') ?? false;
   const parseJobs = overview?.parseJobs.filter(job => job.status !== 'completed' && job.error !== 'superseded') ?? [];
   const parseActive = parseJobs.some(job => job.status === 'queued' || job.status === 'running');
+  const profilesRefining = overview?.items.some(item => item.profile?.refining) ?? false;
   useEffect(() => {
-    if (!analysisActive && !parseActive) return;
+    if (!analysisActive && !parseActive && !profilesRefining) return;
     const interval = window.setInterval(() => void load(), 5000);
     return () => window.clearInterval(interval);
-  }, [analysisActive, parseActive, load]);
+  }, [analysisActive, parseActive, profilesRefining, load]);
 
   const plugins = overview?.plugins.filter(plugin => plugin.installed && plugin.enabled && plugin.configured && ['email', 'sharepoint', 'mcp'].includes(plugin.id)) ?? [];
   const selectedPlugin = plugins.find(plugin => plugin.id === pluginId)?.id ?? plugins[0]?.id ?? '';
@@ -835,10 +837,16 @@ export function KnowledgePage() {
           <span className={`knowledge-badge ${job.status === 'outcome_unknown' || job.status === 'failed' ? 'is-warning' : ''}`}>{label(job.status)}</span>
         </li>)}</ul></div> : null}
 
-        {overview.items.length ? <ul id="knowledge-items-list" className="knowledge-source-list knowledge-items">{overview.items.map(item => <li key={item.id}>
-          <div><strong>{item.title}</strong><small>{t('versionMeta', { version: item.version, locator: item.locator })}</small><small>{pluginName(item.pluginId, overview.plugins)}{item.confirmed ? '' : ` · ${t('itemStatusPending')}`}</small><ItemPreview key={`${item.id}:${item.version}`} item={item} request={request} errorMessage={errorMessage} t={t} /></div>
-          {item.confirmed ? <span className="knowledge-badge is-green">{t('readyFile')}</span> : ['deleted', 'revoked', 'parse_failed'].includes(item.status) ? <span className="knowledge-badge">{t('badgeUnavailable')}</span> : overview.canConfirm ? <button className="btn" disabled={!!busy} title={t('confirmItemTitle', { version: item.version })} onClick={() => void action(`item:${item.id}`, `/items/${encodeURIComponent(item.id)}/confirm`, { version: item.version }, t('confirmItemSuccess'))}>{t('confirmItemBtn')}</button> : null}
-        </li>)}</ul> : !parseJobs.length && !fileSubmissions.length ? <p className="knowledge-empty">{t('noMaterials')}</p> : null}
+        {overview.items.length ? <MaterialReview
+          items={overview.items}
+          canManage={overview.canConfirm}
+          request={request}
+          errorMessage={errorMessage}
+          disabled={!!busy}
+          sourceName={pluginId => pluginName(pluginId, overview.plugins)}
+          onChanged={async (message, failure) => { setNotice(message ?? ''); setError(failure ?? ''); searchSequence.current++; setSearchResult(null); setSearchError(''); setSearching(false); await load(); }}
+          renderPreview={item => <ItemPreview key={`${item.id}:${item.version}`} item={item} request={request} errorMessage={errorMessage} t={t} />}
+        /> : !parseJobs.length && !fileSubmissions.length ? <p className="knowledge-empty">{t('noMaterials')}</p> : null}
       </section>
 
       <section id="knowledge-sources" className="panel knowledge-section" hidden={!sourcesOpen} aria-labelledby="knowledge-sources-heading">

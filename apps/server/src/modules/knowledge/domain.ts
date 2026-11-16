@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { UserContext } from '@superagent/shared';
 import { KnowledgeStore, type Connection, type Item, type Chunk } from './store.js';
 import type { StoredQueryTemplate } from './database.js';
+import { ruleProfile, shingles, similarity, SIMILAR_THRESHOLD, type ItemProfile } from './profile.js';
 export class KnowledgeError extends Error { constructor(public code: string, message: string, public statusCode = 400) { super(message); } }
 export interface Snapshot { connections: Connection[]; items: Item[]; chunks: Chunk[]; citations: [string, string[]][]; flagged: [string, string][] }
 export interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string }
@@ -25,8 +26,9 @@ export interface KnowledgeState {
   spaceName: string; installedPlugins: string[];
   revision: number; source: Snapshot; connectionMeta: Record<string, ConnectionMeta>; confirmations: Record<string, Confirmation>;
   analyses: AnalysisRun[]; recommendations: Recommendation[]; uploads: Upload[]; disabledPlugins: string[]; parseJobs: ParseJob[]; queryTemplates: StoredQueryTemplate[];
+  profiles: Record<string, ItemProfile>;
 }
-export const emptyState = (): KnowledgeState => ({ spaceName: '企业知识', installedPlugins: ['local-file'], revision: 0, source: { connections: [], items: [], chunks: [], citations: [], flagged: [] }, connectionMeta: {}, confirmations: {}, analyses: [], recommendations: [], uploads: [], disabledPlugins: [], parseJobs: [], queryTemplates: [] });
+export const emptyState = (): KnowledgeState => ({ spaceName: '企业知识', installedPlugins: ['local-file'], revision: 0, source: { connections: [], items: [], chunks: [], citations: [], flagged: [] }, connectionMeta: {}, confirmations: {}, analyses: [], recommendations: [], uploads: [], disabledPlugins: [], parseJobs: [], queryTemplates: [], profiles: {} });
 export const stamp = () => new Date().toISOString();
 export const id = () => randomUUID();
 export const hash = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -53,8 +55,27 @@ export function mayRead(state: KnowledgeState, ctx: UserContext, item: Item, con
   return !confirmed || state.confirmations[item.id]?.signature === itemSignature(state, item);
 }
 export function signature(state: KnowledgeState, ctx: UserContext): string { return hash(JSON.stringify(state.source.items.filter(i => mayRead(state, ctx, i)).map(i => [i.id, itemSignature(state, i)]).sort())); }
+/** Gives every current parsed version a rule profile and a likely duplicate/earlier-revision pointer. */
+export function refreshProfiles(state: KnowledgeState): void {
+  const profiles = state.profiles ??= {};
+  const current = state.source.items.filter(i => i.current && i.status === 'parsed');
+  const live = new Set(current.map(i => i.id));
+  for (const key of Object.keys(profiles)) if (!live.has(key)) delete profiles[key];
+  for (const item of current) {
+    if (profiles[item.id]?.version === item.version) continue;
+    const text = positionedChunks(state, item).map(c => c.text).join('\n'), sketch = shingles(text);
+    const others = current.filter(o => o.id !== item.id && profiles[o.id]?.version === o.version);
+    const previous = state.source.items.find(o => o.connectionId === item.connectionId && o.externalId === item.externalId && o.id !== item.id && !o.current && o.status !== 'deleted');
+    const duplicate = others.find(o => o.contentHash === item.contentHash);
+    let similar: { id: string; score: number } | null = null;
+    for (const o of others) { const score = similarity(sketch, profiles[o.id]!.shingles); if (score >= SIMILAR_THRESHOLD && (!similar || score > similar.score)) similar = { id: o.id, score }; }
+    const related = duplicate ? { sourceId: duplicate.id, kind: 'duplicate' as const } : previous ? { sourceId: previous.id, kind: 'update' as const } : similar ? { sourceId: similar.id, kind: 'similar' as const } : null;
+    profiles[item.id] = { version: item.version, ...ruleProfile(item.externalId.split('/').pop() ?? item.title, text), origin: 'rules', refine: 'pending', related, shingles: sketch };
+  }
+}
 export function invalidateAnalyses(state: KnowledgeState): void {
   state.revision++;
+  refreshProfiles(state);
   for (const [key, c] of Object.entries(state.confirmations)) { const item = state.source.items.find(i => i.id === key); if (!item || !item.current || item.status !== 'parsed' || c.signature !== itemSignature(state, item)) delete state.confirmations[key]; }
   for (const run of state.analyses) if (run.signature !== signature(state, run.actor) && ['queued', 'running', 'completed'].includes(run.status)) run.status = 'stale';
 }

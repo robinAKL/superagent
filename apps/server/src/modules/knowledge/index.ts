@@ -25,6 +25,8 @@ export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = asy
   app.post('/uploads', async (req,reply) => {const result=await service!.upload(req.user!,body(req));return result.error?reply.code(502).send({...result,message:result.error,error:'source_sync_failed'}):result;});
   app.post('/files', { bodyLimit: 28 * 1024 * 1024 }, req => service!.uploadBinary(req.user!, body(req)));
   app.post('/local-materials', { bodyLimit: 28 * 1024 * 1024 }, req => service!.uploadLocal(req.user!, body(req)));
+  app.post('/items/confirm', req => service!.confirmMany(req.user!, body(req)));
+  app.post<{ Params: { id: string } }>('/items/:id/profile', req => service!.editProfile(req.user!, req.params.id, body(req)));
   app.post<{ Params: { id: string } }>('/items/:id/confirm', req => service!.confirm(req.user!, req.params.id, String(body(req).version ?? '')));
   app.get<{ Params: { id: string }; Querystring: { version?: string } }>('/items/:id/preview', req => service!.preview(req.user!, req.params.id, req.query.version ?? ''));
   app.get<{ Querystring: { q?: string } }>('/search', req => service!.search(req.user!, req.query.q ?? ''));
