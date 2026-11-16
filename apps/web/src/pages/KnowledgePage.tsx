@@ -6,8 +6,8 @@ import { DatabaseSourcePanel } from './DatabaseSourcePanel';
 import { MaterialReview, type Material } from './MaterialReview';
 
 interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string }
-interface Plugin { id: string; name: string; installed: boolean; builtIn: boolean; enabled: boolean; configured: boolean; capabilities: string[] }
-interface SourceScope { resourceId?: string; mailbox?: string; folder?: string; receivedSince?: string; driveId?: string; folderPath?: string; projectIds?: string[]; mcpResourceCount?: number }
+interface Plugin { id: string; name: string; enabled: boolean; configured: boolean; capabilities: string[] }
+interface SourceScope { resourceId?: string; mailbox?: string; folder?: string; receivedSince?: string; driveId?: string; folderPath?: string; projectIds?: string[]; mcpResourceCount?: number; publicMcpEndpoint?: string }
 interface SourceResource { id: string; name: string; pluginId: string; scope: SourceScope; projectIds: string[] }
 interface Connection { id: string; name: string; pluginId: string; status: string; scope?: SourceScope }
 interface ConnectionPreview { connectionId: string; name: string; pluginId: string; status: string; scope: SourceScope; items: { id: string; title: string; version: string; locator: string; selected: boolean }[]; blocked: number }
@@ -41,6 +41,17 @@ const ENGLISH_PLUGINS: Record<string, { name: string; capabilities: string[] }> 
 const TEXT = {
   en: {
     manageSources: 'Manage sources',
+    badgeAutomatic: 'Automatic',
+    badgeConnected: 'Connected',
+    badgeNeedsSetup: 'Needs setup',
+    mcpEndpointLabel: 'MCP URL',
+    mcpEndpointHint: 'Enter a public HTTPS Streamable HTTP endpoint with resources to import.',
+    mcpApprovedTitle: 'Use an approved MCP configuration',
+    mcpInvalidUrl: 'Enter a public HTTPS MCP URL.',
+    mcpAuthRequired: 'This MCP server requires authorization. Use an approved configuration with credentials.',
+    mcpNoResources: 'The server has no resources available to import.',
+    mcpConnectionFailed: 'Could not verify this MCP URL. Check that the server is reachable over HTTPS.',
+    connectionTestFailed: 'The source did not pass its connection test.',
     automaticLocal: 'Created automatically when you upload a file.',
     addMaterials: 'Add materials',
     chooseFiles: 'Choose files',
@@ -133,7 +144,7 @@ const TEXT = {
     recAdoptBtn: 'Verify & adopt this change',
     recManualNoEvidence: 'Entered manually; no document-inferred evidence.',
     recViewEvidence: 'View evidence · {count} item(s)',
-    connCreatedNotice: 'Connection draft created. Verify the scope and confirm it.',
+    connCreatedNotice: 'Connection verified. You can now choose materials to import.',
     spaceSavedNotice: 'Knowledge space name saved (metadata only).',
     manualRoleSavedNotice: 'Manual role added; this does not automatically enable material analysis.',
     uploadSuccessNotice: 'Material submitted. Confirm the current version after parsing finishes.',
@@ -147,40 +158,32 @@ const TEXT = {
     loadingState: 'Loading sources and knowledge status…',
     step3Cta: 'Start analysis',
     sec1Title: 'Knowledge sources',
-    sec1Sub: 'Connection confirmation and material version confirmation are managed separately.',
+    sec1Sub: 'Configure a source to bring its materials into the knowledge base.',
     pluginsAria: 'Source plugin catalog',
-    badgeNotInstalled: 'Not installed',
     badgePaused: 'Paused',
-    badgeEnabledConfigured: 'Enabled · Configured',
-    badgeInstalledPending: 'Installed · Needs setup',
     capsFallback: 'Capabilities defined by server',
-    installPluginBtn: 'Install {name} plugin',
-    pluginInstalledNotice: 'Plugin installed. Configure the source scope and create a connection separately.',
-    pausePluginBtn: 'Pause {name} plugin',
-    enablePluginBtn: 'Enable {name} plugin',
+    pausePluginBtn: 'Pause {name}',
+    enablePluginBtn: 'Enable {name}',
     pluginPausedNotice: 'Plugin paused; source data remains unchanged.',
     pluginEnabledNotice: 'Plugin enabled; review source connections.',
     configureCardBtn: 'Configure connection',
     hideConfigBtn: 'Hide form',
-    pluginHint: 'Installing only registers plugin capabilities; it does not create connections, import materials, or generate employee tools. Admins configure credentials via managed identity or secure references—never enter raw secrets, passwords, or DSNs.',
     confirmConnBtn: 'Confirm connection',
     retestConfirmBtn: 'Retest & confirm connection',
     connConfirmedNotice: 'Connection confirmed. Materials still need version-by-version confirmation.',
     retestConnBtn: 'Retest connection',
     connRetestedNotice: 'Connection retested and confirmed. Materials still need version-by-version confirmation.',
-    noConnections: 'No source connections yet. Select a source card above to create one.',
+    noConnections: 'No external sources connected yet.',
     connFormTitle: 'Configure {name} connection',
     connNameLabel: 'Connection name',
     connNamePlaceholder: 'e.g. Team operations handbook',
-    sourcePluginLabel: 'Source plugin',
-    noReadyPlugin: 'No installed, enabled, and configured plugin',
     approvedResourceLabel: 'Approved source resource',
     noApprovedResource: 'No approved source resources yet',
     needAdminScope: 'Ask an admin to approve a source scope before creating a connection.',
     readOnlyAckLabel: 'I have verified the source scope and confirm read-only access only',
     connFormHint: 'Default reader is the current user. Connections are read-only; confirmation cannot override source permissions or project scopes.',
-    creatingConn: 'Creating…',
-    createConnBtn: 'Create connection draft',
+    creatingConn: 'Verifying…',
+    createConnBtn: 'Verify and connect',
     sec2Title: 'Materials',
     itemNameLabel: 'Material name',
     itemNamePlaceholder: 'operations-handbook.md',
@@ -230,6 +233,17 @@ const TEXT = {
   },
   zh: {
     manageSources: '管理来源',
+    badgeAutomatic: '自动接入',
+    badgeConnected: '已连接',
+    badgeNeedsSetup: '待配置',
+    mcpEndpointLabel: 'MCP 地址',
+    mcpEndpointHint: '填写提供可导入资源的公开 HTTPS Streamable HTTP 地址。',
+    mcpApprovedTitle: '使用已授权的 MCP 配置',
+    mcpInvalidUrl: '请输入公开可访问的 HTTPS MCP 地址。',
+    mcpAuthRequired: '此 MCP 服务器需要授权，请选择已配置凭据的来源。',
+    mcpNoResources: '此服务器没有可导入的资源。',
+    mcpConnectionFailed: '无法验证 MCP 地址，请检查地址和服务器是否可访问。',
+    connectionTestFailed: '来源连接测试未通过。',
     automaticLocal: '首次上传时自动创建。',
     addMaterials: '添加资料',
     chooseFiles: '选择文件',
@@ -322,7 +336,7 @@ const TEXT = {
     recAdoptBtn: '核对后采纳这次修改',
     recManualNoEvidence: '此角色由人工录入，没有文档推断依据。',
     recViewEvidence: '查看依据 · {count} 处',
-    connCreatedNotice: '连接草案已创建，请核对范围后确认。',
+    connCreatedNotice: '连接已验证，可以选择资料导入。',
     spaceSavedNotice: '知识空间名称已保存，仅更新名称元数据。',
     manualRoleSavedNotice: '人工角色已补充，不会据此自动启用资料分析。',
     uploadSuccessNotice: '资料已提交。解析完成后仍需确认当前版本。',
@@ -336,40 +350,32 @@ const TEXT = {
     loadingState: '正在读取来源与知识状态…',
     step3Cta: '开始分析',
     sec1Title: '知识来源',
-    sec1Sub: '连接确认与资料版本确认分别管理。',
+    sec1Sub: '配置来源后，可选择要导入知识库的资料。',
     pluginsAria: '来源插件目录',
-    badgeNotInstalled: '未安装',
     badgePaused: '已暂停',
-    badgeEnabledConfigured: '已启用 · 已配置',
-    badgeInstalledPending: '已安装 · 待配置',
     capsFallback: '能力以服务端为准',
-    installPluginBtn: '安装{name}插件',
-    pluginInstalledNotice: '插件已安装。请另行配置来源范围并创建连接。',
-    pausePluginBtn: '暂停{name}插件',
-    enablePluginBtn: '启用{name}插件',
+    pausePluginBtn: '暂停{name}',
+    enablePluginBtn: '启用{name}',
     pluginPausedNotice: '插件已暂停，来源数据保持不变。',
     pluginEnabledNotice: '插件已启用，请核对来源连接。',
     configureCardBtn: '配置连接',
     hideConfigBtn: '收起表单',
-    pluginHint: '安装仅登记插件能力；不会创建来源连接、导入资料或生成员工工具。凭据由管理员通过托管身份或安全凭据引用配置，请勿在名称、范围或查询模板中填写原始密钥、密码或 DSN。',
     confirmConnBtn: '确认连接',
     retestConfirmBtn: '重新测试并确认连接',
     connConfirmedNotice: '连接已确认，资料仍需逐版本确认。',
     retestConnBtn: '重新测试连接',
     connRetestedNotice: '连接已重新测试并确认，资料仍需逐版本确认。',
-    noConnections: '还没有来源连接。点击上方来源卡片即可创建连接。',
+    noConnections: '还没有外部来源连接。',
     connFormTitle: '配置{name}连接',
     connNameLabel: '连接名称',
     connNamePlaceholder: '例如：团队操作资料',
-    sourcePluginLabel: '来源插件',
-    noReadyPlugin: '没有已安装、启用且已配置的插件',
     approvedResourceLabel: '已批准的来源资源',
     noApprovedResource: '暂无已批准的来源资源',
     needAdminScope: '请由管理员批准来源范围后再创建连接。',
     readOnlyAckLabel: '我已核对来源范围，并确认仅以只读方式接入',
     connFormHint: '默认读者为当前用户。连接只读；确认操作不能覆盖来源权限和项目范围。需要额外授权的来源由服务端校验。',
-    creatingConn: '创建中…',
-    createConnBtn: '创建连接草案',
+    creatingConn: '验证中…',
+    createConnBtn: '验证并连接',
     sec2Title: '资料',
     itemNameLabel: '资料名称',
     itemNamePlaceholder: '操作手册.md',
@@ -589,6 +595,13 @@ export function KnowledgePage() {
       if (response.body.error === 'workbook_unreadable') throw new Error(t('errUnreadableWorkbook'));
       if (response.body.error === 'unsupported_file' || response.body.error === 'unreadable_file') throw new Error(t('errUnreadableFile'));
       if (response.status === 413 || response.body.error === 'text_too_large') throw new Error(t('errTooLarge'));
+      const mcpErrors: Record<string, TextKey> = {
+        mcp_invalid_url: 'mcpInvalidUrl', mcp_auth_required: 'mcpAuthRequired',
+        mcp_no_resources: 'mcpNoResources', mcp_connection_failed: 'mcpConnectionFailed',
+      };
+      const mcpError = response.body.error && mcpErrors[response.body.error];
+      if (mcpError) throw new Error(t(mcpError));
+      if (response.body.error === 'connection_test_failed') throw new Error(t('connectionTestFailed'));
       throw new Error((lang === 'zh' ? response.body.message : undefined) ?? t('reqFailedHttp', { status: response.status }));
     }
     return response.body;
@@ -606,7 +619,8 @@ export function KnowledgePage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [connectionName, setConnectionName] = useState('');
-  const [pluginId, setPluginId] = useState('');
+  const [mcpEndpoint, setMcpEndpoint] = useState('');
+  const [sourceFeedback, setSourceFeedback] = useState<{ text: string; error?: boolean } | null>(null);
   const [resourceId, setResourceId] = useState('');
   const [readOnlyAcknowledged, setReadOnlyAcknowledged] = useState(false);
   const [spaceName, setSpaceName] = useState('');
@@ -646,12 +660,13 @@ export function KnowledgePage() {
     return () => window.clearInterval(interval);
   }, [analysisActive, parseActive, profilesRefining, load]);
 
-  const plugins = overview?.plugins.filter(plugin => plugin.installed && plugin.enabled && plugin.configured && ['email', 'sharepoint', 'mcp'].includes(plugin.id)) ?? [];
-  const selectedPlugin = plugins.find(plugin => plugin.id === pluginId)?.id ?? plugins[0]?.id ?? '';
+  const activeCardPlugin = overview?.plugins.find(plugin => plugin.id === activeSourceCard && plugin.enabled);
+  const selectedPlugin = activeCardPlugin?.id ?? '';
+  const externalConnections = overview?.connections.filter(connection => connection.pluginId !== 'local-file') ?? [];
   const sourceResources = overview?.sourceResources?.filter(resource => resource.pluginId === selectedPlugin) ?? [];
   const selectedResource = sourceResources.find(resource => resource.id === resourceId) ?? sourceResources[0];
   const databasePlugin = overview?.plugins.find(plugin => plugin.id === 'database');
-  const databaseEnabled = !!databasePlugin?.installed && databasePlugin.enabled && databasePlugin.configured;
+  const databaseEnabled = !!databasePlugin?.enabled;
   const canUpload = !!overview?.canConfirm && overview.plugins.some(plugin => plugin.id === 'local-file' && plugin.enabled);
   const confirmedCount = overview?.items.filter(item => item.confirmed).length ?? 0;
   const recommendations = overview?.recommendations.filter(recommendation => !recommendation.deleted) ?? [];
@@ -667,14 +682,21 @@ export function KnowledgePage() {
   async function action(key: string, path: string, body: unknown, success: string, method = 'POST'): Promise<boolean> {
     if (actionInFlight.current) return false;
     actionInFlight.current = true;
+    const forSources = path.startsWith('/connections') || path.startsWith('/plugins');
     setBusy(key); setNotice(''); setError('');
+    if (forSources) setSourceFeedback(null);
     try {
       await request(path, { method, body: JSON.stringify(body) });
-      setNotice(success);
+      if (forSources) setSourceFeedback({ text: success });
+      else setNotice(success);
       searchSequence.current++; setSearchResult(null); setSearchError(''); setSearching(false);
       await load();
       return true;
-    } catch (caught) { setError(errorMessage(caught)); return false; }
+    } catch (caught) {
+      if (forSources) setSourceFeedback({ text: errorMessage(caught), error: true });
+      else setError(errorMessage(caught));
+      return false;
+    }
     finally { actionInFlight.current = false; setBusy(''); }
   }
 
@@ -685,22 +707,24 @@ export function KnowledgePage() {
       window.setTimeout(() => document.getElementById('database-source-heading')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
       return;
     }
-    if (activeSourceCard === cardId) {
+    setActiveSourceCard(activeSourceCard === cardId ? null : cardId);
+    setResourceId('');
+    setReadOnlyAcknowledged(false);
+    setSourceFeedback(null);
+  }
+
+  async function connectMcp(event: FormEvent) {
+    event.preventDefault();
+    if (await action('mcp-connection', '/connections/mcp', { endpoint: mcpEndpoint.trim() }, t('connCreatedNotice'))) {
+      setMcpEndpoint('');
       setActiveSourceCard(null);
-      return;
-    }
-    setActiveSourceCard(cardId);
-    if (plugins.some(p => p.id === cardId)) {
-      setPluginId(cardId);
-      setResourceId('');
-      setReadOnlyAcknowledged(false);
     }
   }
 
   async function createConnection(event: FormEvent) {
     event.preventDefault();
     if (!selectedPlugin || !selectedResource || !readOnlyAcknowledged) return;
-    if (await action('connection', '/connections', { name: connectionName.trim(), pluginId: selectedPlugin, scope: { resourceId: selectedResource.id }, readOnlyAcknowledged: true }, t('connCreatedNotice'))) {
+    if (await action('connection', '/connections', { name: connectionName.trim(), pluginId: selectedPlugin, scope: { resourceId: selectedResource.id }, readOnlyAcknowledged: true, verify: true }, t('connCreatedNotice'))) {
       setConnectionName('');
       setReadOnlyAcknowledged(false);
       setActiveSourceCard(null);
@@ -770,7 +794,6 @@ export function KnowledgePage() {
     finally { if (sequence === searchSequence.current) setSearching(false); }
   }
 
-  const activeCardPlugin = plugins.find(plugin => plugin.id === activeSourceCard);
 
   return <div className="knowledge-page">
     <header className="page-head knowledge-head">
@@ -854,26 +877,30 @@ export function KnowledgePage() {
         <div className="knowledge-plugins knowledge-source-cards" aria-label={t('pluginsAria')}>
           {orderedPlugins.map(plugin => {
             const isSelected = activeSourceCard === plugin.id;
-            const readyToConfigure = plugin.installed && plugin.enabled && plugin.configured;
             return <div key={plugin.id} data-testid={`plugin-${plugin.id}`} className={`knowledge-source-card ${isSelected ? 'is-selected' : ''}`}>
               <div className="knowledge-source-card-top">
                 <strong>{pluginDisplay(plugin).name}</strong>
-                <span className="knowledge-badge">{!plugin.installed ? t('badgeNotInstalled') : !plugin.enabled ? t('badgePaused') : plugin.configured ? t('badgeEnabledConfigured') : t('badgeInstalledPending')}</span>
+                <span className="knowledge-badge">{!plugin.enabled ? t('badgePaused') : plugin.id === 'local-file' ? t('badgeAutomatic') : externalConnections.some(connection => connection.pluginId === plugin.id && connection.status === 'confirmed') ? t('badgeConnected') : t('badgeNeedsSetup')}</span>
               </div>
               <small>{plugin.id === 'local-file' ? t('automaticLocal') : pluginDisplay(plugin).capabilities.join(' · ') || t('capsFallback')}</small>
               <div className="knowledge-source-card-actions">
-                {!plugin.installed ? <button className="btn" type="button" disabled={!!busy} onClick={() => void action(`install:${plugin.id}`, `/plugins/${encodeURIComponent(plugin.id)}/install`, {}, t('pluginInstalledNotice'))}>{t('installPluginBtn', { name: pluginDisplay(plugin).name })}</button> : <button className="btn" type="button" disabled={!!busy} onClick={() => void action(`plugin:${plugin.id}`, `/plugins/${encodeURIComponent(plugin.id)}`, { enabled: !plugin.enabled }, plugin.enabled ? t('pluginPausedNotice') : t('pluginEnabledNotice'))}>{plugin.enabled ? t('pausePluginBtn', { name: pluginDisplay(plugin).name }) : t('enablePluginBtn', { name: pluginDisplay(plugin).name })}</button>}
-                {plugin.id !== 'local-file' && (readyToConfigure || plugin.id === 'database') ? <button className="btn" type="button" onClick={() => selectSourceCard(plugin.id)}>{isSelected && plugin.id !== 'database' ? t('hideConfigBtn') : t('configureCardBtn')}</button> : null}
+                {overview.canConfirm && plugin.enabled && plugin.id !== 'local-file' ? <button className="btn" type="button" onClick={() => selectSourceCard(plugin.id)}>{isSelected && plugin.id !== 'database' ? t('hideConfigBtn') : t('configureCardBtn')}</button> : null}
+                {overview.canConfirm && (!plugin.enabled || externalConnections.some(connection => connection.pluginId === plugin.id)) ? <button className="btn" type="button" disabled={!!busy} onClick={() => void action(`plugin:${plugin.id}`, `/plugins/${encodeURIComponent(plugin.id)}`, { enabled: !plugin.enabled }, plugin.enabled ? t('pluginPausedNotice') : t('pluginEnabledNotice'))}>{plugin.enabled ? t('pausePluginBtn', { name: pluginDisplay(plugin).name }) : t('enablePluginBtn', { name: pluginDisplay(plugin).name })}</button> : null}
               </div>
             </div>;
           })}
         </div>
-        <p className="helper knowledge-plugin-hint">{t('pluginHint')}</p>
+        {sourceFeedback ? <div className={sourceFeedback.error ? 'knowledge-alert knowledge-inset' : 'knowledge-notice knowledge-inset'} role={sourceFeedback.error ? 'alert' : 'status'}>{sourceFeedback.text}</div> : null}
+        {selectedPlugin === 'mcp' ? <form onSubmit={connectMcp} className="knowledge-form knowledge-inset">
+          <h3>{t('connFormTitle', { name: 'MCP' })}</h3>
+          <label className="field"><span>{t('mcpEndpointLabel')}</span><input type="url" required maxLength={1000} value={mcpEndpoint} placeholder="https://example.com/mcp" onChange={event => setMcpEndpoint(event.target.value)} /></label>
+          <p className="helper">{t('mcpEndpointHint')}</p>
+          <button className="btn" disabled={!!busy || !mcpEndpoint.trim()}>{busy === 'mcp-connection' ? t('creatingConn') : t('createConnBtn')}</button>
+        </form> : null}
 
-        {activeCardPlugin ? <form onSubmit={createConnection} className="knowledge-form knowledge-inset">
-          <h3>{t('connFormTitle', { name: pluginDisplay(activeCardPlugin).name })}</h3>
+        {activeCardPlugin && ['email', 'sharepoint', 'mcp'].includes(selectedPlugin) && (selectedPlugin !== 'mcp' || sourceResources.length > 0) ? <form onSubmit={createConnection} className="knowledge-form knowledge-inset">
+          <h3>{selectedPlugin === 'mcp' ? t('mcpApprovedTitle') : t('connFormTitle', { name: pluginDisplay(activeCardPlugin).name })}</h3>
           <label className="field"><span>{t('connNameLabel')}</span><input required maxLength={160} value={connectionName} placeholder={t('connNamePlaceholder')} onChange={event => setConnectionName(event.target.value)} /></label>
-          <label className="field"><span>{t('sourcePluginLabel')}</span><select value={selectedPlugin} onChange={event => { setPluginId(event.target.value); setActiveSourceCard(event.target.value); setResourceId(''); setReadOnlyAcknowledged(false); }} disabled={!plugins.length}>{!plugins.length ? <option value="">{t('noReadyPlugin')}</option> : plugins.map(plugin => <option key={plugin.id} value={plugin.id}>{pluginDisplay(plugin).name}</option>)}</select></label>
           <label className="field"><span>{t('approvedResourceLabel')}</span><select value={selectedResource?.id ?? ''} disabled={!sourceResources.length || !!busy} onChange={event => { setResourceId(event.target.value); setReadOnlyAcknowledged(false); }}>{!sourceResources.length ? <option value="">{t('noApprovedResource')}</option> : sourceResources.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}</select></label>
           {selectedResource ? <ScopeSummary scope={selectedResource.scope} projectIds={selectedResource.projectIds} t={t} /> : <p className="helper">{t('needAdminScope')}</p>}
           <label className="knowledge-check"><input type="checkbox" required checked={readOnlyAcknowledged} onChange={event => setReadOnlyAcknowledged(event.target.checked)} /><span>{t('readOnlyAckLabel')}</span></label>
@@ -881,12 +908,12 @@ export function KnowledgePage() {
           <button className="btn" disabled={!!busy || !selectedPlugin || !connectionName.trim() || !selectedResource || !readOnlyAcknowledged}>{busy === 'connection' ? t('creatingConn') : t('createConnBtn')}</button>
         </form> : null}
 
-        {overview.connections.length ? <ul className="knowledge-source-list">{overview.connections.map(connection => <li key={connection.id}>
-          <div><strong>{connection.name}</strong><small>{pluginName(connection.pluginId, overview.plugins)}</small></div>
+        {externalConnections.length ? <ul className="knowledge-source-list">{externalConnections.map(connection => <li key={connection.id}>
+          <div><strong>{connection.name}</strong><small>{connection.scope?.publicMcpEndpoint ?? pluginName(connection.pluginId, overview.plugins)}</small></div>
           <span className={`knowledge-badge ${connection.status === 'confirmed' ? 'is-green' : ''}`}>{label(connection.status)}</span>
           {overview.canConfirm && ['draft', 'tested', 'pending_confirmation', 'sync_failed', 'needs_reauth'].includes(connection.status) ? <button className="btn" disabled={!!busy} onClick={() => void action(`confirm:${connection.id}`, `/connections/${encodeURIComponent(connection.id)}/confirm`, {}, t('connConfirmedNotice'))}>{connection.status === 'draft' ? t('confirmConnBtn') : t('retestConfirmBtn')}</button> : null}
           {overview.canConfirm && connection.status === 'confirmed' ? <button className="btn" disabled={!!busy} onClick={() => void action(`confirm:${connection.id}`, `/connections/${encodeURIComponent(connection.id)}/confirm`, {}, t('connRetestedNotice'))}>{t('retestConnBtn')}</button> : null}
-          {['email', 'sharepoint', 'mcp'].includes(connection.pluginId) ? <RemoteSourcePreview connection={connection} resource={overview.sourceResources?.find(resource => resource.id === connection.scope?.resourceId)} active={overview.plugins.some(plugin => plugin.id === connection.pluginId && plugin.installed && plugin.enabled && plugin.configured)} disabled={!!busy} onAction={action} request={request} errorMessage={errorMessage} t={t} /> : null}
+          {['email', 'sharepoint', 'mcp'].includes(connection.pluginId) ? <RemoteSourcePreview connection={connection} resource={overview.sourceResources?.find(resource => resource.id === connection.scope?.resourceId)} active={overview.plugins.some(plugin => plugin.id === connection.pluginId && plugin.enabled && plugin.configured)} disabled={!!busy} onAction={action} request={request} errorMessage={errorMessage} t={t} /> : null}
         </li>)}</ul> : <p className="knowledge-empty">{t('noConnections')}</p>}
       </section>
 

@@ -35,7 +35,7 @@ const TEXT = {
     tag: 'Current fact',
     intro1: 'Connect only to DBA-approved standalone read-only accounts and table/view scopes. Template approval and execution are managed separately, with timestamps and scope attached to results.',
     intro2: 'Credentials are configured by admins via managed identity or secure credential references. Never enter raw secrets, passwords, connection strings, or DSNs in connection names or SQL.',
-    noPlugin: 'Install and enable the database plugin in the source catalog before configuring a read-only source.',
+    noPlugin: 'Enable the database source in Manage sources to configure a connection.',
     noResources: 'No DBA-approved database resources are configured yet. Configure a standalone read-only account and allowed tables, row-filtered views, and columns before creating a connection.',
     createTitle: 'Create controlled connection',
     dbaResource: 'DBA-approved resource',
@@ -46,8 +46,8 @@ const TEXT = {
     connNamePlaceholder: 'e.g. Operations read-only view',
     ackLabel: 'I have verified the database scope and confirm connecting with a standalone read-only account',
     creating: 'Creating…',
-    createBtn: 'Create database connection draft',
-    createSuccess: 'Database connection draft created. Verify and confirm it in the source connections list.',
+    createBtn: 'Verify and connect database',
+    createSuccess: 'Database connection verified.',
     refreshFailed: 'Connection created, but refreshing the list failed: {msg}',
     confirmedConn: 'Confirmed database connection',
     noConfirmedConn: 'Confirm a database connection in the source connections list first',
@@ -107,7 +107,7 @@ const TEXT = {
     tag: '当前事实',
     intro1: '仅连接 DBA 已批准的独立只读账号与表／视图范围。模板批准与执行分开管理，查询结果附带时间与范围。',
     intro2: '凭据由管理员通过托管身份或安全凭据引用配置。请勿在连接名称或 SQL 中填写原始密钥、密码、连接字符串或 DSN。',
-    noPlugin: '请先在来源插件目录安装并启用数据库插件，再配置只读来源。',
+    noPlugin: '请先在「管理来源」中启用数据库来源。',
     noResources: '尚未配置 DBA 批准的数据库资源。请先配置独立只读数据库账号，以及允许访问的表、行过滤视图和列范围，再创建连接。',
     createTitle: '创建受控连接',
     dbaResource: 'DBA 批准的资源',
@@ -118,8 +118,8 @@ const TEXT = {
     connNamePlaceholder: '例如：运营只读视图',
     ackLabel: '我已核对数据库范围，并确认使用独立只读账号接入',
     creating: '创建中…',
-    createBtn: '创建数据库连接草案',
-    createSuccess: '数据库连接草案已创建，请在来源连接列表中核对并确认。',
+    createBtn: '验证并连接数据库',
+    createSuccess: '数据库连接已验证。',
     refreshFailed: '连接已创建，列表刷新失败：{msg}',
     confirmedConn: '已确认的数据库连接',
     noConfirmedConn: '请先在来源连接列表确认数据库连接',
@@ -239,7 +239,7 @@ export function DatabaseSourcePanel({ resources, connections, onRefresh, pluginE
     if (!selectedResource || !pluginEnabled || !readOnlyAcknowledged || mutationActive.current) return;
     mutationActive.current = true; setBusy('create'); setError(''); setNotice('');
     try {
-      await request('/connections', { name: name.trim(), pluginId: 'database', scope: { resourceId: selectedResource.id }, readOnlyAcknowledged: true });
+      await request('/connections', { name: name.trim(), pluginId: 'database', scope: { resourceId: selectedResource.id }, readOnlyAcknowledged: true, verify: true });
       setName(''); setReadOnlyAcknowledged(false); setNotice(t('createSuccess'));
       try { await onRefresh(); } catch (caught) { setError(t('refreshFailed', { msg: message(caught) })); }
     } catch (caught) { setError(message(caught)); }
