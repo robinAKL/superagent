@@ -112,6 +112,11 @@ async function applyRef(store: KnowledgeStore, plugin: KnowledgeSourcePlugin, cf
   // ACL first: the content of an item whose readers are unknown is never read or stored (PRD §3.2).
   const aclRes: AclResult = plugin.getAcl ? await plugin.getAcl(cfg, ref) : { status: 'unknown', reason: 'plugin does not report ACL' };
   const acl = aclRes.status === 'known' ? aclRes.entries : null;
+  let content: SourceContent | undefined;
+  if (acl && ref.contentVersion === 'hash') {
+    content = await plugin.readItem(cfg, ref);
+    ref = { ...ref, version: hash(JSON.stringify([content.text, content.anchors])) };
+  }
   const sameVersion = !!existing && existing.version === ref.version;
 
   if (!acl) {
@@ -136,7 +141,7 @@ async function applyRef(store: KnowledgeStore, plugin: KnowledgeSourcePlugin, cf
     return 'dup';
   }
 
-  const content = await plugin.readItem(cfg, ref);
+  content ??= await plugin.readItem(cfg, ref);
   const contentHash = hash(content.text);
   if (existing && (sameVersion || existing.contentHash === contentHash)) {
     // Same version whose readers just became known, or a new version label with identical content.

@@ -25,20 +25,12 @@ d('knowledge UI over real HTTP handlers', () => {
     const page = await context.newPage(), errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
     try {
       await page.goto(`${base}/#knowledge`);
-      // Each source card opens its own connection form (#77 guided layout).
-      await page.getByTestId('plugin-local-file').getByRole('button', { name: '配置连接', exact: true }).click();
-      await page.getByLabel('连接名称',{exact:true}).fill('真实 HTTP 测试资料');
-      await page.getByRole('button', { name: '创建连接草案' }).click();
-      await page.getByRole('button', { name: '确认连接', exact: true }).click();
+      await page.getByText('粘贴文本', { exact: true }).click();
       await page.getByLabel('资料名称').fill('policy.md');
       await page.getByLabel('文本内容').fill('付款前核对金额。');
       await page.getByRole('button', { name: '提交资料', exact: true }).click();
-      await page.getByRole('button', { name: '确认此版本', exact: true }).waitFor();
+      await page.getByText('可搜索', { exact: true }).waitFor();
       await page.getByLabel('查询企业资料').fill('付款');
-      await page.getByRole('button', { name: '查询依据', exact: true }).click();
-      await page.getByText('没有当前可用的依据。', { exact: false }).waitFor();
-      await page.getByRole('button', { name: '确认此版本', exact: true }).click();
-      await page.getByText('当前版本已人工确认', { exact: false }).waitFor();
       await page.getByRole('button', { name: '查询依据', exact: true }).click();
       await page.locator('.knowledge-evidence blockquote').first().waitFor();
       expect(await page.locator('.knowledge-evidence blockquote').first().textContent()).toBe('付款前核对金额。');
@@ -54,6 +46,7 @@ d('knowledge UI over real HTTP handlers', () => {
       const state = await deps.repo.read({ tenantId: 'ui-test', userId: 'alice', roles: ['owner'], projectScopes: [] });
       expect(state.recommendations[0]).toMatchObject({ name: '人工保留名称', humanLocked: true });
       expect(state.source.connections).toHaveLength(1); expect(state.analyses[0]!.status).toBe('completed');
+      await page.getByRole('button', { name: '管理来源', exact: true }).click();
       await page.getByTestId('plugin-database').getByRole('button', { name: '安装只读数据库插件', exact: true }).click();
       // The database panel lives in the collapsed 高级 section; its card's 配置连接 opens it.
       await page.getByTestId('plugin-database').getByRole('button', { name: '配置连接', exact: true }).click();

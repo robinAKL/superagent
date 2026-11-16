@@ -3,12 +3,12 @@ import { BlobServiceClient } from '@azure/storage-blob';
 import { DefaultAzureCredential } from '@azure/identity';
 import { SourceError, type KnowledgeSourcePlugin, type UserContext } from '@superagent/shared';
 import type { DocumentIntelligenceAdapter } from '../../plugins/document-intelligence.js';
-import { hydrate, id, invalidateAnalyses, KnowledgeError, snapshot, type ParseJob } from './domain.js';
+import { confirmSource, hydrate, id, invalidateAnalyses, KnowledgeError, snapshot, type ParseJob } from './domain.js';
+import { mimeFor } from './docintel-parser.js';
 import type { KnowledgeRepository } from './repository.js';
 import { syncConnection } from './sync.js';
 export interface BinaryStore { put(ref: string, bytes: Uint8Array, mimeType: string): Promise<void>; get(ref: string): Promise<Uint8Array> }
 export interface BinaryDeps { blobs: BinaryStore; parser: Pick<DocumentIntelligenceAdapter, 'start' | 'poll'> }
-const TYPES: Record<string, string> = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', tiff: 'image/tiff', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' };
 const MAX_BYTES = 20 * 1024 * 1024;
 export class AzureBinaryStore implements BinaryStore {
   private container;
@@ -24,11 +24,21 @@ export class AzureBinaryStore implements BinaryStore {
     return blob.downloadToBuffer(0, props.contentLength, { abortSignal: signal });
   }
 }
-export async function queueBinaryUpload(repo: KnowledgeRepository, deps: BinaryDeps, ctx: UserContext, input: Record<string, unknown>) {
-  const { connectionId, name, base64 } = input;
-  if (typeof connectionId !== 'string' || typeof name !== 'string' || !name || name.length > 180 || /[\\/\x00-\x1f]/.test(name) || typeof base64 !== 'string' || base64.length > Math.ceil(MAX_BYTES / 3) * 4 || base64.length % 4 !== 0) throw new KnowledgeError('invalid_file', '文件编码、大小或文件名无效。');
-  const mimeType = TYPES[name.split('.').pop()!.toLowerCase()]; if (!mimeType) throw new KnowledgeError('unsupported_file', '不支持此文件类型。');
+export function decodeUpload(base64: unknown): Buffer {
+  if (typeof base64 !== 'string' || base64.length > Math.ceil(MAX_BYTES / 3) * 4 || base64.length % 4 !== 0) throw new KnowledgeError('invalid_file', '文件编码或大小无效。');
   const bytes = Buffer.from(base64, 'base64'); if (!bytes.length || bytes.length > MAX_BYTES || bytes.toString('base64') !== base64) throw new KnowledgeError('invalid_file', '文件编码无效、为空或超过 20MB。');
+  return bytes;
+}
+
+export async function queueBinaryUpload(repo: KnowledgeRepository, deps: BinaryDeps, ctx: UserContext, input: Record<string, unknown>) {
+  const { connectionId, name } = input;
+  if (typeof connectionId !== 'string' || typeof name !== 'string' || !name.trim() || name.length > 180 || /[\\/\x00-\x1f]/.test(name)) throw new KnowledgeError('invalid_file', '文件名或来源无效。');
+  const mime = mimeFor(name);
+  if (!mime) throw new KnowledgeError('unsupported_file', '不支持此文件类型。');
+  return queueDocument(repo, deps, ctx, connectionId, name, decodeUpload(input.base64), mime);
+}
+
+export async function queueDocument(repo: KnowledgeRepository, deps: BinaryDeps, ctx: UserContext, connectionId: string, name: string, bytes: Buffer, mimeType: string) {
   const version = createHash('sha256').update(bytes).digest('hex');
   const state = await repo.read(ctx), conn = state.source.connections.find(c => c.id === connectionId), meta = state.connectionMeta[connectionId];
   if (!conn || conn.pluginId !== 'local-file' || conn.status !== 'confirmed' || !meta?.audience.includes(ctx.userId) || !meta.projectIds.every(p => ctx.projectScopes.includes(p))) throw new KnowledgeError('source_denied', '先确认当前有权限的本地文件连接。', 403);
@@ -37,8 +47,12 @@ export async function queueBinaryUpload(repo: KnowledgeRepository, deps: BinaryD
   return repo.transact(ctx, s => {
     const current = s.source.connections.find(c => c.id === connectionId), currentMeta = s.connectionMeta[connectionId];
     if (current?.status !== 'confirmed' || s.disabledPlugins.includes('local-file') || !currentMeta?.audience.includes(ctx.userId) || !currentMeta.projectIds.every(p => ctx.projectScopes.includes(p))) throw new KnowledgeError('source_denied', '来源连接已变更。', 403);
-    const duplicate = s.parseJobs.find(j => j.connectionId === connectionId && j.name === name && j.version === version && !['failed', 'outcome_unknown'].includes(j.status));
-    if (duplicate) return { id: duplicate.id, status: duplicate.status };
+    const latest = s.parseJobs.filter(j => j.connectionId === connectionId && j.name === name).at(-1);
+    const currentItem = s.source.items.find(item => item.current && item.connectionId === connectionId && item.externalId === name);
+    const alreadyParsed = latest?.status === 'completed' && currentItem?.version === latest.version;
+    if (latest?.version === version && (alreadyParsed || ['queued', 'running'].includes(latest.status))) {
+      return { id: latest.id, status: latest.status };
+    }
     if (s.parseJobs.length >= 500) throw new KnowledgeError('parse_job_limit', '文档解析任务达到试点上限。', 409);
     // Earlier pending revisions must not overwrite a later upload when Azure completes them out of order.
     for (const old of s.parseJobs.filter(j => j.connectionId === connectionId && j.name === name && ['queued', 'running'].includes(j.status))) { old.status = 'failed'; old.error = 'superseded'; }
@@ -83,13 +97,18 @@ export async function runParseJob(repo: KnowledgeRepository, deps: BinaryDeps, c
       };
       const store = hydrate(s.source), sync = await syncConnection(store, plugin, j.connectionId);
       if (sync.error) throw new SourceError('fatal', 'Parsed source rejected.');
-      s.source = snapshot(store); j.status = 'completed'; j.leaseUntil = 0; invalidateAnalyses(s);
+      const parsed = store.currentItem(j.connectionId, j.name);
+      if (!parsed || parsed.status !== 'parsed' || !result.content.text.trim()) throw new SourceError('fatal', 'No readable text was returned.');
+      s.source = snapshot(store);
+      if (meta.localUpload) confirmSource(s, j.actor, parsed.id, parsed.version);
+      else invalidateAnalyses(s);
+      j.status = 'completed'; j.leaseUntil = 0;
     });
   } catch (error) {
     await repo.transact(ctx, s => {
       const j = s.parseJobs.find(j => j.id === jobId)!; if (j.leaseToken !== leaseToken || j.status !== 'running') return;
       const kind = error instanceof SourceError ? error.kind : 'transient';
-      if (kind === 'auth' || kind === 'scope') {
+      if ((kind === 'auth' || kind === 'scope') && !s.connectionMeta[j.connectionId]?.localUpload) {
         const conn = s.source.connections.find(c => c.id === j.connectionId); if (conn) conn.status = 'needs_reauth'; invalidateAnalyses(s);
       }
       if (posting && kind === 'transient') { j.status = 'outcome_unknown'; j.error = 'start_outcome_unknown'; }

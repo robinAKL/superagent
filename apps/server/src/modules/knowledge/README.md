@@ -2,7 +2,7 @@
 
 The production bootstrap supplies the one platform PostgreSQL pool, Blob endpoint, Document Intelligence endpoint and budgeted LLM gateway. Knowledge stores source versions, confirmations, ACLs, references and durable parse/analysis jobs in PostgreSQL. Migration 0002 must run before traffic switches. Both web and worker use the same store; the worker owns one leased start/poll step per tick. Unknown billable outcomes stay held for reconciliation. There is no direct-provider model fallback.
 
-Source files use the private `sources` Blob container. Text imports retain original line offsets. Local PDF, scans and Office uploads persist the Azure operation reference and respect RetryAfter. Successful parsing still requires human confirmation of the current version. Preview, retrieval, history-derived recommendations and live database results all enforce source access; owner/admin roles do not override it.
+Source files use the private `sources` Blob container. Text imports retain original line offsets. Local documents sent to Azure persist the operation reference and respect RetryAfter. The knowledge page submits each selected file to `POST /local-materials`, which creates or reuses the uploader's private local source and publishes that version when readable content is available. External imports continue to require version confirmation. Preview, retrieval, history-derived recommendations and live database results all enforce source access; owner/admin roles do not override it.
 
 ## Database sources
 
@@ -27,6 +27,26 @@ Unit/service tests use labeled fixtures. CI exercises native PostgreSQL includin
 Only the local-file plugin is initially installed. `POST /plugins/:id/install` records capability availability; it creates no connection, source item, recommendation or employee business tool. Pause/resume stays separate. Remote connection creation requires literal `readOnlyAcknowledged: true`; raw credential references and write effects are refused. Database requests select only `scope.resourceId`, with tables, columns, row bounds and projects derived from the operator registry.
 
 `KNOWLEDGE_SOURCES_JSON` defines approved mail/SharePoint metadata scopes, audiences and project grants, using managed identity for Graph. `GET /connections/:id/preview` reads metadata after per-item ACL checks and exposes opaque version-bound selection IDs; denied titles/bodies remain hidden. `POST /connections/:id/import {ids}` rechecks those permissions and persists the selected external IDs. Every sync filters the same selection and checks the current actor ACL before any body read. Imported versions remain unconfirmed. Revocation/deletion clears retrievable chunks and confirmation; same-version recovery rereads content and requires confirmation again. Folder hierarchy changes force a bounded full SharePoint reconciliation so omitted descendants lose old references.
+
+### Import from an external MCP server
+
+Add a resource to `KNOWLEDGE_SOURCES_JSON` with `pluginId: "mcp"`, its approved audience and projects, and a scope such as:
+
+```json
+{
+  "id": "policy-mcp",
+  "name": "Policy library",
+  "pluginId": "mcp",
+  "audience": ["approved-user-id"],
+  "projectIds": ["approved-project-id"],
+  "scope": {
+    "endpoint": "https://mcp.example.com/mcp",
+    "resources": [{ "uri": "policy://onboarding", "title": "Onboarding policy" }]
+  }
+}
+```
+
+For a bearer-authenticated server, set `scope.secret` to the Key Vault secret reference `{ "name": "...", "version": "..." }`. The connector accesses the configured endpoint via Streamable HTTP and reads exact, approved text resource URIs. In **Manage sources**, install MCP, connect the approved resource, and select the entries to import. A subsequent import refreshes the selected snapshots; changed content needs confirmation. Endpoint or URI scope changes suspend the old connection and require a new one.
 
 Remote production connectors currently support mail bodies and text files. Non-text remote documents require durable parse-job integration; use the local binary upload queue for PDF/Office/image files. The synchronous parser bridge is deliberately not wired into remote production sync because it does not persist uncertain billable submissions.
 

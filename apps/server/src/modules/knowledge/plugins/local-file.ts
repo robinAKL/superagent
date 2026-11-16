@@ -10,6 +10,7 @@ export interface UploadedFile {
   bytes: Uint8Array;
   version: string;
   audience: string[]; // principals allowed to read (users/groups); chosen at upload
+  plainText?: boolean;
 }
 
 export function textWithLineAnchors(text: string, fileName: string): SourceContent {
@@ -36,7 +37,7 @@ export function createLocalFilePlugin(files: Map<string, UploadedFile[]>, parser
     async readItem(cfg: ConnectionConfig, ref: SourceItemRef) {
       const f = current(cfg.connectionId).find((x) => x.name === ref.externalId && x.version === ref.version);
       if (!f) throw new Error('file not found');
-      if (/\.(txt|md|markdown|csv)$/i.test(f.name)) return textWithLineAnchors(Buffer.from(f.bytes).toString('utf8'), f.name);
+      if (f.plainText || /\.(txt|md|markdown|csv)$/i.test(f.name)) return textWithLineAnchors(Buffer.from(f.bytes).toString('utf8'), f.name);
       if (!parser) throw new Error(`${f.name}: PDF/Office/image parsing requires Document Intelligence`);
       return parser.parse(f.bytes, f.name);
     },
