@@ -3,6 +3,7 @@ import { runtimeState } from '../runtime/index.js';
 import { claimTask, deadLetterTask, heartbeatTask, releaseTask, succeedTask, type Queryable } from '../runtime/pg-queue.js';
 import { PgWorkerRegistry } from './pg-registry.js';
 import { tenantKey, workerKey, workSignal } from './signal.js';
+import { MemoryApprovalStore, PgApprovalStore, registerApprovalAdminRoutes, registerApprovalLinkRoutes, type ApprovalDeps, type ApprovalStore } from './approvals.js';
 import {
   authenticateWorker,
   cleanCapabilities,
@@ -35,6 +36,7 @@ const NOTIFIED_SCAN_MS = 5_000;
 
 export const workersState: {
   registry: WorkerRegistry;
+  approvals: ApprovalStore;
   db: Queryable | null;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
@@ -42,6 +44,7 @@ export const workersState: {
   notifiedScanMs: number;
 } = {
   registry: memoryRegistry(),
+  approvals: new MemoryApprovalStore(),
   db: null,
   now: () => Date.now(),
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -57,10 +60,12 @@ function memoryRegistry(): MemoryWorkerRegistry {
 export function bindWorkersDb(db: Queryable | null): void {
   workersState.db = db;
   workersState.registry = db ? new PgWorkerRegistry(db) : memoryRegistry();
+  workersState.approvals = db ? new PgApprovalStore(db) : new MemoryApprovalStore();
 }
 
 export function resetWorkers(): void {
   workersState.registry = memoryRegistry();
+  workersState.approvals = new MemoryApprovalStore();
   workersState.db = null;
   workersState.now = () => Date.now();
   workersState.sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -68,6 +73,14 @@ export function resetWorkers(): void {
   workersState.notifiedScanMs = NOTIFIED_SCAN_MS;
   workSignal.listening = false;
 }
+
+/** Approval routes read state through these, so tests can swap the clock and store like the rest of the module. */
+const approvalDeps: ApprovalDeps = {
+  store: () => workersState.approvals,
+  now: () => workersState.now(),
+  sleep: (ms) => workersState.sleep(ms),
+  stepMs: () => (workSignal.listening ? workersState.notifiedScanMs : workersState.pollStepMs),
+};
 
 /** Admin side, mounted under the signed-in /api/v1/workers prefix (admin/owner only). */
 export const workersModule: FastifyPluginAsync = async (app) => {
@@ -121,6 +134,8 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     if (!(await workersState.registry.revoke(tenantId, id, workersState.now()))) return reply.code(404).send({ error: 'not_found' });
     return { id, status: 'revoked' };
   });
+
+  registerApprovalAdminRoutes(app, approvalDeps);
 };
 
 declare module 'fastify' {
@@ -165,6 +180,8 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     if (!worker) return reply.code(401).send({ error: 'bad_worker_token' });
     req.worker = worker;
   });
+
+  registerApprovalLinkRoutes(app, approvalDeps);
 
   app.post('/heartbeat', async (req, reply) => {
     const body = (req.body ?? {}) as { busy?: unknown; waitingAuthReason?: unknown };

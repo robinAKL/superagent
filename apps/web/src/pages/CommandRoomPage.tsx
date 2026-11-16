@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './execution.css';
 import { authHeaders } from '../api';
+import { WorkerApprovals } from './WorkerApprovals';
 
 /**
  * Command room (PRD §3.7), layout and copy from the accepted v12 prototype. Everything on the page comes from the
@@ -568,6 +569,7 @@ export function CommandRoomPage() {
         </p>
         {viewer?.owner ? <a className="exec-action" href="#brain">配置超级智能体</a> : null}
       </div>
+      {viewer?.owner ? <WorkerApprovals key={viewer.userId} /> : null}
       <div className="exec-grid">
         <section className="panel exec-pane" aria-label="共享协作记录">
           <div className="exec-pane-head">
