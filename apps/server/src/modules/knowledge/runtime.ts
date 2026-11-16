@@ -9,7 +9,7 @@ import { managedSourcePlugins } from './sources.js';
 import { PgKnowledgeAudit } from './audit.js';
 /** All identity/endpoints/pools originate from the fail-closed platform bootstrap. */
 export function createKnowledgeDeps(runtime: Runtime & { llm?: AnalysisGateway }): KnowledgeDeps {
-  const sourceResources = runtime.config.sourceResources ?? [], plugins = managedSourcePlugins(sourceResources);
+  const sourceResources = runtime.config.sourceResources ?? [], plugins = managedSourcePlugins(sourceResources, runtime.app.setupDeps.secrets);
   const model = runtime.llm ? new GatewayAnalysisModel(runtime.llm) : undefined;
   const database = configuredDatabases(runtime.config.sourceDatabases ?? [], runtime.app.setupDeps.secrets);
   if (runtime.config.mode === 'dev') return { repo: new MemoryKnowledgeRepository(), sourceResources, plugins, model, database: database.gateway, close: database.close, enqueue: async () => undefined };

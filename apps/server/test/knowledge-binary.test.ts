@@ -17,6 +17,27 @@ async function fixture() {
   return { repo, service, conn, deps, blobs, upload, counts: () => ({ starts, polls }) };
 }
 describe('durable document parsing', () => {
+  it('publishes readable documents on the automatic private source and isolates a parser failure', async () => {
+    const f = await fixture();
+    const service = new KnowledgeService({ repo: f.repo, binary: f.deps });
+    const input = { base64: Buffer.from('synthetic document').toString('base64') };
+    const [, first] = await Promise.all([
+      service.uploadLocal(ctx, { name: 'guide', text: 'Current guide' }),
+      service.uploadLocal(ctx, { ...input, name: 'readable.pdf' }),
+    ]);
+    expect(first.status).toBe('processing');
+    for (let step = 0; step < 2; step++) await runParseJob(f.repo, f.deps, ctx, first.jobId!);
+    expect((await service.search(ctx, '扫描')).hits).toHaveLength(1);
+
+    const bad = await service.uploadLocal(ctx, { ...input, name: 'bad.pdf' });
+    f.deps.parser.start = async () => { throw new SourceError('auth', '401'); };
+    await runParseJob(f.repo, f.deps, ctx, bad.jobId!);
+    const overview = await service.overview(ctx);
+    expect(overview.connections.filter(connection => connection.name === '本地上传')).toHaveLength(1);
+    expect(overview.items.map(item => [item.title, item.confirmed])).toEqual([['guide', true], ['readable.pdf', true]]);
+    expect(overview.parseJobs.find(job => job.id === bad.jobId)).toMatchObject({ status: 'failed', error: 'auth' });
+    expect((await service.overview({ ...ctx, userId: 'bob' })).items).toEqual([]);
+  });
   it('persists operation reference, polls once per delivery, and requires confirmation after parsing', async () => {
     const f = await fixture(), job = await f.upload();
     await runParseJob(f.repo, f.deps, ctx, job.id); expect(f.counts()).toEqual({ starts: 1, polls: 0 });

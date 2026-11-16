@@ -48,23 +48,27 @@ async function openAdvanced(page: Page) {
 async function configureCard(page: Page, pluginId: string) {
   await page.getByTestId(`plugin-${pluginId}`).getByRole('button', { name: '配置连接', exact: true }).click();
 }
-async function refresh(page: Page) { await page.reload(); await expect(page.getByRole('heading', { name: '企业知识', exact: true })).toBeVisible(); await expect(page.getByTestId('plugin-local-file')).toBeVisible(); await openAdvanced(page); }
+async function openSources(page: Page) {
+  const toggle = page.getByRole('button', { name: '管理来源', exact: true });
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  await expect(page.getByTestId('plugin-local-file')).toBeVisible();
+}
+async function refresh(page: Page) { await page.reload(); await expect(page.getByRole('heading', { name: '企业知识', exact: true })).toBeVisible(); await openSources(page); await openAdvanced(page); }
 async function install(page: Page, id: string) { await post(page, `/plugins/${id}/install`); }
 async function confirmItems(page: Page) {
   for (const item of (await getOverview(page)).items.filter(item => !item.confirmed)) await post(page, `/items/${item.id}/confirm`, { version: item.version });
 }
 async function localFile(page: Page, confirmed = true, text = ROLE_FILE) {
-  const connection = await post<{ id: string }>(page, '/connections', { name: '本地职责资料', pluginId: 'local-file', scope: {} });
-  await post(page, `/connections/${connection.id}/confirm`);
-  await refresh(page);
-  await page.getByLabel('选择文本文件（.txt / .md / .csv / .markdown，最多 2 MB）').setInputFiles({ name: '实际上传职责.md', mimeType: 'text/markdown', buffer: Buffer.from(text) });
-  await expect(page.getByPlaceholder('也可以在此粘贴纯文本…')).toHaveValue(text);
-  const submitted = page.waitForResponse(result => result.url().endsWith('/knowledge/uploads') && result.request().method() === 'POST');
-  await page.getByRole('button', { name: '提交资料', exact: true }).click();
-  expect((await submitted).ok()).toBe(true);
-  await expect(page.getByText('实际上传职责.md', { exact: true })).toBeVisible();
-  if (confirmed) { await confirmItems(page); await refresh(page); }
-  return connection;
+  const name = '实际上传职责.md';
+  if (confirmed) {
+    await page.getByLabel('选择文件', { exact: true }).setInputFiles({ name, mimeType: 'text/markdown', buffer: Buffer.from(text) });
+  } else {
+    const connection = await post<{ id: string }>(page, '/connections', { name: '本地职责资料', pluginId: 'local-file', scope: {} });
+    await post(page, `/connections/${connection.id}/confirm`);
+    await post(page, '/uploads', { connectionId: connection.id, name, text });
+    await refresh(page);
+  }
+  await expect(page.getByText(name, { exact: true })).toBeVisible();
 }
 async function dbSource(page: Page, confirmed = true, sourceConfirmed = true) {
   await install(page, 'database');
@@ -120,14 +124,14 @@ async function assertDenied(page: Page, path: string, data: unknown, identity?: 
 test.beforeEach(async ({ page }) => {
   await response(page.request.post('/__test/knowledge/reset', { data: {} }));
   await page.goto('/#knowledge');
-  await expect(page.getByTestId('plugin-local-file')).toBeVisible();
+  await openSources(page);
   await openAdvanced(page);
 });
 
 test('[qa-enablement#1] New company begins without invented knowledge', async ({ page }) => {
   await test.step('real empty tenant has no sources, candidates or analyses', async () => {
     const overview = await getOverview(page); expect(overview.items).toEqual([]); expect(overview.recommendations).toEqual([]); expect(overview.analyses).toEqual([]);
-    await expect(page.getByText('还没有资料。上传后将在这里显示解析与确认状态。', { exact: true })).toBeVisible();
+    await expect(page.getByText('还没有资料。', { exact: true })).toBeVisible();
   });
 });
 test('[qa-enablement#2] Recommendations gated before knowledge confirmation', async ({ page }) => {
@@ -141,9 +145,28 @@ test('[qa-enablement#3] Manual role is distinguished from document inference', a
   await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
 });
 test('[qa-enablement#4] Actual local text file is read', async ({ page }) => {
-  await localFile(page, false); await page.getByText('查看当前版本原文与定位', { exact: true }).click();
+  await localFile(page); await page.getByText('查看当前版本原文与定位', { exact: true }).click();
   await expect(page.locator('.knowledge-item-preview')).toContainText(ROLE_FILE.split('\n')[0]!);
   const item = (await getOverview(page)).items[0]!; const preview = await response<{ chunks: { text: string; locator: string }[] }>(page.request.get(`${ROOT}/items/${item.id}/preview?version=${item.version}`)); expect(preview.chunks.map(chunk => chunk.text).join('\n')).toBe(ROLE_FILE); expect(preview.chunks[0]!.locator).toContain('#L1');
+});
+test('A mixed file selection publishes readable files and reports failures individually', async ({ page }) => {
+  await page.getByRole('button', { name: '管理来源', exact: true }).click();
+  await expect(page.getByTestId('plugin-mcp')).toBeHidden();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: '添加资料', exact: true }).click();
+  const files = await chooser;
+  expect(files.isMultiple()).toBe(true);
+  await files.setFiles([
+    { name: '第一份', mimeType: 'application/octet-stream', buffer: Buffer.from('入库材料一。') },
+    { name: '无法读取.bin', mimeType: 'application/octet-stream', buffer: Buffer.from([0, 255, 0]) },
+    { name: '第二份.log', mimeType: 'text/plain', buffer: Buffer.from('入库材料二。') },
+  ]);
+  await expect(page.getByText('上传失败', { exact: true })).toBeVisible();
+  await expect(page.getByText('可搜索', { exact: true })).toHaveCount(2);
+  const overview = await getOverview(page);
+  expect(overview.connections).toHaveLength(1);
+  expect(overview.items.map(item => item.title).sort()).toEqual(['第一份', '第二份.log'].sort());
+  expect(overview.items.every(item => item.confirmed)).toBe(true);
 });
 test('[qa-enablement#5] Imported but unconfirmed knowledge cannot generate recommendations', async ({ page }) => {
   await localFile(page, false); expect((await getOverview(page)).items.every(item => !item.confirmed)).toBe(true); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled(); await assertDenied(page, '/analyses', {});
@@ -165,7 +188,7 @@ test('[qa-enablement#50] Reanalysis preserves explicit role deletion instead of 
 });
 
 test('[qa-database-knowledge#1] Documents and databases share enterprise knowledge entry', async ({ page }) => {
-  await expect(page.getByRole('heading', { name: '导入与确认资料', exact: true })).toBeVisible(); await expect(page.getByRole('heading', { name: '只读数据库来源', exact: true })).toBeVisible(); await expect(page.getByTestId('plugin-database')).toContainText('只读数据库');
+  await expect(page.getByRole('heading', { name: '资料', exact: true })).toBeVisible(); await expect(page.getByRole('heading', { name: '只读数据库来源', exact: true })).toBeVisible(); await expect(page.getByTestId('plugin-database')).toContainText('只读数据库');
 });
 test('[qa-database-knowledge#2] Data source requires explicit read-only policy acknowledgement', async ({ page }) => {
   await install(page, 'database'); await refresh(page); await page.getByLabel('数据库连接名称', { exact: true }).fill('待确认数据库'); await expect(page.getByRole('button', { name: '创建数据库连接草案', exact: true })).toBeDisabled(); await assertDenied(page, '/connections', { name: 'forged', pluginId: 'database', scope: { resourceId: DB_RESOURCE_ID } }); await page.getByLabel('我已核对数据库范围，并确认使用独立只读账号接入', { exact: true }).check(); const created = page.waitForResponse(result => result.url().endsWith('/knowledge/connections') && result.request().method() === 'POST'); await page.getByRole('button', { name: '创建数据库连接草案', exact: true }).click(); expect((await created).status()).toBe(201); expect((await getOverview(page)).connections[0]).toMatchObject({ name: '待确认数据库', status: 'draft' });
@@ -209,8 +232,8 @@ test('[qa-database-knowledge#35] Schema change withdraws source confirmation and
 });
 test('[qa-database-knowledge#36] Metadata reanalysis preserves human role edits', async ({ page }) => { const connection = await dbSource(page); await analyse(page); const retained = await lockRole(page, '数据分析员'); await control(page, { kind: 'database', schemaChanged: true }); await post(page, `/connections/${connection.id}/sync`); await confirmItems(page); await analyse(page); await expect(card(page, retained)).toContainText('人工锁定'); await expect(card(page, retained)).toContainText('分析提出了修改'); });
 
-test('[qa-source-plugins#1] Four knowledge-source manifests visible', async ({ page }) => { for (const id of ['local-file', 'database', 'email', 'sharepoint']) await expect(page.getByTestId(`plugin-${id}`)).toBeVisible(); expect((await getOverview(page)).plugins).toHaveLength(4); });
-test('[qa-source-plugins#2] Local single-import built in, remote plugin not installed', async ({ page }) => { const overview = await getOverview(page); expect(overview.plugins.find(plugin => plugin.id === 'local-file')).toMatchObject({ builtIn: true, installed: true }); expect(overview.plugins.filter(plugin => plugin.id !== 'local-file').every(plugin => !plugin.installed)).toBe(true); await expect(page.getByTestId('plugin-local-file')).toContainText('内置插件'); await expect(page.getByTestId('plugin-email')).toContainText('未安装'); });
+test('[qa-source-plugins#1] Knowledge-source catalog includes MCP', async ({ page }) => { for (const id of ['local-file', 'mcp', 'database', 'email', 'sharepoint']) await expect(page.getByTestId(`plugin-${id}`)).toBeVisible(); expect((await getOverview(page)).plugins).toHaveLength(5); });
+test('[qa-source-plugins#2] Local single-import built in, remote plugin not installed', async ({ page }) => { const overview = await getOverview(page); expect(overview.plugins.find(plugin => plugin.id === 'local-file')).toMatchObject({ builtIn: true, installed: true }); expect(overview.plugins.filter(plugin => plugin.id !== 'local-file').every(plugin => !plugin.installed)).toBe(true); await expect(page.getByTestId('plugin-local-file')).toContainText('首次上传时自动创建'); await expect(page.getByTestId('plugin-email')).toContainText('未安装'); });
 test('[qa-source-plugins#3] Catalog install has no implied connection or source', async ({ page }) => { await page.getByRole('button', { name: '安装SharePoint插件', exact: true }).click(); await expect(page.getByTestId('plugin-sharepoint')).not.toContainText('未安装'); const overview = await getOverview(page); expect(overview.connections).toEqual([]); expect(overview.items).toEqual([]); expect(overview.recommendations).toEqual([]); });
 test('[qa-source-plugins#6] Import does not imply source confirmation', async ({ page }) => { await localFile(page, false); await expect(page.getByRole('button', { name: '确认此版本', exact: true })).toBeVisible(); expect((await getOverview(page)).items[0]!.confirmed).toBe(false); });
 test('[qa-source-plugins#7] Mail plugin installation creates no connection or source', async ({ page }) => { await page.getByRole('button', { name: '安装企业邮件插件', exact: true }).click(); await expect(page.getByTestId('plugin-email')).toContainText('已启用'); expect((await getOverview(page)).connections).toEqual([]); expect((await getOverview(page)).items).toEqual([]); });

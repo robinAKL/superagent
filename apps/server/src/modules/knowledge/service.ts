@@ -1,13 +1,14 @@
 import type { KnowledgeSourcePlugin, UserContext } from '@superagent/shared';
 import { confirmSource, evidenceValid, hash, hydrate, id, invalidateAnalyses, KnowledgeError, mayRead, positionedChunks, pluginInstalled, selectedItem, requireManager, signature, snapshot, stamp, type KnowledgeState, type Evidence } from './domain.js';
-import { sourceScope, type SourceResource } from './sources.js';
+import { managedSource, publicSourceScope, sourceScope, type SourceResource } from './sources.js';
 import type { Item } from './store.js';
 import type { AuditSink } from '../audit/audit.js';
 import type { KnowledgeRepository, SearchHit } from './repository.js';
 import { syncConnection } from './sync.js';
 import { createLocalFilePlugin } from './plugins/local-file.js';
 import type { AnalysisModel } from '../analysis/service.js';
-import { queueBinaryUpload, type BinaryDeps } from './binary.js';
+import { decodeUpload, queueBinaryUpload, queueDocument, type BinaryDeps } from './binary.js';
+import { mimeFor } from './docintel-parser.js';
 import type { DatabaseGateway } from './database.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
@@ -24,6 +25,7 @@ export const MANIFESTS = [
   { id: 'local-file', name: '本地文件', capabilities: ['文件导入', '版本与行定位'] },
   { id: 'database', name: '只读数据库', capabilities: ['结构知识', '受控实时查询'] },
   { id: 'email', name: '企业邮件', capabilities: ['指定邮箱', '增量同步'] },
+  { id: 'mcp', name: 'MCP', capabilities: ['已授权的服务器', '只读资源'] },
   { id: 'sharepoint', name: 'SharePoint', capabilities: ['资料库范围', '源权限同步'] },
 ];
 function bounded(value: unknown, max: number, label: string): string {
@@ -38,7 +40,7 @@ export class KnowledgeService {
   private allowed(state: KnowledgeState, ctx: UserContext, item: Item, confirmed = true): boolean {
     if (!mayRead(state, ctx, item, confirmed)) return false;
     const conn = state.source.connections.find(c => c.id === item.connectionId)!;
-    if (conn.pluginId === 'email' || conn.pluginId === 'sharepoint') { try { sourceScope(this.deps.sourceResources ?? [], ctx, conn.pluginId, conn.scope, state.connectionMeta[conn.id]!.audience); return true; } catch { return false; } }
+    if (managedSource(conn.pluginId)) { try { sourceScope(this.deps.sourceResources ?? [], ctx, conn.pluginId, conn.scope, state.connectionMeta[conn.id]!.audience); return true; } catch { return false; } }
     if (conn.pluginId !== 'database') return true;
     try { return !!this.deps.database?.scope(ctx, conn.scope); } catch { return false; }
   }
@@ -49,7 +51,7 @@ export class KnowledgeService {
   private connectionAllowed(state: KnowledgeState, ctx: UserContext, connectionId: string): boolean {
     const conn = state.source.connections.find(c => c.id === connectionId), meta = state.connectionMeta[connectionId];
     if (!conn || !meta?.audience.includes(ctx.userId) || !meta.projectIds.every(p => ctx.projectScopes.includes(p))) return false;
-    if (conn.pluginId === 'email' || conn.pluginId === 'sharepoint') { try { sourceScope(this.deps.sourceResources ?? [], ctx, conn.pluginId, conn.scope, state.connectionMeta[conn.id]!.audience); return true; } catch { return false; } }
+    if (managedSource(conn.pluginId)) { try { sourceScope(this.deps.sourceResources ?? [], ctx, conn.pluginId, conn.scope, state.connectionMeta[conn.id]!.audience); return true; } catch { return false; } }
     if (conn.pluginId !== 'database') return true;
     try { return !!this.deps.database?.scope(ctx, conn.scope); } catch { return false; }
   }
@@ -82,11 +84,11 @@ export class KnowledgeService {
     const visibleRecs=recs.filter(r=>r.kind!=='relation'||r.relation&&objectKeys.has(r.relation.from)&&objectKeys.has(r.relation.to));
     return {
       spaceName: s.spaceName,
-      sourceResources: (this.deps.sourceResources ?? []).filter(r => r.audience.includes(ctx.userId) && r.projectIds.every(p => ctx.projectScopes.includes(p))).map(({ audience: _, ...r }) => r),
+      sourceResources: (this.deps.sourceResources ?? []).filter(r => r.audience.includes(ctx.userId) && r.projectIds.every(p => ctx.projectScopes.includes(p))).map(({ audience: _, ...r }) => ({ ...r, scope: publicSourceScope(r) })),
       plugins: MANIFESTS.map(m => ({ ...m, installed: pluginInstalled(s, m.id), builtIn: m.id === 'local-file', enabled: pluginInstalled(s,m.id) && !s.disabledPlugins.includes(m.id), configured: m.id === 'local-file' || (m.id === 'database' && !!this.deps.database?.list(ctx).length) || !!this.deps.plugins?.[m.id] })),
       databaseResources: this.deps.database?.list(ctx) ?? [],
       connections: s.source.connections.filter(c => this.connectionAllowed(s, ctx, c.id)).map(c => ({ id: c.id, name: s.connectionMeta[c.id]!.name, pluginId: c.pluginId, status: c.status, scope: c.scope })),
-      items: items.map(i => ({ id: hash(i.id), title: i.title, version: i.version, status: i.status, confirmed: this.allowed(s, ctx, i), locator: i.locator })),
+      items: items.map(i => ({ id: hash(i.id), title: i.title, version: i.version, status: i.status, confirmed: this.allowed(s, ctx, i), locator: i.locator, pluginId: s.source.connections.find(c => c.id === i.connectionId)!.pluginId })),
       analyses: s.analyses.filter(r => r.actor.userId === ctx.userId).map(({ actor: _, ...run }) => run), recommendations: visibleRecs,
       canConfirm: ctx.roles.some(role => role === 'owner' || role === 'admin'),
       parseJobs: s.parseJobs.filter(j => j.actor.userId === ctx.userId && s.connectionMeta[j.connectionId]?.audience.includes(ctx.userId) && s.connectionMeta[j.connectionId]!.projectIds.every(p => ctx.projectScopes.includes(p))).map(j => ({ id: j.id, name: j.name, status: j.status, error: j.error })),
@@ -107,8 +109,8 @@ export class KnowledgeService {
     if (pluginId === 'database' && Object.keys(scope).some(key => key !== 'resourceId')) throw new KnowledgeError('scope_denied', '数据库表、列、行数及项目范围由管理员的只读资源定义。', 403);
     return this.deps.repo.transact(ctx, async s => {
       this.plugin(s, pluginId);
-      const effective: Record<string, unknown> = pluginId === 'database' ? { ...this.deps.database!.scope(ctx, { ...scope as Record<string, unknown>, audience }) } : pluginId === 'email' || pluginId === 'sharepoint' ? sourceScope(this.deps.sourceResources ?? [], ctx, pluginId, scope as Record<string, unknown>, audience) : scope as Record<string, unknown>;
-      if (pluginId === 'email' || pluginId === 'sharepoint') effective.selectedExternalIds = [];
+      const effective: Record<string, unknown> = pluginId === 'database' ? { ...this.deps.database!.scope(ctx, { ...scope as Record<string, unknown>, audience }) } : managedSource(pluginId) ? sourceScope(this.deps.sourceResources ?? [], ctx, pluginId, scope as Record<string, unknown>, audience) : scope as Record<string, unknown>;
+      if (managedSource(pluginId)) effective.selectedExternalIds = [];
       const conn = { id: id(), pluginId, scope: effective, credentialRef: null, status: 'draft' as const, cursor: null, confirmedBy: null };
       s.source.connections.push(conn); s.connectionMeta[conn.id] = { name, audience, projectIds: [...new Set([...projectIds, ...((effective.projectIds as string[] | undefined) ?? [])])] }; return { ...conn, name };
     });
@@ -126,7 +128,7 @@ export class KnowledgeService {
   private scopedPlugin(state: KnowledgeState, pluginId: string, ctx: UserContext): KnowledgeSourcePlugin {
     const plugin = this.plugin(state, pluginId);
     return { ...plugin,
-      async listItems(cfg, cursor) { const batch = await plugin.listItems(cfg, cursor); return { ...batch, items: batch.items.filter(ref => selectedItem(cfg.scope, ref.externalId)) }; },
+      async listItems(cfg, cursor) { const batch = await plugin.listItems(cfg, cursor); return { ...batch, items: batch.items.filter(ref => selectedItem(cfg.scope, ref.externalId, pluginId !== 'mcp')) }; },
       async getAcl(cfg, ref) {
         const acl = await plugin.getAcl?.(cfg, ref);
         // Re-evaluate at the body-read boundary: a preview grant may have been revoked meanwhile.
@@ -142,7 +144,7 @@ export class KnowledgeService {
   }
   private async sourcePreview(state: KnowledgeState, ctx: UserContext, connectionId: string) {
     const conn = state.source.connections.find(c => c.id === connectionId);
-    if (!conn || !this.connectionAllowed(state, ctx, connectionId) || !['email','sharepoint'].includes(conn.pluginId)) throw new KnowledgeError('source_denied', '当前来源范围不可预览。', 403);
+    if (!conn || !this.connectionAllowed(state, ctx, connectionId) || !managedSource(conn.pluginId)) throw new KnowledgeError('source_denied', '当前来源范围不可预览。', 403);
     const plugin = this.plugin(state, conn.pluginId), cfg = { connectionId, scope: conn.scope, credentialRef: conn.credentialRef };
     const batch = await plugin.listItems(cfg, undefined);
     const eligible: { id: string; externalId: string; title: string; version: string; locator: string; selected: boolean }[] = [];
@@ -152,7 +154,7 @@ export class KnowledgeService {
       if (ref.change === 'deleted' || ref.change === 'access_revoked') { blocked++; continue; }
       const acl = await plugin.getAcl?.(cfg, ref);
       if (acl?.status !== 'known' || !acl.entries.some(e => e.principal === ctx.userId && e.access === 'read')) { blocked++; continue; }
-      eligible.push({ id: hash(JSON.stringify([connectionId, ref.externalId, ref.version])), externalId: ref.externalId, title: ref.title, version: ref.version, locator: ref.locator, selected: selectedItem(conn.scope, ref.externalId) });
+      eligible.push({ id: hash(JSON.stringify([connectionId, ref.externalId, ref.version])), externalId: ref.externalId, title: ref.title, version: ref.version, locator: ref.locator, selected: selectedItem(conn.scope, ref.externalId, conn.pluginId !== 'mcp') });
     }
     return { conn, eligible, blocked };
   }
@@ -218,6 +220,64 @@ export class KnowledgeService {
   async uploadBinary(ctx: UserContext, input: Record<string, unknown>) {
     requireManager(ctx); if (!this.deps.binary) throw new KnowledgeError('parser_unavailable', 'Azure 文档解析和文件存储尚未配置。', 503);
     return queueBinaryUpload(this.deps.repo, this.deps.binary, ctx, input);
+  }
+  private automaticLocalConnection(state: KnowledgeState, ctx: UserContext): string {
+    if (state.disabledPlugins.includes('local-file')) throw new KnowledgeError('plugin_disabled', '本地上传已暂停。', 409);
+    const existing = state.source.connections.find(c => {
+      const meta = state.connectionMeta[c.id];
+      return c.pluginId === 'local-file' && meta?.localUpload && meta.audience[0] === ctx.userId;
+    });
+    if (existing) {
+      if (existing.status !== 'confirmed') throw new KnowledgeError('source_denied', '本地上传来源暂不可用。', 403);
+      return existing.id;
+    }
+    const connectionId = id();
+    state.source.connections.push({ id: connectionId, pluginId: 'local-file', scope: {}, credentialRef: null, status: 'confirmed', cursor: null, confirmedBy: ctx.userId });
+    state.connectionMeta[connectionId] = { name: '本地上传', audience: [ctx.userId], projectIds: [], localUpload: true };
+    return connectionId;
+  }
+  async uploadLocal(ctx: UserContext, input: Record<string, unknown>) {
+    requireManager(ctx);
+    const name = bounded(input.name, 180, '文件名');
+    if (/[\\/\x00-\x1f]/.test(name)) throw new KnowledgeError('invalid_file', '文件名无效。');
+    const mime = input.text === undefined ? mimeFor(name) : null;
+    if (mime) {
+      if (!this.deps.binary) throw new KnowledgeError('parser_unavailable', 'Azure 文档解析和文件存储尚未配置。', 503);
+      const bytes = decodeUpload(input.base64);
+      const connectionId = await this.deps.repo.transact(ctx, s => this.automaticLocalConnection(s, ctx));
+      const job = await queueDocument(this.deps.repo, this.deps.binary, ctx, connectionId, name, bytes, mime);
+      return { status: job.status === 'completed' ? 'ready' : 'processing', jobId: job.id };
+    }
+
+    let decoded = input.text;
+    if (decoded === undefined) {
+      const bytes = decodeUpload(input.base64);
+      const encoding = bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf-16le'
+        : bytes[0] === 0xfe && bytes[1] === 0xff ? 'utf-16be' : 'utf-8';
+      try { decoded = new TextDecoder(encoding, { fatal: true }).decode(bytes); }
+      catch { throw new KnowledgeError('unsupported_file', '无法读取此文件格式。'); }
+    }
+    if (typeof decoded === 'string' && decoded.length > 200_000) throw new KnowledgeError('text_too_large', '提取出的文本超过大小限制。', 413);
+    const text = typeof decoded === 'string' ? decoded : '';
+    if (!text.trim()) throw new KnowledgeError('unreadable_file', '未能读取资料内容。', 422);
+    if (/[\x00-\x08\x0e-\x1f]/.test(text)) throw new KnowledgeError('unsupported_file', '无法读取此文件格式。');
+    return this.deps.repo.transact(ctx, async s => {
+      const connectionId = this.automaticLocalConnection(s, ctx);
+      const store = hydrate(s.source);
+      if (!store.currentItem(connectionId, name) && s.source.items.filter(item => item.current && item.connectionId === connectionId).length >= 200) {
+        throw new KnowledgeError('corpus_limit', '试点资料数已达到上限。', 409);
+      }
+      const plugin = createLocalFilePlugin(new Map([[connectionId, [{ name, bytes: Buffer.from(text), version: hash(text), audience: [ctx.userId], plainText: true }]]]));
+      const result = await syncConnection(store, plugin, connectionId);
+      const item = store.currentItem(connectionId, name);
+      if (result.error || !item || item.status !== 'parsed') throw new KnowledgeError('unreadable_file', '未能读取资料内容。', 422);
+      for (const job of s.parseJobs.filter(j => j.connectionId === connectionId && j.name === name && ['queued', 'running'].includes(j.status))) {
+        job.status = 'failed'; job.error = 'superseded';
+      }
+      s.source = snapshot(store);
+      confirmSource(s, ctx, item.id, item.version);
+      return { status: 'ready' as const };
+    });
   }
   async confirm(ctx: UserContext, sourceId: string, version: string) {
     requireManager(ctx);

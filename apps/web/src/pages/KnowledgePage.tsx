@@ -6,11 +6,11 @@ import { DatabaseSourcePanel } from './DatabaseSourcePanel';
 
 interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string }
 interface Plugin { id: string; name: string; installed: boolean; builtIn: boolean; enabled: boolean; configured: boolean; capabilities: string[] }
-interface SourceScope { resourceId?: string; mailbox?: string; folder?: string; receivedSince?: string; driveId?: string; folderPath?: string; projectIds?: string[] }
+interface SourceScope { resourceId?: string; mailbox?: string; folder?: string; receivedSince?: string; driveId?: string; folderPath?: string; projectIds?: string[]; mcpResourceCount?: number }
 interface SourceResource { id: string; name: string; pluginId: string; scope: SourceScope; projectIds: string[] }
 interface Connection { id: string; name: string; pluginId: string; status: string; scope?: SourceScope }
 interface ConnectionPreview { connectionId: string; name: string; pluginId: string; status: string; scope: SourceScope; items: { id: string; title: string; version: string; locator: string; selected: boolean }[]; blocked: number }
-interface Item { id: string; title: string; version: string; status: string; confirmed: boolean; locator: string }
+interface Item { id: string; title: string; version: string; status: string; confirmed: boolean; locator: string; pluginId: string }
 interface Recommendation {
   id: string; kind: string; name: string; description: string; humanLocked: boolean; deleted: boolean; stale?: boolean;
   proposedChange?: { name: string; description: string; evidence?: Evidence[] }; evidence: Evidence[];
@@ -26,6 +26,7 @@ interface Overview {
   databaseResources?: { id: string; name: string; tables: Record<string, { columns: string[]; sensitive?: string[] }>; maxRows: number }[];
 }
 interface SearchResult { answer: string; hits: Evidence[] }
+interface FileSubmission { name: string; status: 'uploading' | 'submitted' | 'failed'; error?: string }
 const ROOT = '/api/v1/knowledge';
 const DEFAULT_SPACE_NAME = '企业知识';
 const ENGLISH_PLUGINS: Record<string, { name: string; capabilities: string[] }> = {
@@ -33,10 +34,28 @@ const ENGLISH_PLUGINS: Record<string, { name: string; capabilities: string[] }> 
   email: { name: 'Enterprise email', capabilities: ['Approved mailbox', 'Incremental sync'] },
   sharepoint: { name: 'SharePoint', capabilities: ['Document library scope', 'Source permission sync'] },
   database: { name: 'Read-only database', capabilities: ['Schema knowledge', 'Controlled live queries'] },
+  mcp: { name: 'MCP', capabilities: ['Approved servers', 'Read-only resources'] },
 };
 
 const TEXT = {
   en: {
+    manageSources: 'Manage sources',
+    automaticLocal: 'Created automatically when you upload a file.',
+    addMaterials: 'Add materials',
+    chooseFiles: 'Choose files',
+    dropFiles: 'Drop files here, or choose multiple files from your computer.',
+    pasteText: 'Paste text',
+    localUploadDisabled: 'Local uploads are available to knowledge managers when the local files source is enabled.',
+    sendingFile: 'Uploading',
+    failedFile: 'Upload failed',
+    parseFileFailed: 'Readable text could not be extracted. Try a different copy of the file.',
+    parseAccessFailed: 'The document parser could not access the file.',
+    readyFile: 'Searchable',
+    fileResults: 'File upload results',
+    noMaterials: 'No materials yet.',
+    mcpResources: 'Approved MCP resources',
+    errUnreadableFile: 'This file could not be read.',
+    errTooLarge: 'This file exceeds the upload or extracted text size limit.',
     status_draft: 'Pending confirmation',
     status_ready: 'Connection confirmed',
     status_confirmed: 'Confirmed',
@@ -116,52 +135,22 @@ const TEXT = {
     spaceSavedNotice: 'Knowledge space name saved (metadata only).',
     manualRoleSavedNotice: 'Manual role added; this does not automatically enable material analysis.',
     uploadSuccessNotice: 'Material submitted. Confirm the current version after parsing finishes.',
-    errTextType: 'Text upload supports .txt / .md / .csv / .markdown. Use the document parser below for PDF and Office files.',
-    errTextSize: 'Text file cannot exceed 2 MB.',
-    errTextChars: 'Text content cannot exceed 200,000 characters.',
-    errFileRead: 'Unable to read file. Please try again.',
-    errBinaryType: 'Document parsing only supports PDF, PNG, JPG, JPEG, TIFF, DOCX, XLSX, PPTX.',
-    errBinarySize: 'Document cannot be empty or exceed 20 MiB.',
     errDocRead: 'Unable to read document file.',
-    errDocAborted: 'Document reading was cancelled.',
-    binaryQueuedNotice: 'Document queued for parsing. Review and confirm the material version once parsing completes.',
-    eyebrow: 'KNOWLEDGE / ENTERPRISE CONTEXT',
     pageTitle: 'Enterprise Knowledge',
-    progressLabel: 'Knowledge setup progress',
     mcpTitle: 'Read knowledge via MCP',
     mcpHint: 'Connect a Streamable HTTP client using an Entra access token for Super Agent. Search and read confirmed sources you have permission to access.',
     loadingBtn: 'Loading…',
     refreshBtn: 'Refresh',
     introMain: 'Build grounded evidence from trusted sources so every recommendation traces back to the original text.',
-    introSub: 'Read-only access · Source permissions first · Parsing does not equal human confirmation',
     loadingState: 'Loading sources and knowledge status…',
-    step1Title: 'Connect sources',
-    step1Desc: 'Pick a source card and confirm the read-only connection.',
-    step2Title: 'Confirm materials',
-    step2Desc: 'Upload or import materials and confirm usable versions.',
-    step3Title: 'Let Super Brain analyze',
-    step3Desc: 'Analyze confirmed materials into reviewable drafts.',
-    stepDone: 'Done',
-    stepCurrent: 'Current',
-    stepPending: 'Pending',
-    step1Cta: 'Configure a source',
-    step2CtaUpload: 'Upload or import materials',
-    step2CtaConfirm: 'Confirm pending materials',
     step3Cta: 'Start analysis',
-    metricConnections: 'Source connections',
-    metricConnectionsSub: ' {count} confirmed',
-    metricConfirmed: 'Confirmed versions',
-    metricConfirmedSub: ' / {count} item(s)',
-    metricDrafts: 'Draft suggestions',
-    metricDraftsSub: ' Pending review',
-    sec1Title: 'Connect knowledge sources',
+    sec1Title: 'Knowledge sources',
     sec1Sub: 'Connection confirmation and material version confirmation are managed separately.',
     pluginsAria: 'Source plugin catalog',
     badgeNotInstalled: 'Not installed',
     badgePaused: 'Paused',
     badgeEnabledConfigured: 'Enabled · Configured',
     badgeInstalledPending: 'Installed · Needs setup',
-    builtInPrefix: 'Built-in · ',
     capsFallback: 'Capabilities defined by server',
     installPluginBtn: 'Install {name} plugin',
     pluginInstalledNotice: 'Plugin installed. Configure the source scope and create a connection separately.',
@@ -190,39 +179,22 @@ const TEXT = {
     connFormHint: 'Default reader is the current user. Connections are read-only; confirmation cannot override source permissions or project scopes.',
     creatingConn: 'Creating…',
     createConnBtn: 'Create connection draft',
-    sec2Title: 'Import & confirm materials',
-    sec2Sub: 'Only confirmed versions with active permissions participate in search and analysis.',
-    confirmedLocalLabel: 'Confirmed local source',
-    noLocalConn: 'Create and confirm a local connection first',
-    readingTextFile: 'Reading file…',
-    pickTextFile: 'Choose text file (.txt / .md / .csv / .markdown, max 2 MB)',
+    sec2Title: 'Materials',
     itemNameLabel: 'Material name',
     itemNamePlaceholder: 'operations-handbook.md',
     itemTextLabel: 'Text content',
     itemTextPlaceholder: 'Or paste plain text here…',
-    uploadTextHint: 'After submitting text, review the original content and confirm the current version. Use the document parser below for PDF, scans, and Office files.',
     submitting: 'Submitting…',
     submitMaterialBtn: 'Submit material',
-    binaryHeading: 'PDF / Scan / Office document parsing',
-    pickBinaryLabel: 'Choose document to parse (max 20 MiB)',
-    binarySelected: 'Selected: {name} · {size} MiB',
-    binaryHint: 'Supports PDF, PNG, JPG, JPEG, TIFF, DOCX, XLSX, PPTX. Files are queued for Azure persistent parsing; unconfigured cloud services will show the actual error.',
-    submittingBinary: 'Reading & submitting…',
-    submitBinaryBtn: 'Submit to document parse queue',
     parseJobsAria: 'Document parse jobs',
     parseJobsTitle: 'Document parse jobs',
-    jobId: 'Job {id}',
-    jobCompletedHint: 'Parsing completed. Review the material below and confirm the current version.',
     jobUnknownHint: 'Verify the cloud job and file status manually before proceeding.',
     versionMeta: 'Version {version} · {locator}',
-    itemStatusConfirmed: 'Current version confirmed by human',
     itemStatusPending: 'Not yet confirmed for search',
-    badgeConfirmed: 'Confirmed',
     badgeUnavailable: 'Unavailable',
     confirmItemTitle: 'Confirm version {version} after reviewing original material',
     confirmItemSuccess: 'Current material version confirmed; availability still depends on source permissions.',
     confirmItemBtn: 'Confirm this version',
-    noItems: 'No materials yet. Uploaded or imported items will show parse and confirmation status here.',
     secSearchTitle: 'Grounded search',
     secSearchSub: 'Unknown-permission, unconfirmed, revoked, or expired versions are excluded from results.',
     searchLabel: 'Search enterprise materials',
@@ -255,6 +227,23 @@ const TEXT = {
     retryLoadBtn: 'Retry loading knowledge status',
   },
   zh: {
+    manageSources: '管理来源',
+    automaticLocal: '首次上传时自动创建。',
+    addMaterials: '添加资料',
+    chooseFiles: '选择文件',
+    dropFiles: '将文件拖到这里，或从电脑一次选择多个文件。',
+    pasteText: '粘贴文本',
+    localUploadDisabled: '知识库管理员可在本地文件来源启用时上传资料。',
+    sendingFile: '上传中',
+    failedFile: '上传失败',
+    parseFileFailed: '未能提取可读内容，请尝试上传另一份文件。',
+    parseAccessFailed: '文档解析服务无法访问文件。',
+    readyFile: '可搜索',
+    fileResults: '文件上传结果',
+    noMaterials: '还没有资料。',
+    mcpResources: '已授权的 MCP 资源',
+    errUnreadableFile: '无法读取此文件。',
+    errTooLarge: '文件或提取出的文本超过大小限制。',
     status_draft: '待确认',
     status_ready: '已确认连接',
     status_confirmed: '已确认',
@@ -334,52 +323,22 @@ const TEXT = {
     spaceSavedNotice: '知识空间名称已保存，仅更新名称元数据。',
     manualRoleSavedNotice: '人工角色已补充，不会据此自动启用资料分析。',
     uploadSuccessNotice: '资料已提交。解析完成后仍需确认当前版本。',
-    errTextType: '文本入口支持 .txt / .md / .csv / .markdown。PDF 和 Office 文件请使用下方文档解析入口。',
-    errTextSize: '文本文件不能超过 2 MB。',
-    errTextChars: '文本内容不能超过 200,000 字符。',
-    errFileRead: '无法读取文件，请重试。',
-    errBinaryType: '文档解析仅支持 PDF、PNG、JPG、JPEG、TIFF、DOCX、XLSX、PPTX。',
-    errBinarySize: '文档不能为空，且不能超过 20 MiB。',
     errDocRead: '无法读取文档文件。',
-    errDocAborted: '文档读取已取消。',
-    binaryQueuedNotice: '文档已加入解析队列。解析完成后仍需核对并确认资料版本。',
-    eyebrow: 'KNOWLEDGE / 企业上下文',
     pageTitle: '企业知识',
-    progressLabel: '知识配置进度',
     mcpTitle: '通过 MCP 读取知识',
     mcpHint: '在支持 Streamable HTTP 的客户端中配置 Super Agent 的 Entra 访问令牌，即可搜索和读取你有权限访问的已确认资料。',
     loadingBtn: '读取中…',
     refreshBtn: '刷新状态',
     introMain: '从可信来源建立依据，让每一条建议都能回到原文。',
-    introSub: '只读接入 · 来源权限优先 · 解析完成不等于人工确认',
     loadingState: '正在读取来源与知识状态…',
-    step1Title: '连接来源',
-    step1Desc: '点选来源卡片并确认只读连接。',
-    step2Title: '确认资料',
-    step2Desc: '上传或导入资料，并核对确认可用版本。',
-    step3Title: '让超级大脑分析',
-    step3Desc: '基于已确认资料生成可核对草案。',
-    stepDone: '已完成',
-    stepCurrent: '当前步',
-    stepPending: '待进行',
-    step1Cta: '去配置来源',
-    step2CtaUpload: '去上传资料',
-    step2CtaConfirm: '去确认资料',
     step3Cta: '开始分析',
-    metricConnections: '来源连接',
-    metricConnectionsSub: ' {count} 个已确认',
-    metricConfirmed: '已确认版本',
-    metricConfirmedSub: ' / {count} 份资料',
-    metricDrafts: '建议草案',
-    metricDraftsSub: ' 待人工核对',
-    sec1Title: '连接知识来源',
+    sec1Title: '知识来源',
     sec1Sub: '连接确认与资料版本确认分别管理。',
     pluginsAria: '来源插件目录',
     badgeNotInstalled: '未安装',
     badgePaused: '已暂停',
     badgeEnabledConfigured: '已启用 · 已配置',
     badgeInstalledPending: '已安装 · 待配置',
-    builtInPrefix: '内置插件 · ',
     capsFallback: '能力以服务端为准',
     installPluginBtn: '安装{name}插件',
     pluginInstalledNotice: '插件已安装。请另行配置来源范围并创建连接。',
@@ -408,39 +367,22 @@ const TEXT = {
     connFormHint: '默认读者为当前用户。连接只读；确认操作不能覆盖来源权限和项目范围。需要额外授权的来源由服务端校验。',
     creatingConn: '创建中…',
     createConnBtn: '创建连接草案',
-    sec2Title: '导入与确认资料',
-    sec2Sub: '仅已确认且仍有权限的版本可参与检索与分析。',
-    confirmedLocalLabel: '已确认的本地来源',
-    noLocalConn: '请先创建并确认本地连接',
-    readingTextFile: '正在读取文件…',
-    pickTextFile: '选择文本文件（.txt / .md / .csv / .markdown，最多 2 MB）',
+    sec2Title: '资料',
     itemNameLabel: '资料名称',
     itemNamePlaceholder: '操作手册.md',
     itemTextLabel: '文本内容',
     itemTextPlaceholder: '也可以在此粘贴纯文本…',
-    uploadTextHint: '文本提交后需核对原文并确认当前版本。PDF、扫描件和 Office 文件请使用下方文档解析入口。',
     submitting: '提交中…',
     submitMaterialBtn: '提交资料',
-    binaryHeading: 'PDF / 扫描件 / Office 文档解析',
-    pickBinaryLabel: '选择待解析文档（最多 20 MiB）',
-    binarySelected: '已选择：{name} · {size} MiB',
-    binaryHint: '支持 PDF、PNG、JPG、JPEG、TIFF、DOCX、XLSX、PPTX。文件提交到 Azure 持久解析队列；云端服务未配置时将显示实际错误。',
-    submittingBinary: '读取并提交中…',
-    submitBinaryBtn: '提交到文档解析队列',
     parseJobsAria: '文档解析任务',
     parseJobsTitle: '文档解析任务',
-    jobId: '任务 {id}',
-    jobCompletedHint: '解析完成，请核对下方资料并确认当前版本。',
     jobUnknownHint: '请人工核对云端任务和文件状态，再决定后续处理。',
     versionMeta: '版本 {version} · {locator}',
-    itemStatusConfirmed: '当前版本已人工确认',
     itemStatusPending: '尚未确认用于检索',
-    badgeConfirmed: '已确认',
     badgeUnavailable: '不可用',
     confirmItemTitle: '核对原始资料后确认版本 {version}',
     confirmItemSuccess: '当前资料版本已确认；是否可用仍由源权限决定。',
     confirmItemBtn: '确认此版本',
-    noItems: '还没有资料。上传后将在这里显示解析与确认状态。',
     secSearchTitle: '有依据地查询',
     secSearchSub: '权限未知、未确认、已撤销或过期版本不应进入结果。',
     searchLabel: '查询企业资料',
@@ -488,7 +430,7 @@ const STATUS_KEYS: Record<string, TextKey> = {
   employee: 'kind_employee', tool: 'kind_tool', sop: 'kind_sop', object: 'kind_object', relation: 'kind_relation',
 };
 
-const CARD_ORDER = ['local-file', 'email', 'sharepoint', 'database'] as const;
+const CARD_ORDER = ['local-file', 'mcp', 'database', 'email', 'sharepoint'] as const;
 
 function EvidenceList({ evidence, t }: { evidence: Evidence[]; t: Translate }) {
   return evidence.length ? <ol className="knowledge-evidence">
@@ -508,6 +450,7 @@ function ScopeSummary({ scope, projectIds, t }: { scope: SourceScope; projectIds
     {scope.receivedSince ? <div><dt>{t('scopeReceivedSince')}</dt><dd>{scope.receivedSince}</dd></div> : null}
     {scope.driveId ? <div><dt>{t('scopeDriveId')}</dt><dd>{scope.driveId}</dd></div> : null}
     {scope.folderPath ? <div><dt>{t('scopeFolderPath')}</dt><dd>{scope.folderPath}</dd></div> : null}
+    {scope.mcpResourceCount !== undefined ? <div><dt>{t('mcpResources')}</dt><dd>{scope.mcpResourceCount}</dd></div> : null}
     {scope.resourceId ? <div><dt>{t('scopeResourceId')}</dt><dd>{scope.resourceId}</dd></div> : null}
     {projects ? <div><dt>{t('scopeProjects')}</dt><dd>{projects.join('、') || t('scopeNoProjects')}</dd></div> : null}
   </dl>;
@@ -640,6 +583,8 @@ export function KnowledgePage() {
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await api<T & { message?: string; error?: string }>(ROOT + path, init);
     if (response.status < 200 || response.status >= 300 || response.body.error) {
+      if (response.body.error === 'unsupported_file' || response.body.error === 'unreadable_file') throw new Error(t('errUnreadableFile'));
+      if (response.status === 413 || response.body.error === 'text_too_large') throw new Error(t('errTooLarge'));
       throw new Error((lang === 'zh' ? response.body.message : undefined) ?? t('reqFailedHttp', { status: response.status }));
     }
     return response.body;
@@ -651,6 +596,10 @@ export function KnowledgePage() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState('');
   const [activeSourceCard, setActiveSourceCard] = useState<string | null>(null);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [fileSubmissions, setFileSubmissions] = useState<FileSubmission[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [connectionName, setConnectionName] = useState('');
   const [pluginId, setPluginId] = useState('');
@@ -659,12 +608,8 @@ export function KnowledgePage() {
   const [spaceName, setSpaceName] = useState('');
   const [manualRoleName, setManualRoleName] = useState('');
   const [manualRoleDescription, setManualRoleDescription] = useState('');
-  const [connectionId, setConnectionId] = useState('');
   const [uploadName, setUploadName] = useState('');
   const [uploadText, setUploadText] = useState('');
-  const [readingFile, setReadingFile] = useState(false);
-  const [binaryFile, setBinaryFile] = useState<File | null>(null);
-  const [readingBinary, setReadingBinary] = useState(false);
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
@@ -688,34 +633,25 @@ export function KnowledgePage() {
     setSpaceName(overview?.spaceName === DEFAULT_SPACE_NAME ? '' : overview?.spaceName ?? '');
   }, [overview?.spaceName]);
   const analysisActive = overview?.analyses.some(run => run.status === 'queued' || run.status === 'running') ?? false;
-  const parseActive = overview?.parseJobs.some(job => job.status === 'queued' || job.status === 'running') ?? false;
+  const parseJobs = overview?.parseJobs.filter(job => job.status !== 'completed' && job.error !== 'superseded') ?? [];
+  const parseActive = parseJobs.some(job => job.status === 'queued' || job.status === 'running');
   useEffect(() => {
     if (!analysisActive && !parseActive) return;
     const interval = window.setInterval(() => void load(), 5000);
     return () => window.clearInterval(interval);
   }, [analysisActive, parseActive, load]);
 
-  const plugins = overview?.plugins.filter(plugin => plugin.installed && plugin.enabled && plugin.configured && ['local-file', 'email', 'sharepoint'].includes(plugin.id)) ?? [];
+  const plugins = overview?.plugins.filter(plugin => plugin.installed && plugin.enabled && plugin.configured && ['email', 'sharepoint', 'mcp'].includes(plugin.id)) ?? [];
   const selectedPlugin = plugins.find(plugin => plugin.id === pluginId)?.id ?? plugins[0]?.id ?? '';
   const sourceResources = overview?.sourceResources?.filter(resource => resource.pluginId === selectedPlugin) ?? [];
   const selectedResource = sourceResources.find(resource => resource.id === resourceId) ?? sourceResources[0];
-  const remotePlugin = selectedPlugin === 'email' || selectedPlugin === 'sharepoint';
   const databasePlugin = overview?.plugins.find(plugin => plugin.id === 'database');
   const databaseEnabled = !!databasePlugin?.installed && databasePlugin.enabled && databasePlugin.configured;
-  const uploadConnections = overview?.connections.filter(connection => connection.status === 'confirmed' && connection.pluginId === 'local-file' && plugins.some(plugin => plugin.id === connection.pluginId)) ?? [];
-  const selectedConnection = uploadConnections.find(connection => connection.id === connectionId)?.id ?? uploadConnections[0]?.id ?? '';
-  const confirmedConnectionsCount = overview?.connections.filter(connection => connection.status === 'confirmed').length ?? 0;
+  const canUpload = !!overview?.canConfirm && overview.plugins.some(plugin => plugin.id === 'local-file' && plugin.enabled);
   const confirmedCount = overview?.items.filter(item => item.confirmed).length ?? 0;
-  const hasPendingItems = overview?.items.some(item => !item.confirmed && !['deleted', 'revoked', 'parse_failed'].includes(item.status)) ?? false;
-  const hasCompletedAnalysis = overview?.analyses.some(run => run.status === 'completed') ?? false;
   const recommendations = overview?.recommendations.filter(recommendation => !recommendation.deleted) ?? [];
   const selectedResourceScope = JSON.stringify({ scope: selectedResource?.scope, projects: selectedResource?.projectIds });
   useEffect(() => { setReadOnlyAcknowledged(false); }, [selectedPlugin, selectedResource?.id, selectedResourceScope]);
-
-  const step1Done = confirmedConnectionsCount > 0;
-  const step2Done = step1Done && confirmedCount > 0;
-  const step3Done = step2Done && hasCompletedAnalysis && !analysisActive;
-  const currentStep = !step1Done ? 1 : !step2Done ? 2 : 3;
 
   const orderedPlugins = [...(overview?.plugins ?? [])].sort((a, b) => {
     const ai = CARD_ORDER.indexOf(a.id as typeof CARD_ORDER[number]);
@@ -756,26 +692,10 @@ export function KnowledgePage() {
     }
   }
 
-  function focusStep1() {
-    const firstReady = plugins[0]?.id ?? 'local-file';
-    setActiveSourceCard(firstReady);
-    if (plugins.some(p => p.id === firstReady)) {
-      setPluginId(firstReady);
-      setResourceId('');
-      setReadOnlyAcknowledged(false);
-    }
-    document.getElementById('knowledge-sources-heading')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
-  function focusStep2() {
-    const targetId = hasPendingItems ? 'knowledge-items-list' : 'knowledge-upload-heading';
-    document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
   async function createConnection(event: FormEvent) {
     event.preventDefault();
-    if (!selectedPlugin || (remotePlugin && (!selectedResource || !readOnlyAcknowledged))) return;
-    if (await action('connection', '/connections', { name: connectionName.trim(), pluginId: selectedPlugin, scope: remotePlugin ? { resourceId: selectedResource!.id } : {}, ...(remotePlugin ? { readOnlyAcknowledged: true } : {}) }, t('connCreatedNotice'))) {
+    if (!selectedPlugin || !selectedResource || !readOnlyAcknowledged) return;
+    if (await action('connection', '/connections', { name: connectionName.trim(), pluginId: selectedPlugin, scope: { resourceId: selectedResource.id }, readOnlyAcknowledged: true }, t('connCreatedNotice'))) {
       setConnectionName('');
       setReadOnlyAcknowledged(false);
       setActiveSourceCard(null);
@@ -789,47 +709,51 @@ export function KnowledgePage() {
     event.preventDefault();
     if (await action('manual-role', '/manual-roles', { name: manualRoleName.trim(), description: manualRoleDescription.trim() }, t('manualRoleSavedNotice'))) { setManualRoleName(''); setManualRoleDescription(''); }
   }
-  async function upload(event: FormEvent) {
+  async function pasteMaterial(event: FormEvent) {
     event.preventDefault();
-    if (await action('upload', '/uploads', { connectionId: selectedConnection, name: uploadName.trim(), text: uploadText }, t('uploadSuccessNotice'))) { setUploadName(''); setUploadText(''); }
+    if (await action('paste', '/local-materials', { name: uploadName.trim(), text: uploadText }, t('uploadSuccessNotice'))) {
+      setUploadName('');
+      setUploadText('');
+    }
   }
-  async function readFile(file: File | undefined) {
-    if (!file) return;
+
+  async function uploadFiles(files: File[]) {
+    if (!files.length || !canUpload || actionInFlight.current) return;
+    actionInFlight.current = true;
+    setDragging(false);
+    setBusy('files');
+    setNotice('');
     setError('');
-    if (!/\.(txt|md|csv|markdown)$/i.test(file.name)) { setError(t('errTextType')); return; }
-    if (file.size > 2_000_000) { setError(t('errTextSize')); return; }
-    setReadingFile(true);
-    try { const text = await file.text(); if (text.length > 200_000) { setError(t('errTextChars')); return; } setUploadText(text); setUploadName(file.name); }
-    catch { setError(t('errFileRead')); }
-    finally { setReadingFile(false); }
-  }
-  function chooseBinary(file: File | undefined) {
-    setBinaryFile(null); setError('');
-    if (!file) return;
-    if (!/\.(pdf|png|jpe?g|tiff|docx|xlsx|pptx)$/i.test(file.name)) { setError(t('errBinaryType')); return; }
-    if (file.size === 0 || file.size > 20 * 1024 * 1024) { setError(t('errBinarySize')); return; }
-    setBinaryFile(file);
-  }
-  async function uploadBinary(event: FormEvent) {
-    event.preventDefault();
-    if (!binaryFile || !selectedConnection || readingBinary || actionInFlight.current) return;
-    setReadingBinary(true); setError(''); setNotice('');
+    const submissions: FileSubmission[] = files.map(file => ({ name: file.name, status: 'uploading' }));
+    setFileSubmissions(submissions.slice());
     try {
-      const file = binaryFile;
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          if (typeof reader.result !== 'string' || !reader.result.includes(',')) reject(new Error(t('errDocRead')));
-          else resolve(reader.result.slice(reader.result.indexOf(',') + 1));
-        };
-        reader.onerror = () => reject(new Error(t('errDocRead')));
-        reader.onabort = () => reject(new Error(t('errDocAborted')));
-        reader.readAsDataURL(file);
-      });
-      if (await action('binary', '/files', { connectionId: selectedConnection, name: file.name, base64 }, t('binaryQueuedNotice'))) setBinaryFile(null);
-    } catch (caught) { setError(errorMessage(caught)); }
-    finally { setReadingBinary(false); }
+      for (const [index, file] of files.entries()) {
+        try {
+          if (file.size === 0) throw new Error(t('errUnreadableFile'));
+          if (file.size > 20 * 1024 * 1024) throw new Error(t('errTooLarge'));
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => typeof reader.result === 'string'
+              ? resolve(reader.result.slice(reader.result.indexOf(',') + 1))
+              : reject(new Error(t('errDocRead')));
+            reader.onerror = reader.onabort = () => reject(new Error(t('errDocRead')));
+            reader.readAsDataURL(file);
+          });
+          await request('/local-materials', { method: 'POST', body: JSON.stringify({ name: file.name, base64 }) });
+          submissions[index] = { name: file.name, status: 'submitted' };
+        } catch (caught) {
+          submissions[index] = { name: file.name, status: 'failed', error: errorMessage(caught) };
+        }
+        setFileSubmissions(submissions.slice());
+      }
+      searchSequence.current++; setSearchResult(null); setSearchError(''); setSearching(false);
+      await load();
+    } finally {
+      actionInFlight.current = false;
+      setBusy('');
+    }
   }
+
   async function search(event: FormEvent) {
     event.preventDefault();
     const sequence = ++searchSequence.current;
@@ -841,61 +765,81 @@ export function KnowledgePage() {
     finally { if (sequence === searchSequence.current) setSearching(false); }
   }
 
-  const activeCardPlugin = activeSourceCard && activeSourceCard !== 'database'
-    ? overview?.plugins.find(p => p.id === activeSourceCard)
-    : null;
+  const activeCardPlugin = plugins.find(plugin => plugin.id === activeSourceCard);
 
   return <div className="knowledge-page">
     <header className="page-head knowledge-head">
       <div>
-        <span className="knowledge-eyebrow">{t('eyebrow')}</span>
         <h1>{t('pageTitle')}</h1>
         {overview?.spaceName && overview.spaceName !== DEFAULT_SPACE_NAME ? <p className="knowledge-space-name">{overview.spaceName}</p> : null}
       </div>
-      <button className="btn" type="button" onClick={() => void load()} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
+      <div className="knowledge-actions">
+        <button className="btn" type="button" onClick={() => {
+          setSourcesOpen(!sourcesOpen);
+          if (!sourcesOpen) window.setTimeout(() => document.getElementById('knowledge-sources')?.scrollIntoView({ block: 'nearest' }), 0);
+        }} aria-expanded={sourcesOpen} aria-controls="knowledge-sources">{t('manageSources')}</button>
+        <button className="btn" type="button" onClick={() => void load()} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
+      </div>
     </header>
-    <div className="knowledge-intro"><p>{t('introMain')}</p><p className="helper">{t('introSub')}</p></div>
+    <div className="knowledge-intro"><p>{t('introMain')}</p></div>
     {error ? <div className="knowledge-alert" role="alert">{error}</div> : null}
     {notice ? <div className="knowledge-notice" role="status">{notice}</div> : null}
     {!overview && loading ? <div className="panel knowledge-empty" role="status">{t('loadingState')}</div> : null}
     {overview ? <>
-      <ol className="panel knowledge-stepper" aria-label={t('progressLabel')}>
-        <li className={`knowledge-stepper-item ${step1Done ? 'is-done' : currentStep === 1 ? 'is-current' : ''}`}>
-          <div className="knowledge-stepper-head">
-            <span className="knowledge-step">01</span>
-            <strong>{t('step1Title')}</strong>
-            <span className={`knowledge-badge ${step1Done ? 'is-green' : currentStep === 1 ? 'is-gold' : ''}`}>{step1Done ? t('stepDone') : currentStep === 1 ? t('stepCurrent') : t('stepPending')}</span>
-          </div>
-          <p className="helper">{t('step1Desc')}</p>
-          {currentStep === 1 ? <button className="btn primary" type="button" onClick={focusStep1}>{t('step1Cta')}</button> : null}
-        </li>
-        <li className={`knowledge-stepper-item ${step2Done ? 'is-done' : currentStep === 2 ? 'is-current' : ''}`}>
-          <div className="knowledge-stepper-head">
-            <span className="knowledge-step">02</span>
-            <strong>{t('step2Title')}</strong>
-            <span className={`knowledge-badge ${step2Done ? 'is-green' : currentStep === 2 ? 'is-gold' : ''}`}>{step2Done ? t('stepDone') : currentStep === 2 ? t('stepCurrent') : t('stepPending')}</span>
-          </div>
-          <p className="helper">{t('step2Desc')}</p>
-          {currentStep === 2 ? <button className="btn primary" type="button" onClick={focusStep2}>{hasPendingItems ? t('step2CtaConfirm') : t('step2CtaUpload')}</button> : null}
-        </li>
-        <li className={`knowledge-stepper-item ${step3Done ? 'is-done' : currentStep === 3 ? 'is-current' : ''}`}>
-          <div className="knowledge-stepper-head">
-            <span className="knowledge-step">03</span>
-            <strong>{t('step3Title')}</strong>
-            <span className={`knowledge-badge ${step3Done ? 'is-green' : currentStep === 3 ? 'is-gold' : ''}`}>{step3Done ? t('stepDone') : currentStep === 3 ? t('stepCurrent') : t('stepPending')}</span>
-          </div>
-          <p className="helper">{t('step3Desc')}</p>
-        </li>
-      </ol>
+      <section className="panel knowledge-section" aria-labelledby="knowledge-upload-heading">
+        <div className="knowledge-section-head">
+          <div><h2 id="knowledge-upload-heading">{t('sec2Title')}</h2></div>
+          <button className="btn primary" type="button" disabled={!canUpload || !!busy} onClick={() => fileInput.current?.click()}>{t('addMaterials')}</button>
+        </div>
+        <input ref={fileInput} type="file" multiple hidden aria-label={t('chooseFiles')} disabled={!canUpload || !!busy} onChange={event => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = '';
+          void uploadFiles(files);
+        }} />
+        {canUpload ? <>
+          <button className={`knowledge-file-drop ${dragging ? 'is-dragging' : ''}`} type="button" disabled={!!busy}
+            onClick={() => fileInput.current?.click()}
+            onDragOver={event => {
+              if (!event.dataTransfer.types.includes('Files')) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = busy ? 'none' : 'copy';
+              if (!busy) setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={event => {
+              event.preventDefault();
+              setDragging(false);
+              void uploadFiles(Array.from(event.dataTransfer.files));
+            }}>{t('dropFiles')}</button>
+          <details className="knowledge-paste">
+            <summary>{t('pasteText')}</summary>
+            <form onSubmit={pasteMaterial} className="knowledge-form">
+              <label className="field"><span>{t('itemNameLabel')}</span><input required maxLength={180} value={uploadName} placeholder={t('itemNamePlaceholder')} onChange={event => setUploadName(event.target.value)} /></label>
+              <label className="field"><span>{t('itemTextLabel')}</span><textarea required rows={4} maxLength={200_000} value={uploadText} placeholder={t('itemTextPlaceholder')} onChange={event => setUploadText(event.target.value)} /></label>
+              <button className="btn" disabled={!!busy || !uploadName.trim() || !uploadText.trim()}>{busy === 'paste' ? t('submitting') : t('submitMaterialBtn')}</button>
+            </form>
+          </details>
+        </> : <p className="helper">{t('localUploadDisabled')}</p>}
+        {fileSubmissions.some(file => file.status !== 'submitted') ? <ul className="knowledge-source-list" aria-label={t('fileResults')} aria-live="polite">
+          {fileSubmissions.map((file, index) => file.status === 'submitted' ? null : <li key={index}>
+            <div><strong>{file.name}</strong>{file.error ? <small className="knowledge-job-error">{file.error}</small> : null}</div>
+            <span className={`knowledge-badge ${file.error ? 'is-warning' : ''}`}>{t(file.error ? 'failedFile' : 'sendingFile')}</span>
+          </li>)}
+        </ul> : null}
 
-      <dl className="knowledge-metrics">
-        <div><dt>{t('metricConnections')}</dt><dd>{overview.connections.length}<small>{t('metricConnectionsSub', { count: confirmedConnectionsCount })}</small></dd></div>
-        <div><dt>{t('metricConfirmed')}</dt><dd>{confirmedCount}<small>{t('metricConfirmedSub', { count: overview.items.length })}</small></dd></div>
-        <div><dt>{t('metricDrafts')}</dt><dd>{recommendations.length}<small>{t('metricDraftsSub')}</small></dd></div>
-      </dl>
+        {parseJobs.length ? <div className="knowledge-parse-jobs" aria-label={t('parseJobsAria')}><h3>{t('parseJobsTitle')}</h3><ul className="knowledge-source-list">{parseJobs.map(job => <li key={job.id}>
+          <div><strong>{job.name}</strong>{job.error && job.status === 'failed' ? <small className="knowledge-job-error">{t(job.error === 'auth' || job.error === 'scope' ? 'parseAccessFailed' : 'parseFileFailed')}</small> : null}{job.status === 'outcome_unknown' ? <small className="knowledge-job-error">{t('jobUnknownHint')}</small> : null}</div>
+          <span className={`knowledge-badge ${job.status === 'outcome_unknown' || job.status === 'failed' ? 'is-warning' : ''}`}>{label(job.status)}</span>
+        </li>)}</ul></div> : null}
 
-      <section className="panel knowledge-section" aria-labelledby="knowledge-sources-heading">
-        <div className="knowledge-section-head"><span className="knowledge-step">01</span><div><h2 id="knowledge-sources-heading">{t('sec1Title')}</h2><p className="helper">{t('sec1Sub')}</p></div></div>
+        {overview.items.length ? <ul id="knowledge-items-list" className="knowledge-source-list knowledge-items">{overview.items.map(item => <li key={item.id}>
+          <div><strong>{item.title}</strong><small>{t('versionMeta', { version: item.version, locator: item.locator })}</small><small>{pluginName(item.pluginId, overview.plugins)}{item.confirmed ? '' : ` · ${t('itemStatusPending')}`}</small><ItemPreview key={`${item.id}:${item.version}`} item={item} request={request} errorMessage={errorMessage} t={t} /></div>
+          {item.confirmed ? <span className="knowledge-badge is-green">{t('readyFile')}</span> : ['deleted', 'revoked', 'parse_failed'].includes(item.status) ? <span className="knowledge-badge">{t('badgeUnavailable')}</span> : overview.canConfirm ? <button className="btn" disabled={!!busy} title={t('confirmItemTitle', { version: item.version })} onClick={() => void action(`item:${item.id}`, `/items/${encodeURIComponent(item.id)}/confirm`, { version: item.version }, t('confirmItemSuccess'))}>{t('confirmItemBtn')}</button> : null}
+        </li>)}</ul> : !parseJobs.length && !fileSubmissions.length ? <p className="knowledge-empty">{t('noMaterials')}</p> : null}
+      </section>
+
+      <section id="knowledge-sources" className="panel knowledge-section" hidden={!sourcesOpen} aria-labelledby="knowledge-sources-heading">
+        <div className="knowledge-section-head"><div><h2 id="knowledge-sources-heading">{t('sec1Title')}</h2><p className="helper">{t('sec1Sub')}</p></div></div>
         <div className="knowledge-plugins knowledge-source-cards" aria-label={t('pluginsAria')}>
           {orderedPlugins.map(plugin => {
             const isSelected = activeSourceCard === plugin.id;
@@ -905,27 +849,25 @@ export function KnowledgePage() {
                 <strong>{pluginDisplay(plugin).name}</strong>
                 <span className="knowledge-badge">{!plugin.installed ? t('badgeNotInstalled') : !plugin.enabled ? t('badgePaused') : plugin.configured ? t('badgeEnabledConfigured') : t('badgeInstalledPending')}</span>
               </div>
-              <small>{plugin.builtIn ? t('builtInPrefix') : ''}{pluginDisplay(plugin).capabilities.join(' · ') || t('capsFallback')}</small>
+              <small>{plugin.id === 'local-file' ? t('automaticLocal') : pluginDisplay(plugin).capabilities.join(' · ') || t('capsFallback')}</small>
               <div className="knowledge-source-card-actions">
                 {!plugin.installed ? <button className="btn" type="button" disabled={!!busy} onClick={() => void action(`install:${plugin.id}`, `/plugins/${encodeURIComponent(plugin.id)}/install`, {}, t('pluginInstalledNotice'))}>{t('installPluginBtn', { name: pluginDisplay(plugin).name })}</button> : <button className="btn" type="button" disabled={!!busy} onClick={() => void action(`plugin:${plugin.id}`, `/plugins/${encodeURIComponent(plugin.id)}`, { enabled: !plugin.enabled }, plugin.enabled ? t('pluginPausedNotice') : t('pluginEnabledNotice'))}>{plugin.enabled ? t('pausePluginBtn', { name: pluginDisplay(plugin).name }) : t('enablePluginBtn', { name: pluginDisplay(plugin).name })}</button>}
-                {readyToConfigure || plugin.id === 'database' ? <button className="btn" type="button" onClick={() => selectSourceCard(plugin.id)}>{isSelected && plugin.id !== 'database' ? t('hideConfigBtn') : t('configureCardBtn')}</button> : null}
+                {plugin.id !== 'local-file' && (readyToConfigure || plugin.id === 'database') ? <button className="btn" type="button" onClick={() => selectSourceCard(plugin.id)}>{isSelected && plugin.id !== 'database' ? t('hideConfigBtn') : t('configureCardBtn')}</button> : null}
               </div>
             </div>;
           })}
         </div>
         <p className="helper knowledge-plugin-hint">{t('pluginHint')}</p>
 
-        {activeSourceCard && activeSourceCard !== 'database' ? <form onSubmit={createConnection} className="knowledge-form knowledge-inset">
-          <h3>{t('connFormTitle', { name: activeCardPlugin ? pluginDisplay(activeCardPlugin).name : selectedPlugin })}</h3>
+        {activeCardPlugin ? <form onSubmit={createConnection} className="knowledge-form knowledge-inset">
+          <h3>{t('connFormTitle', { name: pluginDisplay(activeCardPlugin).name })}</h3>
           <label className="field"><span>{t('connNameLabel')}</span><input required maxLength={160} value={connectionName} placeholder={t('connNamePlaceholder')} onChange={event => setConnectionName(event.target.value)} /></label>
           <label className="field"><span>{t('sourcePluginLabel')}</span><select value={selectedPlugin} onChange={event => { setPluginId(event.target.value); setActiveSourceCard(event.target.value); setResourceId(''); setReadOnlyAcknowledged(false); }} disabled={!plugins.length}>{!plugins.length ? <option value="">{t('noReadyPlugin')}</option> : plugins.map(plugin => <option key={plugin.id} value={plugin.id}>{pluginDisplay(plugin).name}</option>)}</select></label>
-          {remotePlugin ? <>
-            <label className="field"><span>{t('approvedResourceLabel')}</span><select value={selectedResource?.id ?? ''} disabled={!sourceResources.length || !!busy} onChange={event => { setResourceId(event.target.value); setReadOnlyAcknowledged(false); }}>{!sourceResources.length ? <option value="">{t('noApprovedResource')}</option> : sourceResources.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}</select></label>
-            {selectedResource ? <ScopeSummary scope={selectedResource.scope} projectIds={selectedResource.projectIds} t={t} /> : <p className="helper">{t('needAdminScope')}</p>}
-            <label className="knowledge-check"><input type="checkbox" required checked={readOnlyAcknowledged} onChange={event => setReadOnlyAcknowledged(event.target.checked)} /><span>{t('readOnlyAckLabel')}</span></label>
-          </> : null}
+          <label className="field"><span>{t('approvedResourceLabel')}</span><select value={selectedResource?.id ?? ''} disabled={!sourceResources.length || !!busy} onChange={event => { setResourceId(event.target.value); setReadOnlyAcknowledged(false); }}>{!sourceResources.length ? <option value="">{t('noApprovedResource')}</option> : sourceResources.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}</select></label>
+          {selectedResource ? <ScopeSummary scope={selectedResource.scope} projectIds={selectedResource.projectIds} t={t} /> : <p className="helper">{t('needAdminScope')}</p>}
+          <label className="knowledge-check"><input type="checkbox" required checked={readOnlyAcknowledged} onChange={event => setReadOnlyAcknowledged(event.target.checked)} /><span>{t('readOnlyAckLabel')}</span></label>
           <p className="helper">{t('connFormHint')}</p>
-          <button className="btn" disabled={!!busy || !selectedPlugin || !connectionName.trim() || (remotePlugin && (!selectedResource || !readOnlyAcknowledged))}>{busy === 'connection' ? t('creatingConn') : t('createConnBtn')}</button>
+          <button className="btn" disabled={!!busy || !selectedPlugin || !connectionName.trim() || !selectedResource || !readOnlyAcknowledged}>{busy === 'connection' ? t('creatingConn') : t('createConnBtn')}</button>
         </form> : null}
 
         {overview.connections.length ? <ul className="knowledge-source-list">{overview.connections.map(connection => <li key={connection.id}>
@@ -933,47 +875,14 @@ export function KnowledgePage() {
           <span className={`knowledge-badge ${connection.status === 'confirmed' ? 'is-green' : ''}`}>{label(connection.status)}</span>
           {overview.canConfirm && ['draft', 'tested', 'pending_confirmation', 'sync_failed', 'needs_reauth'].includes(connection.status) ? <button className="btn" disabled={!!busy} onClick={() => void action(`confirm:${connection.id}`, `/connections/${encodeURIComponent(connection.id)}/confirm`, {}, t('connConfirmedNotice'))}>{connection.status === 'draft' ? t('confirmConnBtn') : t('retestConfirmBtn')}</button> : null}
           {overview.canConfirm && connection.status === 'confirmed' ? <button className="btn" disabled={!!busy} onClick={() => void action(`confirm:${connection.id}`, `/connections/${encodeURIComponent(connection.id)}/confirm`, {}, t('connRetestedNotice'))}>{t('retestConnBtn')}</button> : null}
-          {['email', 'sharepoint'].includes(connection.pluginId) ? <RemoteSourcePreview connection={connection} resource={overview.sourceResources?.find(resource => resource.id === connection.scope?.resourceId)} active={overview.plugins.some(plugin => plugin.id === connection.pluginId && plugin.installed && plugin.enabled && plugin.configured)} disabled={!!busy} onAction={action} request={request} errorMessage={errorMessage} t={t} /> : null}
+          {['email', 'sharepoint', 'mcp'].includes(connection.pluginId) ? <RemoteSourcePreview connection={connection} resource={overview.sourceResources?.find(resource => resource.id === connection.scope?.resourceId)} active={overview.plugins.some(plugin => plugin.id === connection.pluginId && plugin.installed && plugin.enabled && plugin.configured)} disabled={!!busy} onAction={action} request={request} errorMessage={errorMessage} t={t} /> : null}
         </li>)}</ul> : <p className="knowledge-empty">{t('noConnections')}</p>}
-      </section>
-
-      <section className="panel knowledge-section" aria-labelledby="knowledge-upload-heading">
-        <div className="knowledge-section-head"><span className="knowledge-step">02</span><div><h2 id="knowledge-upload-heading">{t('sec2Title')}</h2><p className="helper">{t('sec2Sub')}</p></div></div>
-        <div className="knowledge-grid">
-          <form onSubmit={upload} className="knowledge-form">
-            <label className="field"><span>{t('confirmedLocalLabel')}</span><select value={selectedConnection} onChange={event => setConnectionId(event.target.value)} disabled={!uploadConnections.length}>{!uploadConnections.length ? <option value="">{t('noLocalConn')}</option> : uploadConnections.map(connection => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label>
-            <label className="knowledge-file field"><span>{readingFile ? t('readingTextFile') : t('pickTextFile')}</span><input type="file" accept=".txt,.md,.csv,.markdown,text/plain,text/markdown,text/csv" disabled={readingFile || !!busy || !selectedConnection} onChange={event => { void readFile(event.target.files?.[0]); event.target.value = ''; }} /></label>
-            <label className="field"><span>{t('itemNameLabel')}</span><input required maxLength={180} value={uploadName} onChange={event => setUploadName(event.target.value)} placeholder={t('itemNamePlaceholder')} /></label>
-            <label className="field"><span>{t('itemTextLabel')}</span><textarea required rows={4} maxLength={200_000} value={uploadText} onChange={event => setUploadText(event.target.value)} placeholder={t('itemTextPlaceholder')} /></label>
-            <p className="helper">{t('uploadTextHint')}</p>
-            <button className="btn" disabled={!!busy || readingFile || !selectedConnection || !uploadName.trim() || !uploadText.trim()}>{busy === 'upload' ? t('submitting') : t('submitMaterialBtn')}</button>
-          </form>
-
-          <form onSubmit={uploadBinary} className="knowledge-form" aria-labelledby="knowledge-binary-heading">
-            <h3 id="knowledge-binary-heading">{t('binaryHeading')}</h3>
-            <label className="knowledge-file field"><span>{t('pickBinaryLabel')}</span><input type="file" accept=".pdf,.png,.jpg,.jpeg,.tiff,.docx,.xlsx,.pptx" disabled={!!busy || readingBinary || !selectedConnection} onChange={event => { chooseBinary(event.target.files?.[0]); event.target.value = ''; }} /></label>
-            {binaryFile ? <p className="helper">{t('binarySelected', { name: binaryFile.name, size: (binaryFile.size / 1024 / 1024).toFixed(2) })}</p> : null}
-            <p className="helper">{t('binaryHint')}</p>
-            <button className="btn" disabled={!!busy || readingBinary || !selectedConnection || !binaryFile}>{readingBinary || busy === 'binary' ? t('submittingBinary') : t('submitBinaryBtn')}</button>
-          </form>
-        </div>
-
-        {overview.parseJobs.length ? <div className="knowledge-parse-jobs" aria-label={t('parseJobsAria')}><h3>{t('parseJobsTitle')}</h3><ul className="knowledge-source-list">{overview.parseJobs.map(job => <li key={job.id}>
-          <div><strong>{job.name}</strong><small>{t('jobId', { id: job.id })}</small>{job.error ? <small className="knowledge-job-error">{lang === 'zh' ? job.error : t('reqFailed')}</small> : null}{job.status === 'completed' ? <small>{t('jobCompletedHint')}</small> : job.status === 'outcome_unknown' ? <small className="knowledge-job-error">{t('jobUnknownHint')}</small> : null}</div>
-          <span className={`knowledge-badge ${job.status === 'completed' ? 'is-green' : job.status === 'outcome_unknown' || job.status === 'failed' ? 'is-warning' : ''}`}>{label(job.status)}</span>
-        </li>)}</ul></div> : null}
-
-        {overview.items.length ? <ul id="knowledge-items-list" className="knowledge-source-list knowledge-items">{overview.items.map(item => <li key={item.id}>
-          <div><strong>{item.title}</strong><small>{t('versionMeta', { version: item.version, locator: item.locator })}</small><small>{label(item.status)} · {item.confirmed ? t('itemStatusConfirmed') : t('itemStatusPending')}</small><ItemPreview key={`${item.id}:${item.version}`} item={item} request={request} errorMessage={errorMessage} t={t} /></div>
-          {item.confirmed ? <span className="knowledge-badge is-green">{t('badgeConfirmed')}</span> : ['deleted', 'revoked', 'parse_failed'].includes(item.status) ? <span className="knowledge-badge">{t('badgeUnavailable')}</span> : overview.canConfirm ? <button className="btn" disabled={!!busy} title={t('confirmItemTitle', { version: item.version })} onClick={() => void action(`item:${item.id}`, `/items/${encodeURIComponent(item.id)}/confirm`, { version: item.version }, t('confirmItemSuccess'))}>{t('confirmItemBtn')}</button> : null}
-        </li>)}</ul> : <p className="knowledge-empty">{t('noItems')}</p>}
       </section>
 
       <section className="panel knowledge-section" aria-labelledby="knowledge-analysis-heading">
         <div className="knowledge-section-head">
-          <span className="knowledge-step">03</span>
           <div><h2 id="knowledge-analysis-heading">{t('sec3Title')}</h2><p className="helper">{t('sec3Sub')}</p></div>
-          <button className={currentStep === 3 ? 'btn primary' : 'btn'} disabled={!!busy || analysisActive || !confirmedCount} onClick={() => void action('analysis', '/analyses', {}, t('analysisSubmittedNotice'))}>{busy === 'analysis' ? t('submitting') : analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}</button>
+          <button className="btn" disabled={!!busy || analysisActive || !confirmedCount} onClick={() => void action('analysis', '/analyses', {}, t('analysisSubmittedNotice'))}>{busy === 'analysis' ? t('submitting') : analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}</button>
         </div>
         {!confirmedCount ? <p className="helper">{t('needConfirmedHint')}</p> : null}
         {overview.analyses.length ? <ul className="knowledge-runs">{overview.analyses.slice(-5).reverse().map(run => <li key={run.id}><span className={`knowledge-badge ${run.status === 'completed' ? 'is-green' : ''}`}>{label(run.status)}</span><span>{label(run.stage)}</span><small>{run.id}</small></li>)}</ul> : <p className="knowledge-empty">{t('noAnalyses')}</p>}
@@ -981,7 +890,7 @@ export function KnowledgePage() {
       </section>
 
       <section className="panel knowledge-section" aria-labelledby="knowledge-search-heading">
-        <div className="knowledge-section-head"><span className="knowledge-step">Q</span><div><h2 id="knowledge-search-heading">{t('secSearchTitle')}</h2><p className="helper">{t('secSearchSub')}</p></div></div>
+        <div className="knowledge-section-head"><div><h2 id="knowledge-search-heading">{t('secSearchTitle')}</h2><p className="helper">{t('secSearchSub')}</p></div></div>
         <form className="knowledge-search-form" onSubmit={search}><label className="field"><span>{t('searchLabel')}</span><input required maxLength={200} value={query} onChange={event => setQuery(event.target.value)} placeholder={t('searchPlaceholder')} /></label><button className="btn" disabled={searching || !!busy || !query.trim()}>{searching ? t('searchingBtn') : t('searchBtn')}</button></form>
         {searchError ? <p className="knowledge-alert" role="alert">{searchError}</p> : null}
         {searchResult ? <div className="knowledge-search-result" aria-live="polite">{searchResult.hits.length ? <><p className="knowledge-answer">{searchResult.answer || t('searchFoundDefault')}</p><EvidenceList evidence={searchResult.hits} t={t} /></> : <p className="knowledge-empty">{t('searchNoHits')}</p>}</div> : <p className="helper">{t('searchIdleHint')}</p>}

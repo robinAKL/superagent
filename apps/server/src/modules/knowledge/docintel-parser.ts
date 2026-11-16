@@ -25,7 +25,11 @@ const MIME: Record<string, string> = {
   htm: 'text/html',
 };
 
-export const mimeFor = (fileName: string): string | null => MIME[fileName.split('.').pop()?.toLowerCase() ?? ''] ?? null;
+export function mimeFor(fileName: string): string | null {
+  const dot = fileName.lastIndexOf('.');
+  const extension = dot < 0 ? '' : fileName.slice(dot + 1).toLowerCase();
+  return Object.hasOwn(MIME, extension) ? MIME[extension]! : null;
+}
 
 export interface DocIntelParserOptions {
   maxPolls?: number;

@@ -69,6 +69,8 @@ export interface SourceItemRef {
   title: string;
   locator: string; // original-system link or path
   change: SourceChange;
+  /** On explicit sync, read the approved item and derive its version from its returned content. */
+  contentVersion?: 'hash';
 }
 
 export interface AclEntry {

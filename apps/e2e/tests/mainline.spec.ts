@@ -1,6 +1,6 @@
 /**
  * T-47 main line, end to end through the real app:
- *   upload → confirm source → analysis → employee + tool → SOP (validate, publish) → trigger
+ *   upload → analysis → employee + tool → SOP (validate, publish) → trigger
  *   → 待我处理 approval → gateway write → read-back, plus the read-back-mismatch exception path.
  * Synthetic parts are the external ones only: the knowledge source/model drivers (knowledge fixture) and the ERP the
  * tool writes to (in-memory ledger on the E2E server). Everything else is the product code.
@@ -33,18 +33,11 @@ const overview = (page: Page) => json<Overview>(page.request.get('/api/v1/knowle
 test('main line: knowledge → employee and tool → SOP → trigger → approval → write → read-back', async ({ page }) => {
   await json(page.request.post('/__test/knowledge/reset', { data: {} }));
 
-  await test.step('upload a policy file and confirm the source and its version', async () => {
-    const conn = await json<{ id: string }>(page.request.post('/api/v1/knowledge/connections', { data: { name: '付款制度', pluginId: 'local-file', scope: {} } }));
-    await json(page.request.post(`/api/v1/knowledge/connections/${conn.id}/confirm`, { data: {} }));
+  await test.step('upload a policy file and make it searchable', async () => {
     await page.goto('/#knowledge');
-    await page.getByLabel('选择文本文件（.txt / .md / .csv / .markdown，最多 2 MB）').setInputFiles({ name: '付款制度.md', mimeType: 'text/markdown', buffer: Buffer.from(POLICY) });
-    const submitted = page.waitForResponse((r) => r.url().endsWith('/knowledge/uploads') && r.request().method() === 'POST');
-    await page.getByRole('button', { name: '提交资料', exact: true }).click();
-    expect((await submitted).ok()).toBe(true);
-    for (const item of (await overview(page)).items.filter((i) => !i.confirmed)) {
-      await json(page.request.post(`/api/v1/knowledge/items/${item.id}/confirm`, { data: { version: item.version } }));
-    }
-    expect((await overview(page)).items.every((i) => i.confirmed)).toBe(true);
+    await page.getByLabel('选择文件', { exact: true }).setInputFiles({ name: '付款制度.md', mimeType: 'text/markdown', buffer: Buffer.from(POLICY) });
+    await expect(page.getByText('可搜索', { exact: true })).toBeVisible();
+    expect((await overview(page)).items).toEqual([expect.objectContaining({ confirmed: true })]);
   });
 
   let employeeId = '';
