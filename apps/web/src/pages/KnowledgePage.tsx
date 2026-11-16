@@ -55,6 +55,7 @@ const TEXT = {
     noMaterials: 'No materials yet.',
     mcpResources: 'Approved MCP resources',
     errUnreadableFile: 'This file could not be read.',
+    errUnreadableWorkbook: 'This workbook could not be read. If it is password-protected, upload an unlocked copy.',
     errTooLarge: 'This file exceeds the upload or extracted text size limit.',
     status_draft: 'Pending confirmation',
     status_ready: 'Connection confirmed',
@@ -243,6 +244,7 @@ const TEXT = {
     noMaterials: '还没有资料。',
     mcpResources: '已授权的 MCP 资源',
     errUnreadableFile: '无法读取此文件。',
+    errUnreadableWorkbook: '无法读取此工作簿。如果文件受密码保护，请上传解锁后的副本。',
     errTooLarge: '文件或提取出的文本超过大小限制。',
     status_draft: '待确认',
     status_ready: '已确认连接',
@@ -583,6 +585,7 @@ export function KnowledgePage() {
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await api<T & { message?: string; error?: string }>(ROOT + path, init);
     if (response.status < 200 || response.status >= 300 || response.body.error) {
+      if (response.body.error === 'workbook_unreadable') throw new Error(t('errUnreadableWorkbook'));
       if (response.body.error === 'unsupported_file' || response.body.error === 'unreadable_file') throw new Error(t('errUnreadableFile'));
       if (response.status === 413 || response.body.error === 'text_too_large') throw new Error(t('errTooLarge'));
       throw new Error((lang === 'zh' ? response.body.message : undefined) ?? t('reqFailedHttp', { status: response.status }));

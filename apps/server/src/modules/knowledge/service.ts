@@ -1,14 +1,15 @@
-import type { KnowledgeSourcePlugin, UserContext } from '@superagent/shared';
+import type { KnowledgeSourcePlugin, SourceContent, UserContext } from '@superagent/shared';
 import { confirmSource, evidenceValid, hash, hydrate, id, invalidateAnalyses, KnowledgeError, mayRead, positionedChunks, pluginInstalled, selectedItem, requireManager, signature, snapshot, stamp, type KnowledgeState, type Evidence } from './domain.js';
 import { managedSource, publicSourceScope, sourceScope, type SourceResource } from './sources.js';
 import type { Item } from './store.js';
 import type { AuditSink } from '../audit/audit.js';
 import type { KnowledgeRepository, SearchHit } from './repository.js';
 import { syncConnection } from './sync.js';
-import { createLocalFilePlugin } from './plugins/local-file.js';
+import { createLocalFilePlugin, textWithLineAnchors } from './plugins/local-file.js';
 import type { AnalysisModel } from '../analysis/service.js';
 import { decodeUpload, queueBinaryUpload, queueDocument, type BinaryDeps } from './binary.js';
 import { mimeFor } from './docintel-parser.js';
+import { parseMacroWorkbook } from './xlsm-parser.js';
 import type { DatabaseGateway } from './database.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
@@ -240,6 +241,9 @@ export class KnowledgeService {
     requireManager(ctx);
     const name = bounded(input.name, 180, '文件名');
     if (/[\\/\x00-\x1f]/.test(name)) throw new KnowledgeError('invalid_file', '文件名无效。');
+    if (input.text === undefined && /\.xlsm$/i.test(name)) {
+      return this.publishLocalContent(ctx, name, await parseMacroWorkbook(decodeUpload(input.base64), name));
+    }
     const mime = input.text === undefined ? mimeFor(name) : null;
     if (mime) {
       if (!this.deps.binary) throw new KnowledgeError('parser_unavailable', 'Azure 文档解析和文件存储尚未配置。', 503);
@@ -261,13 +265,16 @@ export class KnowledgeService {
     const text = typeof decoded === 'string' ? decoded : '';
     if (!text.trim()) throw new KnowledgeError('unreadable_file', '未能读取资料内容。', 422);
     if (/[\x00-\x08\x0e-\x1f]/.test(text)) throw new KnowledgeError('unsupported_file', '无法读取此文件格式。');
+    return this.publishLocalContent(ctx, name, textWithLineAnchors(text, name));
+  }
+  private async publishLocalContent(ctx: UserContext, name: string, content: SourceContent) {
     return this.deps.repo.transact(ctx, async s => {
       const connectionId = this.automaticLocalConnection(s, ctx);
       const store = hydrate(s.source);
       if (!store.currentItem(connectionId, name) && s.source.items.filter(item => item.current && item.connectionId === connectionId).length >= 200) {
         throw new KnowledgeError('corpus_limit', '试点资料数已达到上限。', 409);
       }
-      const plugin = createLocalFilePlugin(new Map([[connectionId, [{ name, bytes: Buffer.from(text), version: hash(text), audience: [ctx.userId], plainText: true }]]]));
+      const plugin = createLocalFilePlugin(new Map([[connectionId, [{ name, content, version: hash(content.text), audience: [ctx.userId] }]]]));
       const result = await syncConnection(store, plugin, connectionId);
       const item = store.currentItem(connectionId, name);
       if (result.error || !item || item.status !== 'parsed') throw new KnowledgeError('unreadable_file', '未能读取资料内容。', 422);
