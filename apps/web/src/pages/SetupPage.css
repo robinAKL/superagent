@@ -1,0 +1,15 @@
+.setup-page { max-width: 54rem; }
+.setup-card { display: grid; gap: var(--space-md); margin-bottom: var(--space-md); }
+.setup-card-head, .setup-result { display: grid; gap: var(--space-xs); }
+.setup-card-head p, .setup-card-head h2, .setup-card p { margin: 0; }
+.setup-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-sm) var(--space-md); padding: 0; margin: 0; border: 0; min-width: 0; }
+.setup-wide { grid-column: 1 / -1; }
+.setup-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-sm); margin-top: var(--space-md); }
+.setup-budget-controls { align-items: end; margin-top: 0; }
+.setup-budget-controls .field { flex: 1 1 13rem; max-width: 21rem; }
+.setup-result { border-top: 1px solid var(--color-rule); padding-top: var(--space-md); }
+.setup-result button { justify-self: start; }
+.setup-result details .setup-fields { margin: var(--space-xs) 0; }
+.setup-success { color: var(--color-success); }
+.setup-error { color: var(--color-error); }
+@media (max-width: 42rem) { .setup-fields { grid-template-columns: minmax(0, 1fr); } }

@@ -5,6 +5,7 @@
 import type { LlmProviderId, ModelInfo } from '@superagent/shared';
 import { createProvider, ProviderHttpError, type FetchLike } from './providers.js';
 import type { SecretStore, SecretVersion } from './secrets.js';
+import { setupModelPrice } from './model-catalog.js';
 
 export const SECRET_NAME = 'llm-provider-key';
 
@@ -31,12 +32,13 @@ export interface ConfigRepo {
 export interface Allowlist {
   /** Models the platform has capability-tested, with results. */
   verified(provider: LlmProviderId): Promise<Map<string, ModelInfo['verified']>>;
+  registerSetupModel?(provider: LlmProviderId, model: string): Promise<void>;
 }
 
 export interface TestResult {
   auth: 'ok' | 'invalid_key' | 'quota' | 'network' | 'error';
   listing: 'ok' | 'not_permitted' | 'failed';
-  tools: 'ok' | 'failed' | 'skipped';
+  tools: 'ok' | 'failed' | 'inconclusive' | 'skipped';
   models: ModelInfo[];
   message: string;
 }
@@ -61,36 +63,54 @@ export interface CandidateKey {
 
 /** Three separate checks. Only an authentication failure marks the key invalid (PRD §3.1). */
 export async function testKey(c: CandidateKey, deps: Pick<SetupDeps, 'allowlist' | 'fetchFn'>): Promise<TestResult> {
-  const p = createProvider({ provider: c.provider, apiKey: c.apiKey, endpoint: c.endpoint, deployments: c.deployments }, deps.fetchFn);
+  const canVerify = !!setupModelPrice(c.provider, c.probeModel);
+  const p = createProvider({
+    provider: c.provider, apiKey: c.apiKey, endpoint: c.endpoint, deployments: c.deployments,
+    probeReasoningEffort: canVerify ? 'minimal' : undefined,
+  }, deps.fetchFn);
   const result: TestResult = { auth: 'error', listing: 'failed', tools: 'skipped', models: [], message: '' };
+  let chatVerified = false;
   try {
-    await p.chat({ model: c.probeModel, messages: [{ role: 'user', content: 'ping' }], maxOutputTokens: 16 });
+    const chat = await p.chat({
+      model: c.probeModel,
+      messages: [{ role: 'user', content: canVerify ? 'Reply with exactly OK.' : 'ping' }],
+      maxOutputTokens: canVerify ? 256 : 16,
+    });
+    chatVerified = /^ok[.!]?$/i.test(chat.text.trim()) && chat.usage.inputTokens > 0 && chat.usage.outputTokens > 0;
     result.auth = 'ok';
   } catch (e) {
     result.auth = e instanceof ProviderHttpError ? (e.kind === 'auth' ? 'invalid_key' : e.kind === 'quota' ? 'quota' : 'error') : 'network';
     result.message = e instanceof ProviderHttpError ? `provider ${e.status}` : 'network error';
     return result;
   }
+  let listed: ModelInfo[] = [];
   try {
-    const listed = await p.listModels();
-    const verified = await deps.allowlist.verified(c.provider);
-    result.models = listed.map((m) => ({ ...m, verified: verified.get(m.id) ?? null }));
+    listed = await p.listModels();
     result.listing = 'ok';
   } catch (e) {
     result.listing = e instanceof ProviderHttpError && (e.kind === 'forbidden' || e.kind === 'auth') ? 'not_permitted' : 'failed';
-    result.message = 'Cannot list models automatically; enter an allowlisted model id.';
   }
   try {
     const r = await p.chat({
       model: c.probeModel,
       messages: [{ role: 'user', content: 'Call the echo tool with value "ok".' }],
       tools: [{ name: 'echo', description: 'Echo a value', inputSchema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] } }],
-      maxOutputTokens: 64,
+      maxOutputTokens: 512,
     });
-    result.tools = r.toolCalls.some((t) => t.name === 'echo') ? 'ok' : 'failed';
+    const echo = r.toolCalls.find(t => t.name === 'echo')?.input;
+    const validEcho = echo && typeof echo === 'object' && 'value' in echo && echo.value === 'ok';
+    result.tools = validEcho ? 'ok' : r.stopReason === 'length' ? 'inconclusive' : 'failed';
+    if (canVerify && chatVerified && result.tools === 'ok' && r.usage.inputTokens > 0 && r.usage.outputTokens > 0) {
+      await deps.allowlist.registerSetupModel?.(c.provider, c.probeModel);
+    }
   } catch {
-    result.tools = 'failed';
+    if (result.tools === 'skipped') result.tools = 'failed';
   }
+  const verified = await deps.allowlist.verified(c.provider);
+  if (verified.has(c.probeModel) && !listed.some(m => m.id === c.probeModel)) {
+    listed.push({ id: c.probeModel, provider: c.provider, verified: null });
+  }
+  result.models = listed.map(m => ({ ...m, verified: verified.get(m.id) ?? null }));
   return result;
 }
 

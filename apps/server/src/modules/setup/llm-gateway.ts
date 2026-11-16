@@ -1,8 +1,7 @@
 /**
  * Budgeted LLM gateway (PRD §3.1, §5.4): the only path from platform code to a model.
  *   Setup config → key from Key Vault → bounded reservation → call → settle / release / freeze.
- * The reservation is a proven upper bound: input tokens ≤ UTF-8 bytes of the serialised request (every token is at
- * least one byte), output tokens ≤ maxOutputTokens. Models without a price, or whose billing cannot be bounded, are
+ * The reservation uses the model's input bound and maxOutputTokens. Models without a price, or whose billing cannot be bounded, are
  * refused: there is no soft cap and no fallback "fake" model.
  */
 import type { ChatRequest, ChatResponse, LlmProvider } from '@superagent/shared';
@@ -29,12 +28,14 @@ export class LlmCallFailed extends Error {
 }
 
 /**
- * A verified model record: prices plus the protocol overhead (system/message/tool wrapper tokens) measured by the
- * platform's capability test. Both are needed to state a hard upper bound; a record missing either is unusable.
+ * A verified model needs prices and an upper bound on input tokens. Use either measured protocol overhead
+ * or the model's documented context ceiling. The latter reserves more and settles against actual usage.
  */
-export interface PricedModel extends Price {
-  overheadTokens: { perRequest: number; perMessage: number; perTool: number };
-}
+type ProtocolOverhead = { perRequest: number; perMessage: number; perTool: number };
+export type PricedModel = Price & (
+  { overheadTokens: ProtocolOverhead; maxInputTokens?: never } |
+  { maxInputTokens: number; overheadTokens?: never }
+);
 
 export interface PriceBook {
   price(provider: string, model: string): Promise<PricedModel | null>;
@@ -44,13 +45,17 @@ export interface PriceBook {
 
 const nonNegInt = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
 
-/** Accepts only finite, non-negative integer prices and overheads with fullyBoundable === true. */
+/** Accepts only verified prices with a usable input bound. */
 export function validPricedModel(v: unknown): PricedModel | null {
   const p = v as Partial<PricedModel> | null | undefined;
   if (!p || !nonNegInt(p.inputPerMTokMicroUsd) || !nonNegInt(p.outputPerMTokMicroUsd) || p.fullyBoundable !== true) return null;
+  const rates = { inputPerMTokMicroUsd: p.inputPerMTokMicroUsd, outputPerMTokMicroUsd: p.outputPerMTokMicroUsd, fullyBoundable: true as const };
+  if (p.maxInputTokens !== undefined) {
+    return nonNegInt(p.maxInputTokens) && p.maxInputTokens > 0 ? { ...rates, maxInputTokens: p.maxInputTokens } : null;
+  }
   const o = p.overheadTokens;
   if (!o || !nonNegInt(o.perRequest) || !nonNegInt(o.perMessage) || !nonNegInt(o.perTool)) return null;
-  return { inputPerMTokMicroUsd: p.inputPerMTokMicroUsd, outputPerMTokMicroUsd: p.outputPerMTokMicroUsd, fullyBoundable: true, overheadTokens: { perRequest: o.perRequest, perMessage: o.perMessage, perTool: o.perTool } };
+  return { ...rates, overheadTokens: { perRequest: o.perRequest, perMessage: o.perMessage, perTool: o.perTool } };
 }
 
 export interface LlmGatewayDeps {
@@ -76,7 +81,7 @@ export interface BudgetedResponse extends ChatResponse {
  * Input-token upper bound: every content token is at least one UTF-8 byte of the serialised request, plus the
  * protocol overhead the platform measured for this model (per request, per message, per tool definition).
  */
-export function inputTokenUpperBound(req: BudgetedRequest, overhead: PricedModel['overheadTokens']): number {
+export function inputTokenUpperBound(req: BudgetedRequest, overhead: ProtocolOverhead): number {
   const bytes = Buffer.byteLength(JSON.stringify({ messages: req.messages, tools: req.tools ?? [] }), 'utf8');
   return bytes + overhead.perRequest + overhead.perMessage * req.messages.length + overhead.perTool * (req.tools?.length ?? 0);
 }
@@ -118,7 +123,8 @@ export function createLlmGateway(deps: LlmGatewayDeps): LlmGateway {
     async chat(tenantId, tier, req) {
       if (!Number.isInteger(req.maxOutputTokens) || req.maxOutputTokens <= 0) throw new Error('maxOutputTokens must be a positive integer');
       const { rec, model, price } = await resolve(tenantId, tier);
-      const reserved = maxBillableMicroUsd(inputTokenUpperBound(req, price.overheadTokens), req.maxOutputTokens, price);
+      const inputBound = typeof price.maxInputTokens === 'number' ? price.maxInputTokens : inputTokenUpperBound(req, price.overheadTokens);
+      const reserved = maxBillableMicroUsd(inputBound, req.maxOutputTokens, price);
       const month = (deps.now?.() ?? new Date()).toISOString().slice(0, 7);
       if (rec.monthlyCapMicroUsd == null) throw new LlmUnavailable('budget_not_set', 'no monthly model budget is set in Setup');
       // The store checks against the cap current at reservation time, not the snapshot read above.

@@ -13,8 +13,8 @@ test('settings shows no Chinese in English, including the test result, and Chine
   const main = page.locator('main');
   await expect(main.getByRole('heading', { level: 1 })).toHaveText('Settings');
   await expect(main).toContainText('Status: ');
-  await page.getByLabel('API key (sent only to the server, stored in Key Vault)').fill('e2e-wrong-key-1111BAD');
-  await page.getByLabel('Model ID to test with (Azure: deployment name)').fill('stub-large');
+  await page.getByLabel('API key', { exact: true }).fill('e2e-wrong-key-1111BAD');
+  await page.getByLabel('Model ID', { exact: true }).fill('stub-large');
   await page.getByRole('button', { name: 'Test connection' }).click();
   await expect(main).toContainText('Authentication: Invalid key');
   expect(await main.innerText()).not.toMatch(CJK);
