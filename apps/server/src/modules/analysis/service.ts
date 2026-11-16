@@ -64,6 +64,11 @@ export async function runAnalysis(repo: KnowledgeRepository, model: AnalysisMode
       run.status = 'completed'; run.stage = 'complete'; run.error = null;
     });
   } catch (error) {
-    await repo.transact(ctx, s => { const run = s.analyses.find(r => r.id === runId); if (run?.status === 'running' && (run as typeof run & { leaseToken?: string }).leaseToken === leaseToken) { run.status = 'failed'; run.error = error instanceof KnowledgeError ? error.code : 'analysis_failed'; } });
+    await repo.transact(ctx, s => {
+      const run = s.analyses.find(r => r.id === runId);
+      if (run?.status !== 'running' || (run as typeof run & { leaseToken?: string }).leaseToken !== leaseToken) return;
+      run.error = error instanceof KnowledgeError ? error.code : 'analysis_failed';
+      run.status = run.error === 'model_outcome_unknown' ? 'outcome_unknown' : 'failed';
+    });
   }
 }

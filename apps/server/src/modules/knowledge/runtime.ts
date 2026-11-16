@@ -11,7 +11,8 @@ import { LiveMcpKnowledge } from './live-mcp.js';
 /** All identity/endpoints/pools originate from the fail-closed platform bootstrap. */
 export function createKnowledgeDeps(runtime: Runtime & { llm?: AnalysisGateway }): KnowledgeDeps {
   const sourceResources = runtime.config.sourceResources ?? [], plugins = managedSourcePlugins(sourceResources, runtime.app.setupDeps.secrets);
-  const model = runtime.llm ? new GatewayAnalysisModel(runtime.llm) : undefined;
+  const model = runtime.llm ? new GatewayAnalysisModel(runtime.llm, async tenantId =>
+    (await runtime.app.setupDeps.repo.get(tenantId)).monthlyCapMicroUsd !== null) : undefined;
   const database = configuredDatabases(runtime.config.sourceDatabases ?? [], runtime.app.setupDeps.secrets);
   const { config, pool } = runtime;
   const repo = config.mode === 'dev' ? new MemoryKnowledgeRepository() : pool && new PgKnowledgeRepository(pool);
