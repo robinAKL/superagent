@@ -5,13 +5,11 @@
 import type { AclResult, ConnectionConfig, KnowledgeSourcePlugin, SourceContent, SourceItemRef } from '@superagent/shared';
 import type { DocParser } from '../parser.js';
 
-export interface UploadedFile {
+export type UploadedFile = {
   name: string;
-  bytes: Uint8Array;
   version: string;
   audience: string[]; // principals allowed to read (users/groups); chosen at upload
-  plainText?: boolean;
-}
+} & ({ bytes: Uint8Array } | { content: SourceContent });
 
 export function textWithLineAnchors(text: string, fileName: string): SourceContent {
   const anchors: SourceContent['anchors'] = [];
@@ -37,7 +35,8 @@ export function createLocalFilePlugin(files: Map<string, UploadedFile[]>, parser
     async readItem(cfg: ConnectionConfig, ref: SourceItemRef) {
       const f = current(cfg.connectionId).find((x) => x.name === ref.externalId && x.version === ref.version);
       if (!f) throw new Error('file not found');
-      if (f.plainText || /\.(txt|md|markdown|csv)$/i.test(f.name)) return textWithLineAnchors(Buffer.from(f.bytes).toString('utf8'), f.name);
+      if ('content' in f) return f.content;
+      if (/\.(txt|md|markdown|csv)$/i.test(f.name)) return textWithLineAnchors(Buffer.from(f.bytes).toString('utf8'), f.name);
       if (!parser) throw new Error(`${f.name}: PDF/Office/image parsing requires Document Intelligence`);
       return parser.parse(f.bytes, f.name);
     },
