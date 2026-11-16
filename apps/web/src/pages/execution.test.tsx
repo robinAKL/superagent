@@ -8,6 +8,7 @@ import {
 } from './CommandRoomPage';
 import { canDecide, decisionWhy, GROUPS, inboxFromServer, KIND_LABEL, RENDERER_LABEL, WorkInboxPage } from './WorkInboxPage';
 import { navFor } from '../App';
+import { LangProvider } from '../i18n';
 
 const EMPLOYEES: RosterEmployee[] = [
   { id: 'emp-1', name: '销售员工', duty: '询价与报价', status: 'active', ownerUserId: 'user-sales' },
@@ -23,7 +24,7 @@ const SALES = { userId: 'user-sales', roles: ['employee'], owner: false };
 
 describe('execution pages reuse the v12 copy', () => {
   it('keeps the command room title and subtitle on one head, and shows no invented conversation or task', () => {
-    const html = renderToStaticMarkup(<CommandRoomPage />);
+    const html = renderToStaticMarkup(<LangProvider initial="zh"><CommandRoomPage /></LangProvider>);
     expect(html).toContain('Agent Room 指挥室');
     expect(html).toContain('同一件工作里，企业负责人、超级智能体和数字员工共享目标、上下文、任务与回报。');
     expect(html).toContain('共享协作记录');
@@ -35,6 +36,13 @@ describe('execution pages reuse the v12 copy', () => {
     expect(html).not.toContain('询价草稿');
     expect(html).not.toContain('模拟同事回报');
     expect(html).not.toContain('href="#brain"'); // only shown once the server says the viewer is an owner
+  });
+
+  it('renders the command room interface in English by default', () => {
+    const html = renderToStaticMarkup(<CommandRoomPage />);
+    expect(html).toContain('Command room');
+    expect(html).toContain('No tasks yet');
+    expect(html).not.toMatch(/\p{Script=Han}/u);
   });
 
   it('reads a one-shot SSE gap-fill and ignores a frame whose sequence is not a number', () => {
