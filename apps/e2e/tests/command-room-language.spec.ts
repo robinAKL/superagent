@@ -10,14 +10,22 @@ test('command room defaults to English and switches system copy live', async ({ 
   expect(worker.ok()).toBe(true);
   await page.goto('/#room');
   const room = page.getByRole('region', { name: 'Command room', exact: true });
+  const interfaceCopy = room.locator('.page-head, .exec-grid, .exec-drawer');
+  const expectEnglishCopy = () => expect.poll(() => interfaceCopy.evaluateAll((sections) => sections.map((section) => [
+    section.textContent,
+    ...Array.from(section.querySelectorAll('[aria-label], [placeholder]'), (element) =>
+      [element.getAttribute('aria-label'), element.getAttribute('placeholder')].join(' ')),
+  ].join(' ')).join(' '))).not.toMatch(/\p{Script=Han}/u);
   await expect(room.getByRole('heading', { name: 'Command room' })).toBeVisible();
+  await expect(room.getByRole('heading', { name: 'Agent confirmations' })).toBeVisible();
   await expect(room.getByRole('heading', { name: 'Conversation' })).toBeVisible();
   await expect(room.getByRole('heading', { name: 'Tasks' })).toBeVisible();
   await expect(room.getByText('No tasks yet')).toBeVisible();
   await expect(room.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
   const textbox = room.getByRole('textbox', { name: 'Message the command room' });
   await expect(textbox).toHaveAttribute('placeholder', 'Write a message or @mention a digital employee to assign work.');
-  await expect(room).not.toContainText(/[\u3400-\u9fff]/u);
+  // Confirmation summaries are user data and may already exist when other specs run first.
+  await expectEnglishCopy();
 
   await textbox.fill('@LanguageAnalyst Review source material');
   await textbox.press('Enter');
@@ -27,7 +35,7 @@ test('command room defaults to English and switches system copy live', async ({ 
   await expect(details.getByText('Waiting for connection')).toBeVisible();
   await expect(details.getByText('Prompt snapshot')).toBeVisible();
   await expect(details.getByRole('button', { name: 'Save criteria' })).toBeVisible();
-  await expect(room).not.toContainText(/[\u3400-\u9fff]/u);
+  await expectEnglishCopy();
   await details.getByRole('button', { name: 'Close' }).click();
 
   await textbox.fill('请保留这条原始消息');
@@ -36,4 +44,5 @@ test('command room defaults to English and switches system copy live', async ({ 
   await page.getByRole('button', { name: '中文', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Agent Room 指挥室' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '共享协作记录' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '待确认的 agent 操作' })).toBeVisible();
 });
