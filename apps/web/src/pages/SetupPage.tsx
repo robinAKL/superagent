@@ -21,7 +21,7 @@ interface TestResponse {
 
 const TEXT = {
   en: {
-    title: 'Settings', connection: 'Model connection', budget: 'Monthly usage cap',
+    title: 'Settings', lead: 'Connect a model and set its monthly budget', connection: 'Model connection', budget: 'Monthly usage cap',
     providerAnthropic: 'Anthropic (Claude)', providerOpenai: 'OpenAI (GPT)', providerAzure: 'Azure OpenAI',
     statusUnconfigured: 'Not configured', statusConfigured: 'Configured', statusRevoked: 'Revoked', statusKeyInvalid: 'Key invalid',
     status: 'Status: ', loading: 'Loading…', statusUnavailable: 'Could not load model settings.',
@@ -47,7 +47,7 @@ const TEXT = {
     capSaved: 'Saved; applies to this month right away', capNotSaved: 'Not saved: Enter a positive USD amount with up to two decimals.',
   },
   zh: {
-    title: '管理设置', connection: '模型连接', budget: '月度用量上限',
+    title: '管理设置', lead: '连接模型并设置月度预算', connection: '模型连接', budget: '月度用量上限',
     providerAnthropic: 'Anthropic（Claude）', providerOpenai: 'OpenAI（GPT）', providerAzure: 'Azure OpenAI',
     statusUnconfigured: '未配置', statusConfigured: '已配置', statusRevoked: '已撤销', statusKeyInvalid: 'Key 失效',
     status: '状态：', loading: '读取中…', statusUnavailable: '无法读取模型设置。',
@@ -180,7 +180,7 @@ export function SetupPage() {
   const toolFeedback = test?.tools === 'inconclusive' ? 'toolIncomplete' : test?.tools === 'failed' ? 'toolFailed' : undefined;
 
   return <div className="setup-page">
-    <header className="page-head"><h1>{t('title')}</h1></header>
+    <header className="page-head"><h1>{t('title')}</h1><p>{t('lead')}</p></header>
     <section className="panel setup-card" aria-labelledby="setup-connection">
       <header className="setup-card-head">
         <h2 id="setup-connection" className="h2">{t('connection')}</h2>
