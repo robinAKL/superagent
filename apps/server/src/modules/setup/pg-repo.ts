@@ -6,6 +6,7 @@ import type pg from 'pg';
 import type { LlmProviderId, ModelInfo } from '@superagent/shared';
 import { sanitize } from '../audit/audit.js';
 import type { Allowlist, ConfigRepo, LlmConfigRecord } from './service.js';
+import { setupModelPrice } from './model-catalog.js';
 
 const OBJECT_TYPE = 'llm_config';
 
@@ -70,5 +71,15 @@ export class PgAllowlist implements Allowlist {
   async verified(provider: LlmProviderId): Promise<Map<string, ModelInfo['verified']>> {
     const r = await this.pool.query("SELECT model_id, capabilities FROM model_capabilities WHERE provider = $1 AND status = 'verified'", [provider]);
     return new Map(r.rows.map((x) => [x.model_id as string, x.capabilities as ModelInfo['verified']]));
+  }
+  async registerSetupModel(provider: LlmProviderId, model: string): Promise<void> {
+    const price = setupModelPrice(provider, model);
+    if (!price) return;
+    await this.pool.query(
+      `INSERT INTO model_capabilities (provider, model_id, capabilities, tested_at, platform_version, status)
+       VALUES ($1, $2, $3::jsonb, now(), 'setup', 'verified')
+       ON CONFLICT (provider, model_id) DO NOTHING`,
+      [provider, model, JSON.stringify({ chat: true, tools: true, structured: false, stream: false, price })],
+    );
   }
 }

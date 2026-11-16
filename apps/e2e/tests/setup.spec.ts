@@ -13,8 +13,8 @@ test.describe.configure({ mode: 'serial' });
 test('a rejected key is reported as invalid, cannot be activated, and is never echoed', async ({ page }) => {
   await page.goto('/#settings');
   await expect(page.locator('main')).toContainText('状态：未配置');
-  await page.getByLabel('API Key（只发送到服务端，保存于 Key Vault）').fill(BAD);
-  await page.getByLabel('用于测试的模型 ID（Azure 填部署名）').fill('stub-large');
+  await page.getByLabel('API Key', { exact: true }).fill(BAD);
+  await page.getByLabel('模型 ID', { exact: true }).fill('stub-large');
   await page.getByRole('button', { name: '测试连接' }).click();
   await expect(page.locator('main')).toContainText('认证：Key 无效');
   await expect(page.getByRole('button', { name: '保存并生效' })).toHaveCount(0);
@@ -27,18 +27,16 @@ test('a valid key: only verified models are selectable; activation stores it ser
     if (r.url().includes('/api/v1/setup/llm')) sent.push(r.url());
   });
   await page.goto('/#settings');
-  await page.getByLabel('API Key（只发送到服务端，保存于 Key Vault）').fill(GOOD);
-  await page.getByLabel('用于测试的模型 ID（Azure 填部署名）').fill('stub-large');
+  await page.getByLabel('API Key', { exact: true }).fill(GOOD);
+  await page.getByLabel('模型 ID', { exact: true }).fill('stub-large');
   await page.getByRole('button', { name: '测试连接' }).click();
-  await expect(page.locator('main')).toContainText('认证：通过 · 模型列表：已获取 · 工具调用：通过');
-  const primary = page.getByLabel('主模型（仅显示已通过平台能力测试的模型）');
-  await expect(primary.locator('option')).toHaveText(['请选择', 'stub-large']);
-  await expect(page.locator('main')).toContainText('未验证（不可选）：stub-unverified');
-  await primary.selectOption('stub-large');
+  await expect(page.locator('main')).toContainText('凭据验证通过');
+  await expect(page.locator('main')).toContainText('已选择 stub-large 作为主模型。');
+  await expect(page.locator('main')).not.toContainText('stub-unverified');
   await page.getByRole('button', { name: '保存并生效' }).click();
-  await expect(page.locator('main')).toContainText('已保存到 Key Vault 并生效');
+  await expect(page.locator('main')).toContainText('模型已保存并生效。');
   await expect(page.locator('main')).toContainText('状态：已配置 · Key ••••GOOD · 主模型 stub-large');
-  await expect(page.getByLabel('API Key（只发送到服务端，保存于 Key Vault）')).toHaveValue('');
+  await expect(page.getByLabel('API Key', { exact: true })).toHaveValue('');
   expect(await page.content()).not.toContain(GOOD);
   expect(sent.every((u) => u.startsWith('http://127.0.0.1'))).toBe(true); // key goes only to our own server
 

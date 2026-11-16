@@ -3,6 +3,7 @@
  * Plain fetch — no vendor SDK lock-in in business code. Keys are passed in per call and never logged.
  */
 import type { ChatRequest, ChatResponse, LlmProvider, LlmProviderId, ModelInfo } from '@superagent/shared';
+import { setupModelPrice } from './model-catalog.js';
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -33,6 +34,7 @@ export interface ProviderConfig {
   endpoint?: string; // Azure OpenAI resource endpoint
   apiVersion?: string; // Azure OpenAI
   deployments?: string[]; // Azure OpenAI deployment names entered by admin
+  probeReasoningEffort?: 'minimal';
 }
 
 export function createProvider(cfg: ProviderConfig, fetchFn: FetchLike = fetch): LlmProvider {
@@ -90,6 +92,11 @@ function openai(cfg: ProviderConfig, fetchFn: FetchLike, base: string, auth: Rec
       const body = {
         model: req.model,
         max_completion_tokens: req.maxOutputTokens,
+        ...(setupModelPrice(id, req.model) ? { service_tier: 'default' } : {}),
+        ...(cfg.probeReasoningEffort ? {
+          reasoning_effort: cfg.probeReasoningEffort,
+          ...(req.tools?.length === 1 ? { tool_choice: { type: 'function', function: { name: req.tools[0]!.name } }, parallel_tool_calls: false } : {}),
+        } : {}),
         messages: req.messages.map((m) => ({ role: m.role === 'tool' ? 'user' : m.role, content: m.content })),
         ...(req.tools?.length ? { tools: req.tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } })) } : {}),
       };

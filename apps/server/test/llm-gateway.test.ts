@@ -7,6 +7,8 @@ import { InMemorySecretStore } from '../src/modules/setup/secrets.js';
 import { InMemoryConfigRepo, setMonthlyCap } from '../src/modules/setup/service.js';
 import { ProviderHttpError } from '../src/modules/setup/providers.js';
 import { PgBudgetStore, PgPriceBook } from '../src/modules/setup/pg-budget.js';
+import { PgAllowlist } from '../src/modules/setup/pg-repo.js';
+import { setupModelPrice } from '../src/modules/setup/model-catalog.js';
 import { migrate } from '../src/migrate.js';
 
 const T = 'tenant-1';
@@ -95,6 +97,15 @@ describe('budgeted LLM gateway: refusals happen before any model call', () => {
 describe('budgeted LLM gateway: reservation, settlement, release, freeze', () => {
   beforeEach(async () => {
     await configure();
+  });
+
+  it('can reserve against a documented context ceiling and settle actual usage', async () => {
+    await configure({ provider: 'openai', primaryModel: 'gpt-5-mini' });
+    const gateway = gw({ 'openai/gpt-5-mini': setupModelPrice('openai', 'gpt-5-mini')! });
+    await expect(gateway.chat(T, 'primary', req)).resolves.toMatchObject({
+      reservedMicroUsd: 102_000, costMicroUsd: 605,
+    });
+    expect(budget.snapshot(T, '2026-11')).toMatchObject({ reserved: 0, spent: 605 });
   });
 
   it('reserves a provable upper bound, calls with the key from the secret store, settles actual usage', async () => {
@@ -316,5 +327,18 @@ const url = process.env.DATABASE_URL;
     expect(await pgBook.price('anthropic', 'priced')).toBeNull();
     const row = (await pool.query("SELECT status, capabilities->'boundViolation'->>'cost' AS cost FROM model_capabilities WHERE provider = 'anthropic' AND model_id = 'priced'")).rows[0];
     expect(row).toEqual({ status: 'unverified', cost: '99' });
+  });
+
+  it('records the priced Setup model and does not reenable it after suspension', async () => {
+    await migrate(pool, undefined, () => undefined);
+    const allowlist = new PgAllowlist(pool);
+    const prices = new PgPriceBook(pool);
+    await pool.query("DELETE FROM model_capabilities WHERE provider = 'openai' AND model_id = 'gpt-5-mini'");
+    await allowlist.registerSetupModel('openai', 'gpt-5-mini');
+    expect((await allowlist.verified('openai')).get('gpt-5-mini')).toMatchObject({ chat: true, tools: true });
+    expect(await prices.price('openai', 'gpt-5-mini')).toEqual(setupModelPrice('openai', 'gpt-5-mini'));
+    await prices.markUnbounded('openai', 'gpt-5-mini', { reserved: 10, cost: 99 });
+    await allowlist.registerSetupModel('openai', 'gpt-5-mini');
+    expect(await prices.price('openai', 'gpt-5-mini')).toBeNull();
   });
 });

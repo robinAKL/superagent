@@ -36,6 +36,42 @@ function deps(fetchFn: FetchLike): SetupDeps & { secrets: InMemorySecretStore } 
 }
 const cand = (apiKey: string) => ({ provider: 'anthropic' as const, apiKey, probeModel: 'claude-haiku-5-5' });
 
+it('verifies and enables GPT-5 mini only when both the text and tool probes complete', async () => {
+  const candidate = { provider: 'openai' as const, apiKey: GOOD, probeModel: 'gpt-5-mini' };
+  const configured = new Map();
+  let truncated = true;
+  const d = deps(async (url, init) => {
+    if (url.endsWith('/models')) return Response.json({ data: [{ id: candidate.probeModel }, { id: 'unapproved-model' }] });
+    const body = JSON.parse(String(init.body));
+    expect(body.reasoning_effort).toBe('minimal');
+    expect(body.service_tier).toBe('default');
+    if (body.tools) expect(body.tool_choice).toEqual({ type: 'function', function: { name: 'echo' } });
+    expect(body.max_completion_tokens).toBeGreaterThan(64);
+    const message = !body.tools ? { content: 'OK' } : truncated ? { content: '' } : {
+      tool_calls: [{ id: 'echo-1', function: { name: 'echo', arguments: '{"value":"ok"}' } }],
+    };
+    return Response.json({ choices: [{ message, finish_reason: body.tools && truncated ? 'length' : 'stop' }],
+      usage: { prompt_tokens: 12, completion_tokens: 8 } });
+  });
+  d.allowlist = {
+    verified: async () => configured,
+    registerSetupModel: async (provider, model) => {
+      expect(provider).toBe('openai');
+      expect(model).toBe(candidate.probeModel);
+      configured.set(model, { chat: true, tools: true, structured: false, stream: false });
+    },
+  };
+  const short = await testKey(candidate, d);
+  expect(short).toMatchObject({ auth: 'ok', tools: 'inconclusive' });
+  expect(configured.size).toBe(0);
+
+  truncated = false;
+  const good = await testKey(candidate, d);
+  expect(good.models.find(model => model.id === candidate.probeModel)?.verified).toMatchObject({ chat: true, tools: true });
+  expect(good.models.find(model => model.id === 'unapproved-model')?.verified).toBeNull();
+  expect((await activateKey('t1', candidate, { primary: candidate.probeModel }, good, d)).primaryModel).toBe(candidate.probeModel);
+});
+
 describe('Setup: key test', () => {
   it('only authentication failure marks the key invalid', async () => {
     expect((await testKey(cand(BAD), deps(fakeAnthropic()))).auth).toBe('invalid_key');
