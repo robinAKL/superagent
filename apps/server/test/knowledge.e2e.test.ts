@@ -20,9 +20,13 @@ d('knowledge UI over real HTTP handlers', () => {
     const base = await app.listen({ host: '127.0.0.1', port: 0 });
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ extraHTTPHeaders: { 'x-dev-user': 'alice|owner|' } });
+    // English is the default since #77; these assertions are the Chinese prototype wording (same pin as apps/e2e fixtures).
+    await context.addInitScript(() => window.localStorage.setItem('superagent.lang', 'zh'));
     const page = await context.newPage(), errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
     try {
       await page.goto(`${base}/#knowledge`);
+      // Each source card opens its own connection form (#77 guided layout).
+      await page.getByTestId('plugin-local-file').getByRole('button', { name: '配置连接', exact: true }).click();
       await page.getByLabel('连接名称',{exact:true}).fill('真实 HTTP 测试资料');
       await page.getByRole('button', { name: '创建连接草案' }).click();
       await page.getByRole('button', { name: '确认连接', exact: true }).click();
@@ -51,6 +55,8 @@ d('knowledge UI over real HTTP handlers', () => {
       expect(state.recommendations[0]).toMatchObject({ name: '人工保留名称', humanLocked: true });
       expect(state.source.connections).toHaveLength(1); expect(state.analyses[0]!.status).toBe('completed');
       await page.getByTestId('plugin-database').getByRole('button', { name: '安装只读数据库插件', exact: true }).click();
+      // The database panel lives in the collapsed 高级 section; its card's 配置连接 opens it.
+      await page.getByTestId('plugin-database').getByRole('button', { name: '配置连接', exact: true }).click();
       await page.getByLabel('数据库连接名称',{exact:true}).fill('受控实时数据');
       await page.getByLabel('我已核对数据库范围，并确认使用独立只读账号接入', {exact:true}).check();
       await page.getByRole('button',{name:'创建数据库连接草案',exact:true}).click();
