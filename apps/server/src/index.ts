@@ -3,7 +3,7 @@ import { buildApp } from './app.js';
 import { dispatchBound, runWorker } from './worker.js';
 import { bindRuntimeDb, runtimeState } from './modules/runtime/index.js';
 import { bindRoomStore, hydrateRoom } from './modules/room/index.js';
-import { bindWorkersDb } from './modules/workers/index.js';
+import { bindWorkersDb, startPgListener } from './modules/workers/index.js';
 import { bindSopStore, hydrateSop } from './modules/sop/index.js';
 import { bindGatewayStore, hydrateGateway } from './modules/gateway/index.js';
 import { bindInboxStore, hydrateInbox } from './modules/humanwork/index.js';
@@ -35,6 +35,8 @@ if (role === 'web') {
     bindRoomStore(db);
     bindRuntimeDb(db);
     bindWorkersDb(db);
+    // One dedicated connection LISTENs for new work and worker events so held polls wake at once (T-07).
+    startPgListener(() => pool.connect());
     bindSopStore(db);
     bindGatewayStore(db);
     bindInboxStore(db);

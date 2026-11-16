@@ -180,12 +180,16 @@ export class MemoryWorkerRegistry implements WorkerRegistry {
   private readonly rows = new Map<string, WorkerRecord>();
   private readonly events: WorkerEvent[] = [];
 
+  /** onAppend stands in for the PostgreSQL trigger's NOTIFY (migration 0015). */
+  constructor(private readonly onAppend?: (event: WorkerEvent) => void) {}
+
   async appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number): Promise<WorkerEvent | null> {
     const row = this.rows.get(workerId);
     if (!row || row.tenantId !== tenantId || row.revokedAt !== null) return null;
     const seq = this.events.filter((e) => e.workerId === workerId).length + 1;
     const event: WorkerEvent = { seq, workerId, kind, payload: structuredClone(payload), createdBy, createdAt: at };
     this.events.push(event);
+    this.onAppend?.(structuredClone(event));
     return structuredClone(event);
   }
 

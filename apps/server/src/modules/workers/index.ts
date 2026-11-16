@@ -2,6 +2,7 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { runtimeState } from '../runtime/index.js';
 import { claimTask, deadLetterTask, heartbeatTask, releaseTask, succeedTask, type Queryable } from '../runtime/pg-queue.js';
 import { PgWorkerRegistry } from './pg-registry.js';
+import { tenantKey, workerKey, workSignal } from './signal.js';
 import {
   authenticateWorker,
   cleanCapabilities,
@@ -20,6 +21,7 @@ import {
 
 export * from './registry.js';
 export { PgWorkerRegistry } from './pg-registry.js';
+export { startPgListener, workSignal } from './signal.js';
 
 /** Under common proxy idle timeouts (Container Apps ingress, corporate proxies), so a held poll is not cut mid-wait. */
 export const LONG_POLL_MAX_MS = 25_000;
@@ -28,31 +30,43 @@ const LEASE_MS = 60_000;
 const MAX_ATTEMPTS = 3;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Rescan period while LISTEN is up: notifications do the waking, this only catches a missed one. */
+const NOTIFIED_SCAN_MS = 5_000;
+
 export const workersState: {
   registry: WorkerRegistry;
   db: Queryable | null;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   pollStepMs: number;
+  notifiedScanMs: number;
 } = {
-  registry: new MemoryWorkerRegistry(),
+  registry: memoryRegistry(),
   db: null,
   now: () => Date.now(),
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   pollStepMs: POLL_STEP_MS,
+  notifiedScanMs: NOTIFIED_SCAN_MS,
 };
+
+/** In memory there is no trigger, so the registry signals event appends itself. */
+function memoryRegistry(): MemoryWorkerRegistry {
+  return new MemoryWorkerRegistry((event) => workSignal.notify(workerKey(event.workerId)));
+}
 
 export function bindWorkersDb(db: Queryable | null): void {
   workersState.db = db;
-  workersState.registry = db ? new PgWorkerRegistry(db) : new MemoryWorkerRegistry();
+  workersState.registry = db ? new PgWorkerRegistry(db) : memoryRegistry();
 }
 
 export function resetWorkers(): void {
-  workersState.registry = new MemoryWorkerRegistry();
+  workersState.registry = memoryRegistry();
   workersState.db = null;
   workersState.now = () => Date.now();
   workersState.sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   workersState.pollStepMs = POLL_STEP_MS;
+  workersState.notifiedScanMs = NOTIFIED_SCAN_MS;
+  workSignal.listening = false;
 }
 
 /** Admin side, mounted under the signed-in /api/v1/workers prefix (admin/owner only). */
@@ -185,15 +199,24 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     let closed = false;
     req.raw.once('close', () => { closed = true; });
     const start = workersState.now();
+    const keys = [tenantKey(worker.tenantId), workerKey(worker.id)];
     for (;;) {
-      const now = workersState.now();
-      if (!(await workersState.registry.heartbeat(worker.id, now, {}))) return reply.code(401).send({ error: 'bad_worker_token' });
-      const events = await workersState.registry.eventsAfter(worker.id, since, EVENTS_PAGE);
-      const task = await claimFor(worker, now);
-      const cursor = events.length ? events[events.length - 1]!.seq : since;
-      if (task || events.length) return { task, events, cursor, ...(task ? { leaseMs: LEASE_MS } : {}) };
-      if (closed || now - start >= waitMs) return { task: null, events, cursor, retryAfterMs: 0 };
-      await workersState.sleep(Math.min(workersState.pollStepMs, waitMs - (now - start)));
+      // Register before reading, so a commit that lands between the read and the wait still wakes this poll.
+      const woken = workSignal.waitFor(keys);
+      try {
+        const now = workersState.now();
+        if (!(await workersState.registry.heartbeat(worker.id, now, {}))) return reply.code(401).send({ error: 'bad_worker_token' });
+        const events = await workersState.registry.eventsAfter(worker.id, since, EVENTS_PAGE);
+        const task = await claimFor(worker, now);
+        const cursor = events.length ? events[events.length - 1]!.seq : since;
+        if (task || events.length) return { task, events, cursor, ...(task ? { leaseMs: LEASE_MS } : {}) };
+        if (closed || now - start >= waitMs) return { task: null, events, cursor, retryAfterMs: 0 };
+        // With LISTEN up, a notification wakes us at once and the timer is only the safety-net rescan.
+        const step = workSignal.listening ? workersState.notifiedScanMs : workersState.pollStepMs;
+        await Promise.race([workersState.sleep(Math.min(step, waitMs - (now - start))), woken.promise]);
+      } finally {
+        woken.cancel();
+      }
     }
   });
 
