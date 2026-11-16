@@ -9,6 +9,7 @@ export async function runCodexTurn({ input, output, cwd, prompt, session, notify
   const lines = createInterface({ input: output });
   const requests = new Map();
   const approvals = new Map();
+  const answered = new Set();
   const changes = new Map();
   let sequence = 0;
   let threadId;
@@ -50,7 +51,7 @@ export async function runCodexTurn({ input, output, cwd, prompt, session, notify
 
   async function serverRequest(message) {
     const { id, method, params = {} } = message;
-    if (approvals.has(id)) return;
+    if (approvals.has(id) || answered.has(id)) return;
     if (method !== COMMAND_APPROVAL && method !== FILE_APPROVAL) {
       write({ id, error: { code: -32601, message: 'Unsupported server request' } });
       return;
@@ -85,6 +86,7 @@ export async function runCodexTurn({ input, output, cwd, prompt, session, notify
       }
     } finally {
       approvals.delete(id);
+      answered.add(id);
     }
   }
 
