@@ -17,8 +17,8 @@ export function projectDirectory(projects, projectId) {
 export function launchAgent(project, prompt, session, notify) {
   const codex = project.agent === 'codex';
   const args = codex
-    ? ['exec', '--json', '--sandbox', 'read-only', ...(session ? ['resume', session] : []), '-']
-    : ['--print', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'plan', ...(session ? ['--resume', session] : [])];
+    ? ['exec', '--json', ...(session ? ['resume', session] : []), '-']
+    : ['--print', '--output-format', 'stream-json', '--verbose', ...(session ? ['--resume', session] : [])];
   const command = project.executable.endsWith('.js') || project.executable.endsWith('.mjs') ? process.execPath : project.executable;
   const argv = command === process.execPath ? [project.executable, ...args] : args;
   const env = { ...process.env };

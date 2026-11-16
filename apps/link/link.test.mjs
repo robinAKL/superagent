@@ -66,7 +66,7 @@ test('runs Codex and sends a result, then resumes the poll cursor without rerunn
   await link.poll(undefined, 0);
   await link.runNext();
   const [agent] = await f.args();
-  assert.deepEqual(agent.argv, ['exec', '--json', '--sandbox', 'read-only', '-']);
+  assert.deepEqual(agent.argv, ['exec', '--json', '-']);
   assert.equal(agent.leaked, false);
   assert.equal((await f.state()).jobs[0].session, 'session-1');
   assert.ok(f.requests.some(({ path, body }) => path.endsWith('/report') && body.body === 'Result: Inspect the project'));
@@ -83,14 +83,14 @@ test('runs Claude Code with a fixed headless adapter', async (t) => {
   const link = f.make();
   await link.poll(undefined, 0);
   await link.runNext();
-  assert.deepEqual((await f.args())[0].argv, ['--print', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'plan']);
+  assert.deepEqual((await f.args())[0].argv, ['--print', '--output-format', 'stream-json', '--verbose']);
   assert.ok(f.requests.some(({ path, body }) => path.endsWith('/report') && body.body === 'Result: Summarise'));
 });
 
 test('restarts an unfinished task through its explicit saved session', async (t) => {
   for (const [agent, args] of [
-    ['codex', ['exec', '--json', '--sandbox', 'read-only', 'resume', 'session-previous', '-']],
-    ['claude-code', ['--print', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'plan', '--resume', 'session-previous']],
+    ['codex', ['exec', '--json', 'resume', 'session-previous', '-']],
+    ['claude-code', ['--print', '--output-format', 'stream-json', '--verbose', '--resume', 'session-previous']],
   ]) {
     const f = await fixture(t, agent);
     await f.save({ cursor: 8, jobs: [{ id: 'task1', projectId: 'p1', prompt: 'Continue', session: 'session-previous', status: 'queued' }] });
