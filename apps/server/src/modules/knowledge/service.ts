@@ -10,6 +10,7 @@ import type { AnalysisModel } from '../analysis/service.js';
 import { decodeUpload, queueBinaryUpload, queueDocument, type BinaryDeps } from './binary.js';
 import { mimeFor } from './docintel-parser.js';
 import type { DatabaseGateway } from './database.js';
+import { CATEGORIES, type Category } from './profile.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
   plugins?: Record<string, KnowledgeSourcePlugin>;
@@ -69,6 +70,7 @@ export class KnowledgeService {
   }
   async overview(ctx: UserContext) {
     const s = await this.deps.repo.read(ctx);
+    const refining = await this.profileModelReady(ctx);
     const items = s.source.items.filter(i => this.allowed(s, ctx, i, false));
     const recs = s.recommendations.filter(r => !r.deleted).flatMap(r => {
       const valid = r.origin === 'manual' || r.evidence.length > 0 && r.evidence.every(e => this.valid(s, ctx, e));
@@ -88,7 +90,7 @@ export class KnowledgeService {
       plugins: MANIFESTS.map(m => ({ ...m, installed: pluginInstalled(s, m.id), builtIn: m.id === 'local-file', enabled: pluginInstalled(s,m.id) && !s.disabledPlugins.includes(m.id), configured: m.id === 'local-file' || (m.id === 'database' && !!this.deps.database?.list(ctx).length) || !!this.deps.plugins?.[m.id] })),
       databaseResources: this.deps.database?.list(ctx) ?? [],
       connections: s.source.connections.filter(c => this.connectionAllowed(s, ctx, c.id)).map(c => ({ id: c.id, name: s.connectionMeta[c.id]!.name, pluginId: c.pluginId, status: c.status, scope: c.scope })),
-      items: items.map(i => ({ id: hash(i.id), title: i.title, version: i.version, status: i.status, confirmed: this.allowed(s, ctx, i), locator: i.locator, pluginId: s.source.connections.find(c => c.id === i.connectionId)!.pluginId })),
+      items: items.map(i => ({ id: hash(i.id), title: i.title, version: i.version, status: i.status, confirmed: this.allowed(s, ctx, i), locator: i.locator, pluginId: s.source.connections.find(c => c.id === i.connectionId)!.pluginId, profile: this.profileView(s, ctx, i, refining) })),
       analyses: s.analyses.filter(r => r.actor.userId === ctx.userId).map(({ actor: _, ...run }) => run), recommendations: visibleRecs,
       canConfirm: ctx.roles.some(role => role === 'owner' || role === 'admin'),
       parseJobs: s.parseJobs.filter(j => j.actor.userId === ctx.userId && s.connectionMeta[j.connectionId]?.audience.includes(ctx.userId) && s.connectionMeta[j.connectionId]!.projectIds.every(p => ctx.projectScopes.includes(p))).map(j => ({ id: j.id, name: j.name, status: j.status, error: j.error })),
@@ -277,6 +279,47 @@ export class KnowledgeService {
       s.source = snapshot(store);
       confirmSource(s, ctx, item.id, item.version);
       return { status: 'ready' as const };
+    });
+  }
+  /** Show "AI is organizing" only when the model is configured and within budget; otherwise rule labels are final. */
+  private async profileModelReady(ctx: UserContext): Promise<boolean> {
+    if (!this.deps.model?.profile) return false;
+    try { await this.deps.model.check?.(ctx.tenantId); return true; } catch { return false; }
+  }
+  private profileView(s: KnowledgeState, ctx: UserContext, item: Item, modelReady = false) {
+    const p = s.profiles?.[item.id];
+    if (!p || p.version !== item.version) return null;
+    const target = p.related && s.source.items.find(i => i.id === p.related!.sourceId);
+    // A related pointer is shown only when this viewer may read the other material (an earlier revision of the same file is always theirs).
+    const related = p.related && target && (p.related.kind === 'update' || this.allowed(s, ctx, target, false)) ? { id: hash(target.id), kind: p.related.kind, title: s.profiles[target.id]?.title ?? target.title, confirmed: p.related.kind === 'update' ? !!target.confirmedVersion : this.allowed(s, ctx, target) } : null;
+    return { title: p.title, category: p.category, summary: p.summary, origin: p.origin, refining: p.refine === 'pending' && modelReady, related };
+  }
+  /** One reviewed list, one click: each version is still checked against its own source permission and version. */
+  async confirmMany(ctx: UserContext, input: Record<string, unknown>) {
+    requireManager(ctx);
+    const entries = input.items;
+    if (!Array.isArray(entries) || !entries.length || entries.length > 100 || entries.some(e => !e || typeof e !== 'object' || typeof e.id !== 'string' || typeof e.version !== 'string')) throw new KnowledgeError('invalid_input', '请选择 1 到 100 份资料。');
+    return this.deps.repo.transact(ctx, async s => {
+      const failed: { id: string; error: string }[] = []; let confirmed = 0;
+      for (const { id: sourceId, version } of entries as { id: string; version: string }[]) {
+        try {
+          const item = s.source.items.find(i => hash(i.id) === sourceId);
+          if (!item || !this.allowed(s, ctx, item, false)) throw new KnowledgeError('source_denied', '当前资料权限不足。', 403);
+          await this.checkLiveAcl(s, ctx, item); confirmSource(s, ctx, item.id, version); confirmed++;
+        } catch (error) { failed.push({ id: sourceId, error: error instanceof KnowledgeError ? error.message : '确认失败。' }); }
+      }
+      return { confirmed, failed };
+    });
+  }
+  async editProfile(ctx: UserContext, sourceId: string, input: Record<string, unknown>) {
+    requireManager(ctx);
+    const title = bounded(input.title, 120, '标题'), category = input.category as Category;
+    if (!CATEGORIES.includes(category)) throw new KnowledgeError('invalid_input', '分类无效。');
+    return this.deps.repo.transact(ctx, s => {
+      const item = s.source.items.find(i => hash(i.id) === sourceId);
+      const profile = item && s.profiles[item.id];
+      if (!item || !profile || !this.allowed(s, ctx, item, false)) throw new KnowledgeError('not_found', '当前资料不可编辑。', 404);
+      Object.assign(profile, { title: title.trim(), category, origin: 'human', refine: 'done' }); return { id: sourceId, title: profile.title, category };
     });
   }
   async confirm(ctx: UserContext, sourceId: string, version: string) {

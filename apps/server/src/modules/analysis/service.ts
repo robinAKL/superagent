@@ -5,6 +5,8 @@ export interface AnalysisModel {
   check?(tenantId: string): Promise<void>;
   /** Implementation MUST reserve budget before the call and freeze uncertain outcomes. No direct-provider fallback. */
   recommend(input: { tenantId: string; runId: string; evidence: Evidence[]; maxOutputTokens: number }): Promise<unknown>;
+  /** Optional: title/category/summary labels for one uploaded material. Output is validated and only ever a review aid. */
+  profile?(input: { tenantId: string; taskId: string; name: string; excerpt: string; categories: readonly string[]; maxOutputTokens: number }): Promise<unknown>;
 }
 export function validateProposals(value: unknown): Omit<Recommendation, 'id' | 'humanLocked' | 'deleted'>[] {
   if (!Array.isArray(value) || value.length > 30) throw new KnowledgeError('invalid_model_output', '分析返回的草案结构无效。', 422);
