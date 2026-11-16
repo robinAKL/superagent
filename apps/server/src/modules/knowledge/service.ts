@@ -1,7 +1,7 @@
 import type { KnowledgeSourcePlugin, SourceContent, UserContext } from '@superagent/shared';
-import { confirmSource, evidenceValid, hash, hydrate, id, invalidateAnalyses, KnowledgeError, mayRead, positionedChunks, pluginInstalled, selectedItem, requireManager, signature, snapshot, stamp, type KnowledgeState, type Evidence } from './domain.js';
+import { confirmSource, evidenceValid, hash, hydrate, id, invalidateAnalyses, KnowledgeError, mayRead, positionedChunks, selectedItem, requireManager, signature, snapshot, stamp, type KnowledgeState, type Evidence } from './domain.js';
 import { managedSource, publicSourceScope, sourceScope, type SourceResource } from './sources.js';
-import type { Item } from './store.js';
+import type { Connection, Item } from './store.js';
 import type { AuditSink } from '../audit/audit.js';
 import type { KnowledgeRepository, SearchHit } from './repository.js';
 import { syncConnection } from './sync.js';
@@ -12,6 +12,8 @@ import { mimeFor } from './docintel-parser.js';
 import { parseMacroWorkbook } from './xlsm-parser.js';
 import type { DatabaseGateway } from './database.js';
 import { CATEGORIES, type Category } from './profile.js';
+import { createPublicMcp, isPublicMcpScope } from './plugins/mcp-resources.js';
+import { publicMcpEndpoint } from './plugins/mcp-public-http.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
   plugins?: Record<string, KnowledgeSourcePlugin>;
@@ -20,6 +22,7 @@ export interface KnowledgeDeps {
   enqueue?: (ctx: UserContext, runId: string) => Promise<void>;
   binary?: BinaryDeps;
   database?: DatabaseGateway;
+  publicMcp?: ReturnType<typeof createPublicMcp>;
   close?: () => Promise<void>;
   audit?: AuditSink;
 }
@@ -38,11 +41,14 @@ function strings(value: unknown, fallback: string[] = []): string[] {
   if (!Array.isArray(value) || value.length > 100 || value.some(x => typeof x !== 'string' || !x || x.length > 200)) throw new KnowledgeError('invalid_input', '权限范围无效。'); return [...new Set(value)];
 }
 export class KnowledgeService {
-  constructor(readonly deps: KnowledgeDeps) {}
+  private readonly publicMcp: ReturnType<typeof createPublicMcp>;
+  constructor(readonly deps: KnowledgeDeps) {
+    this.publicMcp = deps.publicMcp ?? createPublicMcp();
+  }
   private allowed(state: KnowledgeState, ctx: UserContext, item: Item, confirmed = true): boolean {
     if (!mayRead(state, ctx, item, confirmed)) return false;
     const conn = state.source.connections.find(c => c.id === item.connectionId)!;
-    if (managedSource(conn.pluginId)) { try { sourceScope(this.deps.sourceResources ?? [], ctx, conn.pluginId, conn.scope, state.connectionMeta[conn.id]!.audience); return true; } catch { return false; } }
+    if (managedSource(conn.pluginId) && !isPublicMcpScope(conn.scope)) { try { sourceScope(this.deps.sourceResources ?? [], ctx, conn.pluginId, conn.scope, state.connectionMeta[conn.id]!.audience); return true; } catch { return false; } }
     if (conn.pluginId !== 'database') return true;
     try { return !!this.deps.database?.scope(ctx, conn.scope); } catch { return false; }
   }
@@ -53,18 +59,18 @@ export class KnowledgeService {
   private connectionAllowed(state: KnowledgeState, ctx: UserContext, connectionId: string): boolean {
     const conn = state.source.connections.find(c => c.id === connectionId), meta = state.connectionMeta[connectionId];
     if (!conn || !meta?.audience.includes(ctx.userId) || !meta.projectIds.every(p => ctx.projectScopes.includes(p))) return false;
-    if (managedSource(conn.pluginId)) { try { sourceScope(this.deps.sourceResources ?? [], ctx, conn.pluginId, conn.scope, state.connectionMeta[conn.id]!.audience); return true; } catch { return false; } }
+    if (managedSource(conn.pluginId) && !isPublicMcpScope(conn.scope)) { try { sourceScope(this.deps.sourceResources ?? [], ctx, conn.pluginId, conn.scope, state.connectionMeta[conn.id]!.audience); return true; } catch { return false; } }
     if (conn.pluginId !== 'database') return true;
     try { return !!this.deps.database?.scope(ctx, conn.scope); } catch { return false; }
   }
-  private plugin(state: KnowledgeState, pluginId: string): KnowledgeSourcePlugin {
+  private plugin(state: KnowledgeState, pluginId: string, scope: Record<string, unknown> = {}): KnowledgeSourcePlugin {
     if (state.disabledPlugins.includes(pluginId)) throw new KnowledgeError('plugin_disabled', '知识源插件已暂停。', 409);
     if (pluginId === 'local-file') {
       const files = new Map<string, { name: string; bytes: Uint8Array; version: string; audience: string[] }[]>();
       for (const u of state.uploads) files.set(u.connectionId, [...files.get(u.connectionId) ?? [], { ...u, bytes: Buffer.from(u.text) }]);
       return createLocalFilePlugin(files);
     }
-    if (pluginId !== 'local-file' && !pluginInstalled(state, pluginId)) throw new KnowledgeError('plugin_not_installed', '请先安装知识源插件。', 409);
+    if (pluginId === 'mcp' && isPublicMcpScope(scope)) return this.publicMcp.plugin;
     if (pluginId === 'database') { if (this.deps.database) return this.deps.database.plugin; throw new KnowledgeError('connector_not_configured', '需要由管理员配置独立只读数据库账号与授权视图。', 503); }
     const plugin = this.deps.plugins?.[pluginId];
     if (!plugin) throw new KnowledgeError('connector_not_configured', '此来源需要独立配置连接凭据与只读授权。模型 API Key 不能代替来源授权。', 503); return plugin;
@@ -88,9 +94,9 @@ export class KnowledgeService {
     return {
       spaceName: s.spaceName,
       sourceResources: (this.deps.sourceResources ?? []).filter(r => r.audience.includes(ctx.userId) && r.projectIds.every(p => ctx.projectScopes.includes(p))).map(({ audience: _, ...r }) => ({ ...r, scope: publicSourceScope(r) })),
-      plugins: MANIFESTS.map(m => ({ ...m, installed: pluginInstalled(s, m.id), builtIn: m.id === 'local-file', enabled: pluginInstalled(s,m.id) && !s.disabledPlugins.includes(m.id), configured: m.id === 'local-file' || (m.id === 'database' && !!this.deps.database?.list(ctx).length) || !!this.deps.plugins?.[m.id] })),
+      plugins: MANIFESTS.map(m => ({ ...m, installed: true, builtIn: true, enabled: !s.disabledPlugins.includes(m.id), configured: m.id === 'local-file' || m.id === 'mcp' || (m.id === 'database' && !!this.deps.database?.list(ctx).length) || !!this.deps.plugins?.[m.id] })),
       databaseResources: this.deps.database?.list(ctx) ?? [],
-      connections: s.source.connections.filter(c => this.connectionAllowed(s, ctx, c.id)).map(c => ({ id: c.id, name: s.connectionMeta[c.id]!.name, pluginId: c.pluginId, status: c.status, scope: c.scope })),
+      connections: s.source.connections.filter(c => this.connectionAllowed(s, ctx, c.id)).map(c => ({ id: c.id, name: s.connectionMeta[c.id]!.name, pluginId: c.pluginId, status: c.status, scope: this.connectionScopeSummary(c.scope) })),
       items: items.map(i => ({ id: hash(i.id), title: i.title, version: i.version, status: i.status, confirmed: this.allowed(s, ctx, i), locator: i.locator, pluginId: s.source.connections.find(c => c.id === i.connectionId)!.pluginId, profile: this.profileView(s, ctx, i, refining) })),
       analyses: s.analyses.filter(r => r.actor.userId === ctx.userId).map(({ actor: _, ...run }) => run), recommendations: visibleRecs,
       canConfirm: ctx.roles.some(role => role === 'owner' || role === 'admin'),
@@ -111,11 +117,54 @@ export class KnowledgeService {
     if (/password|secret|token|api.?key|connection.?string/i.test(JSON.stringify(scope))) throw new KnowledgeError('secret_not_allowed', '来源范围中不能保存凭据。');
     if (pluginId === 'database' && Object.keys(scope).some(key => key !== 'resourceId')) throw new KnowledgeError('scope_denied', '数据库表、列、行数及项目范围由管理员的只读资源定义。', 403);
     return this.deps.repo.transact(ctx, async s => {
-      this.plugin(s, pluginId);
+      const plugin = this.plugin(s, pluginId);
       const effective: Record<string, unknown> = pluginId === 'database' ? { ...this.deps.database!.scope(ctx, { ...scope as Record<string, unknown>, audience }) } : managedSource(pluginId) ? sourceScope(this.deps.sourceResources ?? [], ctx, pluginId, scope as Record<string, unknown>, audience) : scope as Record<string, unknown>;
       if (managedSource(pluginId)) effective.selectedExternalIds = [];
-      const conn = { id: id(), pluginId, scope: effective, credentialRef: null, status: 'draft' as const, cursor: null, confirmedBy: null };
+      const conn: Connection = { id: id(), pluginId, scope: effective, credentialRef: null, status: 'draft', cursor: null, confirmedBy: null };
+      if (input.verify === true) {
+        await this.verifyConnection(plugin, conn);
+        conn.status = 'confirmed';
+        conn.confirmedBy = ctx.userId;
+      }
       s.source.connections.push(conn); s.connectionMeta[conn.id] = { name, audience, projectIds: [...new Set([...projectIds, ...((effective.projectIds as string[] | undefined) ?? [])])] }; return { ...conn, name };
+    });
+  }
+  private connectionScopeSummary(scope: Record<string, unknown>): Record<string, unknown> {
+    if (!isPublicMcpScope(scope)) return scope;
+    const { mcpResources, ...summary } = scope;
+    return { ...summary, mcpResourceCount: mcpResources.length };
+  }
+  private async verifyConnection(plugin: KnowledgeSourcePlugin, conn: { id: string; scope: Record<string, unknown>; credentialRef: string | null }) {
+    try {
+      const tested = await plugin.testConnection({ connectionId: conn.id, scope: conn.scope, credentialRef: conn.credentialRef });
+      if (tested.ok) return;
+    } catch (error) {
+      if (error instanceof KnowledgeError) throw error;
+      // Connector errors may contain sensitive connection details.
+    }
+    throw new KnowledgeError('connection_test_failed', '来源连接测试未通过。', 409);
+  }
+  async connectPublicMcp(ctx: UserContext, input: Record<string, unknown>) {
+    requireManager(ctx);
+    const endpoint = publicMcpEndpoint(input.endpoint).href;
+    if ((await this.deps.repo.read(ctx)).disabledPlugins.includes('mcp')) throw new KnowledgeError('plugin_disabled', 'MCP 来源已暂停。', 409);
+    const { name, resources } = await this.publicMcp.discover(endpoint);
+    return this.deps.repo.transact(ctx, s => {
+      if (s.disabledPlugins.includes('mcp')) throw new KnowledgeError('plugin_disabled', 'MCP 来源已暂停。', 409);
+      const existing = s.source.connections.find(conn => conn.pluginId === 'mcp' && conn.scope.publicMcpEndpoint === endpoint && s.connectionMeta[conn.id]?.audience[0] === ctx.userId);
+      const selected = new Set(Array.isArray(existing?.scope.selectedExternalIds) ? existing.scope.selectedExternalIds : []);
+      const previouslySelected = resources.filter(resource => selected.has(resource.uri)).map(resource => resource.uri);
+      const scope = {
+        publicMcpEndpoint: endpoint, mcpResources: resources,
+        mcpScopeHash: hash(JSON.stringify([endpoint, resources.map(resource => resource.uri).sort()])),
+        audience: [ctx.userId], selectedExternalIds: previouslySelected,
+      };
+      const conn = existing ?? { id: id(), pluginId: 'mcp', scope, credentialRef: null, status: 'confirmed' as const, cursor: null, confirmedBy: ctx.userId };
+      Object.assign(conn, { scope, status: 'confirmed', confirmedBy: ctx.userId });
+      if (!existing) s.source.connections.push(conn);
+      s.connectionMeta[conn.id] = { name, audience: [ctx.userId], projectIds: [] };
+      invalidateAnalyses(s);
+      return { id: conn.id, name, status: conn.status };
     });
   }
   async confirmConnection(ctx: UserContext, connectionId: string) {
@@ -123,13 +172,12 @@ export class KnowledgeService {
     return this.deps.repo.transact(ctx, async s => {
       const conn = s.source.connections.find(c => c.id === connectionId);
       if (!conn || !this.connectionAllowed(s, ctx, connectionId)) throw new KnowledgeError('not_found', '来源连接不存在。', 404);
-      const test = await this.plugin(s, conn.pluginId).testConnection({ connectionId, scope: conn.scope, credentialRef: conn.credentialRef });
-      if (!test.ok) throw new KnowledgeError('connection_test_failed', '来源连接测试未通过。', 409);
+      await this.verifyConnection(this.plugin(s, conn.pluginId, conn.scope), conn);
       conn.status = 'confirmed'; conn.confirmedBy = ctx.userId; invalidateAnalyses(s); return { id: conn.id, status: conn.status };
     });
   }
-  private scopedPlugin(state: KnowledgeState, pluginId: string, ctx: UserContext): KnowledgeSourcePlugin {
-    const plugin = this.plugin(state, pluginId);
+  private scopedPlugin(state: KnowledgeState, pluginId: string, scope: Record<string, unknown>, ctx: UserContext): KnowledgeSourcePlugin {
+    const plugin = this.plugin(state, pluginId, scope);
     return { ...plugin,
       async listItems(cfg, cursor) { const batch = await plugin.listItems(cfg, cursor); return { ...batch, items: batch.items.filter(ref => selectedItem(cfg.scope, ref.externalId, pluginId !== 'mcp')) }; },
       async getAcl(cfg, ref) {
@@ -142,13 +190,13 @@ export class KnowledgeService {
   private async checkLiveAcl(state: KnowledgeState, ctx: UserContext, item: Item) {
     const conn = state.source.connections.find(c => c.id === item.connectionId)!;
     if (conn.pluginId === 'local-file') return;
-    const acl = await this.plugin(state, conn.pluginId).getAcl?.({ connectionId: conn.id, scope: conn.scope, credentialRef: conn.credentialRef }, { externalId: item.externalId, version: item.version, title: item.title, locator: item.locator, change: 'upsert' });
+    const acl = await this.plugin(state, conn.pluginId, conn.scope).getAcl?.({ connectionId: conn.id, scope: conn.scope, credentialRef: conn.credentialRef }, { externalId: item.externalId, version: item.version, title: item.title, locator: item.locator, change: 'upsert' });
     if (acl?.status !== 'known' || !acl.entries.some(e => e.principal === ctx.userId && e.access === 'read')) throw new KnowledgeError('source_denied', '来源权限已变化，不能确认或读取当前资料。', 403);
   }
   private async sourcePreview(state: KnowledgeState, ctx: UserContext, connectionId: string) {
     const conn = state.source.connections.find(c => c.id === connectionId);
     if (!conn || !this.connectionAllowed(state, ctx, connectionId) || !managedSource(conn.pluginId)) throw new KnowledgeError('source_denied', '当前来源范围不可预览。', 403);
-    const plugin = this.plugin(state, conn.pluginId), cfg = { connectionId, scope: conn.scope, credentialRef: conn.credentialRef };
+    const plugin = this.plugin(state, conn.pluginId, conn.scope), cfg = { connectionId, scope: conn.scope, credentialRef: conn.credentialRef };
     const batch = await plugin.listItems(cfg, undefined);
     const eligible: { id: string; externalId: string; title: string; version: string; locator: string; selected: boolean }[] = [];
     let blocked = 0;
@@ -163,7 +211,7 @@ export class KnowledgeService {
   }
   async previewConnection(ctx: UserContext, connectionId: string) {
     const state = await this.deps.repo.read(ctx), { conn, eligible, blocked } = await this.sourcePreview(state, ctx, connectionId);
-    return { connectionId, name: state.connectionMeta[connectionId]!.name, pluginId: conn.pluginId, status: conn.status, scope: conn.scope, items: eligible.map(({externalId: _, ...item}) => item), blocked };
+    return { connectionId, name: state.connectionMeta[connectionId]!.name, pluginId: conn.pluginId, status: conn.status, scope: this.connectionScopeSummary(conn.scope), items: eligible.map(({externalId: _, ...item}) => item), blocked };
   }
   async importSelection(ctx: UserContext, connectionId: string, input: Record<string, unknown>) {
     requireManager(ctx); const ids = strings(input.ids);
@@ -191,7 +239,7 @@ export class KnowledgeService {
   }
   async installPlugin(ctx: UserContext, pluginId: string) {
     requireManager(ctx); if (!MANIFESTS.some(m => m.id === pluginId)) throw new KnowledgeError('unknown_plugin', '插件不存在。');
-    return this.deps.repo.transact(ctx, s => { if (!s.installedPlugins.includes(pluginId)) s.installedPlugins.push(pluginId); return { installed: true }; });
+    return { installed: true };
   }
   async sync(ctx: UserContext, connectionId: string) {
     requireManager(ctx);
@@ -199,7 +247,7 @@ export class KnowledgeService {
       const conn = s.source.connections.find(c => c.id === connectionId);
       if (!conn || !this.connectionAllowed(s, ctx, connectionId)) throw new KnowledgeError('not_found', '来源连接不存在。', 404);
       if (conn.status !== 'confirmed') throw new KnowledgeError('connection_unconfirmed', '先测试并确认连接范围。', 409);
-      const store = hydrate(s.source), result = await syncConnection(store, this.scopedPlugin(s, conn.pluginId, ctx), connectionId);
+      const store = hydrate(s.source), result = await syncConnection(store, this.scopedPlugin(s, conn.pluginId, conn.scope, ctx), connectionId);
       s.source = snapshot(store);
       if (result.error) { const current = s.source.connections.find(c => c.id === connectionId)!; if (current.status !== 'needs_reauth') current.status = 'sync_failed'; }
       invalidateAnalyses(s); return { ...result, error: result.error ? '来源同步失败；资料暂停使用，检查授权后重试。' : undefined };
@@ -393,11 +441,11 @@ export class KnowledgeService {
   }
   async togglePlugin(ctx: UserContext, pluginId: string, enabled: boolean) {
     requireManager(ctx); if (!MANIFESTS.some(m => m.id === pluginId)) throw new KnowledgeError('unknown_plugin', '插件不存在。');
-    return this.deps.repo.transact(ctx, s => { if (!pluginInstalled(s, pluginId)) throw new KnowledgeError('plugin_not_installed', '请先安装知识源插件。', 409); s.disabledPlugins = s.disabledPlugins.filter(p => p !== pluginId); if (!enabled) s.disabledPlugins.push(pluginId); invalidateAnalyses(s); return { enabled }; });
+    return this.deps.repo.transact(ctx, s => { s.disabledPlugins = s.disabledPlugins.filter(p => p !== pluginId); if (!enabled) s.disabledPlugins.push(pluginId); invalidateAnalyses(s); return { enabled }; });
   }
   private databaseConnection(s: KnowledgeState, ctx: UserContext, connectionId: string) {
     const conn = s.source.connections.find(c => c.id === connectionId), meta = s.connectionMeta[connectionId];
-    if (!this.deps.database || !conn || conn.pluginId !== 'database' || conn.status !== 'confirmed' || !pluginInstalled(s, 'database') || s.disabledPlugins.includes('database') || !meta || !this.connectionAllowed(s, ctx, connectionId)) throw new KnowledgeError('source_denied', '当前数据库来源不可用。', 403);
+    if (!this.deps.database || !conn || conn.pluginId !== 'database' || conn.status !== 'confirmed' || s.disabledPlugins.includes('database') || !meta || !this.connectionAllowed(s, ctx, connectionId)) throw new KnowledgeError('source_denied', '当前数据库来源不可用。', 403);
     return conn;
   }
   async templates(ctx: UserContext, connectionId: string) { const state = await this.deps.repo.read(ctx); this.databaseConnection(state, ctx, connectionId); return { templates: state.queryTemplates.filter(t => t.connectionId === connectionId) }; }

@@ -16,7 +16,7 @@ Example shape (all values are placeholders):
 
 The default authentication uses the deployment managed identity's PostgreSQL audience token. If the source needs a password, provision it separately in Key Vault and add `"secret":{"name":"db-source-finance","version":"specific-version"}`. Passwords, model-key references and connection strings are refused in this configuration. TLS certificate validation is always enabled. The source pool is separate from the platform write pool and closes on shutdown.
 
-The UI installs the database plugin, selects an approved resource, explicitly acknowledges independent read-only access, confirms the connection, syncs structure and approves SELECT templates separately from running them by ID. Schema/view-definition or scope changes invalidate a template and require reapproval. Returned rows carry query time and an opaque, scope/template-bound data revision. The freshness endpoint rechecks current permission, schema and source revision; missing or unstable signals expire the result. PostgreSQL snapshots conservatively expire on unrelated transactions. Rows are never added as policy knowledge. No resources are simulated when configuration is absent.
+In Manage sources, configure the database by selecting an approved resource, acknowledging independent read-only access, and verifying the connection. Sync structure and approve SELECT templates separately from running them by ID. Schema/view-definition or scope changes invalidate a template and require reapproval. Returned rows carry query time and an opaque, scope/template-bound data revision. The freshness endpoint rechecks current permission, schema and source revision; missing or unstable signals expire the result. PostgreSQL snapshots conservatively expire on unrelated transactions. Rows are never added as policy knowledge. No resources are simulated when configuration is absent.
 
 ## Validation scope
 
@@ -24,13 +24,15 @@ Unit/service tests use labeled fixtures. CI exercises native PostgreSQL includin
 
 ## Source lifecycle and confirmation
 
-Only the local-file plugin is initially installed. `POST /plugins/:id/install` records capability availability; it creates no connection, source item, recommendation or employee business tool. Pause/resume stays separate. Remote connection creation requires literal `readOnlyAcknowledged: true`; raw credential references and write effects are refused. Database requests select only `scope.resourceId`, with tables, columns, row bounds and projects derived from the operator registry.
+Source connectors are built in. The legacy `POST /plugins/:id/install` endpoint is idempotent for existing clients. Pause and resume control source access. Remote connection creation requires literal `readOnlyAcknowledged: true`; raw credential references and write effects are refused. Database requests select only `scope.resourceId`, with tables, columns, row bounds and projects derived from the operator registry.
 
 `KNOWLEDGE_SOURCES_JSON` defines approved mail/SharePoint metadata scopes, audiences and project grants, using managed identity for Graph. `GET /connections/:id/preview` reads metadata after per-item ACL checks and exposes opaque version-bound selection IDs; denied titles/bodies remain hidden. `POST /connections/:id/import {ids}` rechecks those permissions and persists the selected external IDs. Every sync filters the same selection and checks the current actor ACL before any body read. Imported versions remain unconfirmed. Revocation/deletion clears retrievable chunks and confirmation; same-version recovery rereads content and requires confirmation again. Folder hierarchy changes force a bounded full SharePoint reconciliation so omitted descendants lose old references.
 
 ### Import from an external MCP server
 
-Add a resource to `KNOWLEDGE_SOURCES_JSON` with `pluginId: "mcp"`, its approved audience and projects, and a scope such as:
+For a public Streamable HTTP server, enter its HTTPS endpoint in **Manage sources → MCP** and verify it. The connection is private to the configuring user, who can then select resources to import.
+
+For a centrally approved server, add a resource to `KNOWLEDGE_SOURCES_JSON` with `pluginId: "mcp"`, its approved audience and projects, and a scope such as:
 
 ```json
 {
@@ -46,7 +48,7 @@ Add a resource to `KNOWLEDGE_SOURCES_JSON` with `pluginId: "mcp"`, its approved 
 }
 ```
 
-For a bearer-authenticated server, set `scope.secret` to the Key Vault secret reference `{ "name": "...", "version": "..." }`. The connector accesses the configured endpoint via Streamable HTTP and reads exact, approved text resource URIs. In **Manage sources**, install MCP, connect the approved resource, and select the entries to import. A subsequent import refreshes the selected snapshots; changed content needs confirmation. Endpoint or URI scope changes suspend the old connection and require a new one.
+For a bearer-authenticated server, set `scope.secret` to the Key Vault secret reference `{ "name": "...", "version": "..." }`. The connector accesses the configured endpoint via Streamable HTTP and reads exact, approved text resource URIs. In **Manage sources**, connect the approved MCP resource and select the entries to import. A subsequent import refreshes the selected snapshots; changed content needs confirmation. Endpoint or URI scope changes suspend the old connection and require a new one.
 
 Remote production connectors currently support mail bodies and text files. Non-text remote documents require durable parse-job integration; use the local binary upload queue for PDF/Office/image files. The synchronous parser bridge is deliberately not wired into remote production sync because it does not persist uncertain billable submissions.
 

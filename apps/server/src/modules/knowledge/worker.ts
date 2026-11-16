@@ -6,6 +6,7 @@ import { runAnalysis } from '../analysis/service.js';
 import { managedSource, sourceScope } from './sources.js';
 import { mayRead, positionedChunks } from './domain.js';
 import { CATEGORIES, validateProfile } from './profile.js';
+import { isPublicMcpScope } from './plugins/mcp-resources.js';
 /** The persisted parseJobs/analyses ledger is the authoritative queue; no process-local launch is required. */
 export async function tickKnowledge(deps: KnowledgeDeps, tenantId: string): Promise<boolean> {
   const internal: UserContext = { tenantId, userId: 'knowledge-worker', roles: [], projectScopes: [] };
@@ -17,7 +18,7 @@ export async function tickKnowledge(deps: KnowledgeDeps, tenantId: string): Prom
     const denied = state.source.items.some(item => {
       if (!mayRead(state, run.actor, item)) return false;
       const conn = state.source.connections.find(c => c.id === item.connectionId)!;
-      if (managedSource(conn.pluginId)) { try { sourceScope(deps.sourceResources ?? [], run.actor, conn.pluginId, conn.scope, state.connectionMeta[conn.id]!.audience); return false; } catch { return true; } }
+      if (managedSource(conn.pluginId) && !isPublicMcpScope(conn.scope)) { try { sourceScope(deps.sourceResources ?? [], run.actor, conn.pluginId, conn.scope, state.connectionMeta[conn.id]!.audience); return false; } catch { return true; } }
       if (conn.pluginId !== 'database') return false;
       try { return !deps.database?.scope(run.actor, conn.scope); } catch { return true; }
     });

@@ -1,6 +1,6 @@
 import type { UserContext } from '@superagent/shared';
 import { Pool, type PoolClient } from 'pg';
-import { emptyState, itemSignature, positionedChunks, pluginInstalled, selectedItem, type Evidence, type KnowledgeState } from './domain.js';
+import { emptyState, itemSignature, positionedChunks, selectedItem, type Evidence, type KnowledgeState } from './domain.js';
 import { appendPgAudit, auditDiff, auditSnapshot } from './audit.js';
 import type { AuditEntry } from '../audit/audit.js';
 export interface SearchHit extends Evidence { title: string; score: number }
@@ -15,7 +15,7 @@ export function indexableChunks(state: KnowledgeState): IndexedChunk[] {
   const result: IndexedChunk[] = [], seen = new Set<string>();
   for (const item of state.source.items) {
     const conn = state.source.connections.find(c => c.id === item.connectionId), meta = state.connectionMeta[item.connectionId];
-    if (!conn || !meta || conn.status !== 'confirmed' || !pluginInstalled(state, conn.pluginId) || !selectedItem(conn.scope, item.externalId) || state.disabledPlugins.includes(conn.pluginId) || !item.current || item.status !== 'parsed' || !item.acl || state.confirmations[item.id]?.signature !== itemSignature(state, item)) continue;
+    if (!conn || !meta || conn.status !== 'confirmed' || !selectedItem(conn.scope, item.externalId, conn.pluginId !== 'mcp') || state.disabledPlugins.includes(conn.pluginId) || !item.current || item.status !== 'parsed' || !item.acl || state.confirmations[item.id]?.signature !== itemSignature(state, item)) continue;
     for (const chunk of positionedChunks(state, item)) for (let offset = 0; offset < chunk.text.length; offset += 1040) {
       const end = Math.min(offset + 1200, chunk.text.length);
       const key = JSON.stringify([item.id, item.version, chunk.start + offset, chunk.start + end, chunk.locator]);

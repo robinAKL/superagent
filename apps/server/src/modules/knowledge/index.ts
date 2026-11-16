@@ -16,6 +16,7 @@ export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = asy
   app.post<{ Params: { id: string } }>('/connections/:id/import', async (req, reply) => { const result = await service!.importSelection(req.user!, req.params.id, body(req)); return result.error ? reply.code(502).send({ error: 'source_sync_failed', message: result.error }) : result; });
   app.get<{ Params: { id: string }; Querystring: { templateId?: string; revision?: string } }>('/connections/:id/fact-freshness', req => service!.factFreshness(req.user!, req.params.id, req.query.templateId ?? '', req.query.revision ?? ''));
   app.get('/overview', req => service!.overview(req.user!));
+  app.post('/connections/mcp', (req, reply) => { reply.code(201); return service!.connectPublicMcp(req.user!, body(req)); });
   app.post('/connections', (req, reply) => { reply.code(201); return service!.createConnection(req.user!, body(req)); });
   app.post<{ Params: { id: string } }>('/connections/:id/confirm', req => service!.confirmConnection(req.user!, req.params.id));
   app.post<{ Params: { id: string } }>('/connections/:id/sync', async (req,reply) => { const result=await service!.sync(req.user!,req.params.id); return result.error ? reply.code(502).send({...result,message:result.error,error:'source_sync_failed'}) : result; });

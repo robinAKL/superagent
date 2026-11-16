@@ -64,13 +64,13 @@ function fixture(pluginId: 'email' | 'sharepoint' = 'email') {
 }
 
 describe('approved remote source lifecycle', () => {
-  it.each(['email', 'sharepoint'] as const)('installs %s metadata without creating connections, items, employee tools or connector calls', async pluginId => {
+  it.each(['email', 'sharepoint'] as const)('keeps the legacy %s install endpoint idempotent for built-in sources', async pluginId => {
     const f = fixture(pluginId);
-    expect((await f.service.overview(owner)).plugins.find(plugin => plugin.id === pluginId)).toMatchObject({ installed: false, configured: true });
+    expect((await f.service.overview(owner)).plugins.find(plugin => plugin.id === pluginId)).toMatchObject({ installed: true, builtIn: true, configured: true });
     await f.service.installPlugin(owner, pluginId);
     await f.service.installPlugin(owner, pluginId);
     const state = await f.repo.read(owner);
-    expect(state.installedPlugins.filter(id => id === pluginId)).toHaveLength(1);
+    expect(state.installedPlugins).toEqual(['local-file']);
     expect(state.source).toMatchObject({ connections: [], items: [], chunks: [] });
     expect(state.recommendations).toEqual([]);
     expect(f.plugin.listItems).not.toHaveBeenCalled();
@@ -78,10 +78,8 @@ describe('approved remote source lifecycle', () => {
     expect(f.plugin.readItem).not.toHaveBeenCalled();
   });
 
-  it('requires explicit installation and literal read-only acknowledgement without accepting credentials or write effect', async () => {
+  it('requires literal read-only acknowledgement without accepting credentials or write effect', async () => {
     const f = fixture();
-    await expect(f.service.createConnection(owner, f.connectionInput())).rejects.toMatchObject({ code: 'plugin_not_installed' });
-    await f.service.installPlugin(owner, 'email');
     for (const readOnlyAcknowledged of [undefined, false, 'true', 1]) await expect(f.service.createConnection(owner, { ...f.connectionInput(), readOnlyAcknowledged })).rejects.toMatchObject({ code: 'read_only_acknowledgement_required' });
     for (const input of [{ credentialRef: 'postgres://raw-password@host/db' }, { effect: 'write' }, { scope: { resourceId: 'approved-resource', selectedExternalIds: ['forbidden-b'] } }, { scope: { resourceId: 'approved-resource', password: 'secret' } }]) {
       await expect(f.service.createConnection(owner, { ...f.connectionInput(), ...input })).rejects.toMatchObject({ statusCode: expect.any(Number) });
@@ -101,6 +99,15 @@ describe('approved remote source lifecycle', () => {
     expect(narrowed.scope).toMatchObject({ ...f.resources[0]!.scope, ...(pluginId === 'email' ? { receivedSince: '2026-02-01T00:00:00.000Z' } : {}), projectIds: ['finance'], audience: ['alice'], selectedExternalIds: [] });
     if (pluginId === 'email') expect(narrowed.scope.receivedSince).toBe('2026-02-01T00:00:00.000Z');
     expect(narrowed.credentialRef).toBeNull();
+  });
+
+  it.each(['email', 'sharepoint'] as const)('verifies %s configuration before saving a connection', async pluginId => {
+    const f = fixture(pluginId);
+    f.plugin.testConnection.mockResolvedValueOnce({ ok: false });
+    const input = { ...f.connectionInput(), verify: true };
+    await expect(f.service.createConnection(owner, input)).rejects.toMatchObject({ code: 'connection_test_failed' });
+    expect((await f.repo.read(owner)).source.connections).toEqual([]);
+    await expect(f.service.createConnection(owner, input)).resolves.toMatchObject({ status: 'confirmed', confirmedBy: owner.userId });
   });
 
   it('checks each preview ACL without reading bodies or leaking denied/unknown titles and opaque identifiers', async () => {

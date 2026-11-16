@@ -48,10 +48,9 @@ export function selectedItem(scope: Record<string, unknown>, externalId: string,
   const selected = scope.selectedExternalIds;
   return !Array.isArray(selected) || selected.some(id => typeof id === 'string' && (id === externalId || (includeAttachments && externalId.startsWith(`${id}/att/`))));
 }
-export function pluginInstalled(state: KnowledgeState, pluginId: string): boolean { return state.installedPlugins?.includes(pluginId) ?? true; }
 export function mayRead(state: KnowledgeState, ctx: UserContext, item: Item, confirmed = true): boolean {
   const conn = state.source.connections.find(c => c.id === item.connectionId), meta = state.connectionMeta[item.connectionId];
-  if (!conn || !meta || !meta.audience.includes(ctx.userId) || conn.status !== 'confirmed' || !pluginInstalled(state, conn.pluginId) || !selectedItem(conn.scope, item.externalId, conn.pluginId !== 'mcp') || state.disabledPlugins.includes(conn.pluginId) || !item.current || item.status !== 'parsed' || !item.acl?.some(a => a.access === 'read' && a.principal === ctx.userId) || !meta.projectIds.every(p => ctx.projectScopes.includes(p))) return false;
+  if (!conn || !meta || !meta.audience.includes(ctx.userId) || conn.status !== 'confirmed' || !selectedItem(conn.scope, item.externalId, conn.pluginId !== 'mcp') || state.disabledPlugins.includes(conn.pluginId) || !item.current || item.status !== 'parsed' || !item.acl?.some(a => a.access === 'read' && a.principal === ctx.userId) || !meta.projectIds.every(p => ctx.projectScopes.includes(p))) return false;
   return !confirmed || state.confirmations[item.id]?.signature === itemSignature(state, item);
 }
 export function signature(state: KnowledgeState, ctx: UserContext): string { return hash(JSON.stringify(state.source.items.filter(i => mayRead(state, ctx, i)).map(i => [i.id, itemSignature(state, i)]).sort())); }
