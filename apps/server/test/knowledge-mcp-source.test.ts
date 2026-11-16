@@ -112,6 +112,12 @@ it('leaves no connection when a public MCP endpoint requires authorization', asy
   expect((await service.overview(actor)).connections).toEqual([]);
 });
 
+it('reports a missing MCP route when the initialization request returns 404', async () => {
+  const service = new KnowledgeService({ repo: new MemoryKnowledgeRepository(), publicMcp: createPublicMcp(async () => Response.json({ detail: 'Not Found' }, { status: 404 })) });
+  await expect(service.connectPublicMcp(actor, { endpoint })).rejects.toMatchObject({ code: 'mcp_endpoint_not_found' });
+  expect((await service.overview(actor)).connections).toEqual([]);
+});
+
 it('rejects local, reserved, encoded and infrastructure destinations', () => {
   for (const address of ['127.0.0.1', '10.1.2.3', '169.254.169.254', '168.63.129.16', '100.64.0.1', '::ffff:a00:1', 'fd00::1', '2001:db8::1']) {
     expect(isPublicMcpAddress(address)).toBe(false);
