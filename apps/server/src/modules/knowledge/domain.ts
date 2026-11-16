@@ -7,15 +7,23 @@ import type { LiveMcpUser } from './live-mcp.js';
 import type { SecretVersion } from '../setup/secrets.js';
 export class KnowledgeError extends Error { constructor(public code: string, message: string, public statusCode = 400) { super(message); } }
 export interface Snapshot { connections: Connection[]; items: Item[]; chunks: Chunk[]; citations: [string, string[]][]; flagged: [string, string][] }
-export interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string }
+export interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string; retrievedAt?: string }
+export interface McpAnalysisSource { id: string; name: string; revision: string }
 export interface Recommendation {
   id: string; key: string; kind: 'employee' | 'tool' | 'sop' | 'object' | 'relation'; name: string; description: string;
   origin?: 'manual' | 'inferred';
   relation?: { from: string; to: string; label: string };
   evidence: Evidence[]; humanLocked: boolean; deleted: boolean;
   proposedChange?: { name: string; description: string; evidence: Evidence[]; relation?: { from:string;to:string;label:string } };
+  mcpScope?: string;
+  mcpRunId?: string;
 }
-export interface AnalysisRun { id: string; actor: UserContext; status: 'queued' | 'running' | 'completed' | 'failed' | 'stale' | 'outcome_unknown'; stage: 'parse' | 'extract' | 'recommend' | 'complete'; signature: string; createdAt: string; error: string | null }
+export interface AnalysisRun {
+  id: string; actor: UserContext; status: 'queued' | 'running' | 'completed' | 'failed' | 'stale' | 'outcome_unknown';
+  stage: 'parse' | 'extract' | 'read_mcp' | 'recommend' | 'complete'; signature: string; createdAt: string; error: string | null;
+  mcpSources?: McpAnalysisSource[]; mcpEvidence?: Evidence[]; focus?: string;
+  leaseUntil?: number; leaseToken?: string;
+}
 export interface ConnectionMeta { name: string; audience: string[]; projectIds: string[]; localUpload?: boolean }
 export interface Confirmation { version: string; signature: string; confirmedBy: string; confirmedAt: string }
 export interface Upload { connectionId: string; name: string; text: string; version: string; audience: string[] }
@@ -99,15 +107,26 @@ export function evidenceValid(state: KnowledgeState, ctx: UserContext, e: Eviden
   if (!item || !mayRead(state, ctx, item) || item.version !== e.version || !Number.isSafeInteger(e.start) || !Number.isSafeInteger(e.end) || e.start < 0 || e.end <= e.start) return false;
   return positionedChunks(state, item).some(c => e.start >= c.start && e.end <= c.end && c.text.slice(e.start - c.start, e.end - c.start) === e.quote && c.locator === e.locator);
 }
-export function mergeRecommendations(state: KnowledgeState, ctx: UserContext, proposals: Omit<Recommendation, 'id' | 'humanLocked' | 'deleted'>[]): void {
-  const objects = new Set(state.recommendations.filter(r=>r.kind==='object'&&!r.deleted&&r.evidence.every(e=>evidenceValid(state,ctx,e))).map(r=>r.key));
-  for(const p of proposals) if(p.kind==='object'&&p.evidence.every(e=>evidenceValid(state,ctx,e))&&!state.recommendations.some(r=>r.kind==='object'&&r.key===p.key&&r.deleted)) objects.add(p.key);
+export function mergeRecommendations(
+  state: KnowledgeState, ctx: UserContext, proposals: Omit<Recommendation, 'id' | 'humanLocked' | 'deleted'>[],
+  mcp?: { mcpScope: string; mcpRunId: string; validEvidence: (e: Evidence) => boolean },
+): void {
+  const scoped = state.recommendations.filter(r => r.mcpScope === mcp?.mcpScope);
+  const valid = mcp?.validEvidence ?? ((e: Evidence) => evidenceValid(state, ctx, e));
+  const objects = new Set(scoped.filter(r=>r.kind==='object'&&!r.deleted&&r.evidence.every(valid)).map(r=>r.key));
+  for(const p of proposals) if(p.kind==='object'&&p.evidence.every(valid)&&!scoped.some(r=>r.kind==='object'&&r.key===p.key&&r.deleted)) objects.add(p.key);
   for (const p of proposals) {
-    if (!p.key || !p.name || !p.evidence.length || !p.evidence.every(e => evidenceValid(state, ctx, e))) throw new KnowledgeError('unsupported_recommendation', '模型建议缺少当前可定位依据，不能生成草案。', 422);
+    if (!p.key || !p.name || !p.evidence.length || !p.evidence.every(valid)) throw new KnowledgeError('unsupported_recommendation', '模型建议缺少当前可定位依据，不能生成草案。', 422);
     if(p.kind==='relation'&&(!p.relation||!objects.has(p.relation.from)||!objects.has(p.relation.to))) throw new KnowledgeError('unsupported_relation','关系必须引用当前有依据且未删除的业务对象草案。',422);
-    const existing = state.recommendations.find(r => r.key === p.key && r.kind === p.kind);
+    const existing = scoped.find(r => r.key === p.key && r.kind === p.kind);
     if (existing?.deleted) continue;
     if (existing?.humanLocked) { existing.proposedChange = { name: p.name, description: p.description, evidence: p.evidence, ...(p.relation?{relation:p.relation}:{}) }; continue; }
-    if (existing) Object.assign(existing, p, { origin: 'inferred' }); else state.recommendations.push({ ...p, origin: 'inferred', id: id(), humanLocked: false, deleted: false });
+    const draft = { ...p, origin: 'inferred' as const, ...(mcp && { mcpScope: mcp.mcpScope, mcpRunId: mcp.mcpRunId }) };
+    if (existing) Object.assign(existing, draft);
+    else {
+      const recommendation = { ...draft, id: id(), humanLocked: false, deleted: false };
+      state.recommendations.push(recommendation);
+      scoped.push(recommendation);
+    }
   }
 }

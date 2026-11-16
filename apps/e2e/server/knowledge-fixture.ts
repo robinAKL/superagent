@@ -10,6 +10,8 @@ import type { KnowledgeDeps } from '../../server/src/modules/knowledge/service.j
 import type { Evidence } from '../../server/src/modules/knowledge/domain.js';
 import type { AuditEntry } from '../../server/src/modules/audit/audit.js';
 import type { SourceResource } from '../../server/src/modules/knowledge/sources.js';
+import { LiveMcpKnowledge } from '../../server/src/modules/knowledge/live-mcp.js';
+import { InMemorySecretStore } from '../../server/src/modules/setup/secrets.js';
 
 export const KNOWLEDGE_OWNER = 'e2e-knowledge-owner';
 export const KNOWLEDGE_HEADER = `${KNOWLEDGE_OWNER}|owner|P-1`;
@@ -113,6 +115,7 @@ export function createKnowledgeFixture(): { deps: KnowledgeDeps; attach(app: Fas
   };
   function reset() {
     deps.repo = new MemoryKnowledgeRepository();
+    delete deps.liveMcp;
     mail = { available: true, acl: 'allowed', version: 1, text: ROLE_FILE.split('\n').slice(0, 2).join('\n') };
     sharepoint = { available: true, acl: 'allowed', version: 1, text: ROLE_FILE.split('\n').slice(2).join('\n') };
     db = { available: true, readOnly: true, schemaVersion: 1, revision: 1, rowValue: 120 };
@@ -131,6 +134,25 @@ export function createKnowledgeFixture(): { deps: KnowledgeDeps; attach(app: Fas
         if (request.headers['x-dev-user'] !== KNOWLEDGE_HEADER) return reply.code(403).send({ error: 'test_driver_identity_required' });
       });
       testApp.post('/reset', async () => { reset(); return { fixture: 'synthetic-only', reset: true }; });
+      testApp.post('/seed-live-mcp', async () => {
+        const endpoint = 'https://handbook.synthetic.example/mcp';
+        const uri = 'handbook://procedures/returns';
+        const network: typeof fetch = async (input, init) => {
+          if (String(input) !== endpoint || init?.method !== 'POST') return new Response(null, { status: 405 });
+          const { id, method, params } = JSON.parse(String(init.body));
+          if (method === 'notifications/initialized') return new Response(null, { status: 202 });
+          const results: Record<string, unknown> = {
+            initialize: { protocolVersion: params?.protocolVersion, serverInfo: { name: '退货手册 MCP', version: 'test' }, capabilities: { resources: {} } },
+            'resources/list': { resources: [{ uri, name: '退货流程' }] },
+            'resources/templates/list': { resourceTemplates: [] },
+            'resources/read': { contents: [{ uri, text: '角色：退货专员；责任：核对收货记录后登记退款。' }] },
+          };
+          return Response.json({ jsonrpc: '2.0', id, result: results[method] });
+        };
+        deps.liveMcp = new LiveMcpKnowledge(deps.repo, new InMemorySecretStore(), network);
+        const connected = await deps.liveMcp.connect(ctx, { endpoint });
+        return { id: 'source' in connected ? connected.source?.id : undefined };
+      });
       testApp.post<{ Body: Record<string, unknown> }>('/control', async request => {
         const body = request.body;
         if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'invalid_test_control' };
