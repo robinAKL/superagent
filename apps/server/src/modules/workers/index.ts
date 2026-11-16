@@ -120,6 +120,19 @@ function bearer(req: FastifyRequest): string | undefined {
   return typeof h === 'string' && h.startsWith('Bearer ') ? h.slice(7).trim() : undefined;
 }
 
+/**
+ * The claim attempt the caller holds (T-02 fencing). Required on every task route: a late call from an earlier
+ * attempt of the same worker must not renew or report the current one.
+ */
+function leaseAttempt(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= 2_147_483_647 ? value : null;
+}
+
+/** The in-process queue does not fence by attempt itself; check it here so both stores behave the same. */
+function memoryAttemptMatches(taskId: string, attempt: number): boolean {
+  return runtimeState.queue.get(taskId)?.attempt === attempt;
+}
+
 async function claimFor(worker: WorkerRecord, now: number) {
   const kinds = worker.capabilities.kinds ?? [];
   if (!kinds.length) return null; // no granted kinds: nothing to claim, but the poll still keeps it present
@@ -195,22 +208,29 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
 
   app.post('/tasks/:id/heartbeat', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const attempt = leaseAttempt((req.body as { attempt?: unknown } | undefined)?.attempt);
+    if (attempt === null) return reply.code(400).send({ error: 'bad_attempt' });
     const worker = req.worker!;
     const now = workersState.now();
     if (!(await stillValid(worker, now))) return reply.code(401).send({ error: 'bad_worker_token' });
-    const ok = runtimeState.db ? await heartbeatTask(runtimeState.db, id, worker.id, LEASE_MS) : runtimeState.queue.heartbeat(id, worker.id, now);
+    const ok = runtimeState.db
+      ? await heartbeatTask(runtimeState.db, id, worker.id, attempt, LEASE_MS)
+      : memoryAttemptMatches(id, attempt) && runtimeState.queue.heartbeat(id, worker.id, now);
     if (ok) await workersState.registry.heartbeat(worker.id, now, { busy: true });
     return { ok };
   });
 
   app.post('/tasks/:id/succeed', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const attempt = leaseAttempt((req.body as { attempt?: unknown } | undefined)?.attempt);
+    if (attempt === null) return reply.code(400).send({ error: 'bad_attempt' });
     const worker = req.worker!;
     const now = workersState.now();
     if (!(await stillValid(worker, now))) return reply.code(401).send({ error: 'bad_worker_token' });
     if (runtimeState.db) {
-      if (!(await succeedTask(runtimeState.db, id, worker.id))) return reply.code(409).send({ error: 'lease_lost' });
+      if (!(await succeedTask(runtimeState.db, id, worker.id, attempt))) return reply.code(409).send({ error: 'lease_lost' });
     } else {
+      if (!memoryAttemptMatches(id, attempt)) return reply.code(409).send({ error: 'lease_lost' });
       try {
         runtimeState.queue.succeed(id, worker.id, now);
       } catch (error) {
@@ -223,18 +243,21 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
 
   app.post('/tasks/:id/fail', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = (req.body ?? {}) as { reason?: unknown };
+    const body = (req.body ?? {}) as { reason?: unknown; attempt?: unknown };
     const reason = typeof body.reason === 'string' && body.reason ? body.reason.slice(0, 500) : null;
     if (!reason) return reply.code(400).send({ error: 'missing_reason' });
+    const attempt = leaseAttempt(body.attempt);
+    if (attempt === null) return reply.code(400).send({ error: 'bad_attempt' });
     const worker = req.worker!;
     const now = workersState.now();
     if (!(await stillValid(worker, now))) return reply.code(401).send({ error: 'bad_worker_token' });
     let deadLettered: boolean;
     if (runtimeState.db) {
-      if (await releaseTask(runtimeState.db, id, worker.id, MAX_ATTEMPTS)) deadLettered = false;
-      else if (await deadLetterTask(runtimeState.db, id, worker.id, MAX_ATTEMPTS, reason)) deadLettered = true;
+      if (await releaseTask(runtimeState.db, id, worker.id, attempt, MAX_ATTEMPTS)) deadLettered = false;
+      else if (await deadLetterTask(runtimeState.db, id, worker.id, attempt, MAX_ATTEMPTS, reason)) deadLettered = true;
       else return reply.code(409).send({ error: 'lease_lost' });
     } else {
+      if (!memoryAttemptMatches(id, attempt)) return reply.code(409).send({ error: 'lease_lost' });
       try {
         deadLettered = runtimeState.queue.fail(id, worker.id, now, reason).deadLettered;
       } catch (error) {

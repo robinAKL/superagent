@@ -138,7 +138,7 @@ it('after 30 minutes offline, every task queued meanwhile is claimed on reconnec
     if (!task) break;
     expect(task.leaseOwner).toBe(worker.id);
     seen.push(task.payload.itemId);
-    const done = await a.inject({ method: 'POST', url: `/api/v1/worker-link/tasks/${task.id}/succeed`, headers: auth(token), payload: {} });
+    const done = await a.inject({ method: 'POST', url: `/api/v1/worker-link/tasks/${task.id}/succeed`, headers: auth(token), payload: { attempt: task.attempt } });
     expect(done.json().status).toBe('reported');
   }
   expect(seen).toEqual(['a', 'b', 'c', 'd', 'e']);
@@ -209,7 +209,7 @@ it('a token revoked after the preHandler read it cannot renew, report, or fail a
   const stale = (await workersState.registry.get(TENANT, worker.id))!;
   await a.inject({ method: 'POST', url: `/api/v1/workers/${worker.id}/revoke` });
   workersState.registry.byTokenHash = async () => ({ ...stale });
-  for (const [path, payload] of [['heartbeat', {}], ['succeed', {}], ['fail', { reason: 'x' }]] as const) {
+  for (const [path, payload] of [['heartbeat', { attempt: task.attempt }], ['succeed', { attempt: task.attempt }], ['fail', { reason: 'x', attempt: task.attempt }]] as const) {
     const res = await a.inject({ method: 'POST', url: `/api/v1/worker-link/tasks/${task.id}/${path}`, headers: auth(token), payload });
     expect(res.statusCode).toBe(401);
   }
@@ -222,12 +222,12 @@ it('a stale task call does not clear busy for the run that holds the lease', asy
   const { token } = await register(a);
   enqueue('one');
   const task = (await poll(a, token)).json().task;
-  expect((await a.inject({ method: 'POST', url: `/api/v1/worker-link/tasks/${task.id}/heartbeat`, headers: auth(token), payload: {} })).json().ok).toBe(true);
+  expect((await a.inject({ method: 'POST', url: `/api/v1/worker-link/tasks/${task.id}/heartbeat`, headers: auth(token), payload: { attempt: task.attempt } })).json().ok).toBe(true);
   const status = async () => (await a.inject({ method: 'GET', url: '/api/v1/workers' })).json().workers[0].status;
   expect(await status()).toBe('live');
-  const stale = await a.inject({ method: 'POST', url: '/api/v1/worker-link/tasks/not-mine/succeed', headers: auth(token), payload: {} });
+  const stale = await a.inject({ method: 'POST', url: '/api/v1/worker-link/tasks/not-mine/succeed', headers: auth(token), payload: { attempt: 1 } });
   expect(stale.statusCode).toBe(409);
-  const staleFail = await a.inject({ method: 'POST', url: '/api/v1/worker-link/tasks/not-mine/fail', headers: auth(token), payload: { reason: 'x' } });
+  const staleFail = await a.inject({ method: 'POST', url: '/api/v1/worker-link/tasks/not-mine/fail', headers: auth(token), payload: { reason: 'x', attempt: 1 } });
   expect(staleFail.statusCode).toBe(409);
   expect(await status()).toBe('live');
 });
@@ -250,9 +250,9 @@ it('one worker cannot report another worker\'s lease', async () => {
   const { token: t2 } = await register(a);
   enqueue('x');
   const task = (await a.inject({ method: 'POST', url: '/api/v1/worker-link/poll', headers: auth(t1), payload: { waitMs: 0 } })).json().task;
-  const stolen = await a.inject({ method: 'POST', url: `/api/v1/worker-link/tasks/${task.id}/succeed`, headers: auth(t2), payload: { workerId: task.leaseOwner } });
+  const stolen = await a.inject({ method: 'POST', url: `/api/v1/worker-link/tasks/${task.id}/succeed`, headers: auth(t2), payload: { workerId: task.leaseOwner, attempt: task.attempt } });
   expect(stolen.statusCode).toBe(409);
-  const hb = await a.inject({ method: 'POST', url: `/api/v1/worker-link/tasks/${task.id}/heartbeat`, headers: auth(t2), payload: {} });
+  const hb = await a.inject({ method: 'POST', url: `/api/v1/worker-link/tasks/${task.id}/heartbeat`, headers: auth(t2), payload: { attempt: task.attempt } });
   expect(hb.json().ok).toBe(false);
 });
 
