@@ -88,3 +88,14 @@
 .exec-report button { align-self: flex-start; }
 .exec-drawer ul { margin: 0; padding-left: var(--space-md); }
 .exec-room .exec-composer-actions button, .exec-followup button { white-space: nowrap; flex-shrink: 0; }
+/* Agent confirmations (T-13) */
+.exec-approvals { margin-bottom: var(--space-md); }
+.exec-approval-list { list-style: none; margin: 0; padding: 0; }
+.exec-approval-list li { border-top: 1px solid var(--color-soft-rule); padding: var(--space-sm) 0; }
+.exec-approval-summary { margin: 0 0 var(--space-2xs); }
+.exec-approval-list dl { display: grid; grid-template-columns: auto 1fr; gap: var(--space-2xs) var(--space-sm); margin: 0; }
+.exec-approval-list dt { color: var(--color-muted); font-size: 13px; }
+.exec-approval-list dd { margin: 0; overflow-wrap: anywhere; }
+.exec-approval-input { max-height: 160px; overflow: auto; background: var(--color-well); border-radius: var(--radius-sm); padding: var(--space-xs); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.exec-approval-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); justify-content: flex-end; }
+.exec-approval-actions span { color: var(--color-muted); font-size: 13px; margin-right: auto; }
