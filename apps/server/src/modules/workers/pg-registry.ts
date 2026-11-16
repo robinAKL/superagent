@@ -52,15 +52,21 @@ RETURNING id;
  * so seq order is commit order. Only a live (unrevoked) worker of the same tenant can be addressed.
  */
 export const APPEND_EVENT_SQL = `
-INSERT INTO worker_events (worker_id, seq, tenant_id, kind, payload, created_by, created_at)
+INSERT INTO worker_events (worker_id, seq, tenant_id, kind, payload, created_by, created_at, room_task_id)
 SELECT w.id,
        coalesce((SELECT max(e.seq) FROM worker_events e WHERE e.worker_id = w.id), 0) + 1,
-       w.tenant_id, $3, $4::jsonb, $5, to_timestamp($6::double precision / 1000)
+       w.tenant_id, $3, $4::jsonb, $5, to_timestamp($6::double precision / 1000), $7
 FROM workers w
 WHERE w.id = $2::uuid
   AND w.tenant_id = $1::uuid
   AND w.revoked_at IS NULL
+ON CONFLICT (tenant_id, room_task_id) DO NOTHING
 RETURNING worker_id, seq, kind, payload, created_by, created_at;
+`.trim();
+
+const FIND_ROOM_DISPATCH_SQL = `
+SELECT seq FROM worker_events
+WHERE tenant_id = $1::uuid AND worker_id = $2::uuid AND room_task_id = $3;
 `.trim();
 
 export const EVENTS_AFTER_SQL = `
@@ -140,10 +146,12 @@ export class PgWorkerRegistry implements WorkerRegistry {
     return rows.length === 1;
   }
 
-  async appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number): Promise<WorkerEvent | null> {
+  async appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number, roomTaskId?: string): Promise<WorkerEvent | null> {
     for (let tries = 0; ; tries++) {
       try {
-        const { rows } = await this.db.query<EventRow>(APPEND_EVENT_SQL, [tenantId, workerId, kind, JSON.stringify(payload), createdBy, at]);
+        const { rows } = await this.db.query<EventRow>(APPEND_EVENT_SQL, [
+          tenantId, workerId, kind, JSON.stringify(payload), createdBy, at, roomTaskId ?? null,
+        ]);
         return rows[0] ? fromEventRow(rows[0]) : null;
       } catch (error) {
         // 23505 unique_violation: another append took this seq first. Read max again. Each round lets at least
@@ -151,6 +159,11 @@ export class PgWorkerRegistry implements WorkerRegistry {
         if ((error as { code?: string }).code !== '23505' || tries >= 25) throw error;
       }
     }
+  }
+
+  async hasRoomDispatch(tenantId: string, workerId: string, roomTaskId: string): Promise<boolean> {
+    const { rows } = await this.db.query(FIND_ROOM_DISPATCH_SQL, [tenantId, workerId, roomTaskId]);
+    return rows.length > 0;
   }
 
   async eventsAfter(workerId: string, since: number, limit: number): Promise<WorkerEvent[]> {

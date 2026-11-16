@@ -21,7 +21,13 @@ export type WorkerStatus = 'registered' | 'live' | 'waiting_auth' | 'offline' | 
 /** A missed heartbeat window plus slack. Link polls at most every LONG_POLL_MAX_MS, which also counts as a heartbeat. */
 export const OFFLINE_AFTER_MS = 90_000;
 
+export interface RoomAssignment {
+  employeeId: string;
+  projectId: string;
+}
+
 export interface WorkerCapabilities {
+  roomAssignments?: RoomAssignment[];
   /** Queue kinds this worker may claim. Empty or absent: it claims nothing until an admin grants kinds. */
   kinds?: string[];
   /** Agent CLIs the device can start, e.g. ["claude-code", "codex"]. Reported, not trusted for authorisation. */
@@ -97,7 +103,8 @@ export interface WorkerRegistry {
   list(tenantId: string): Promise<WorkerRecord[]>;
   heartbeat(id: string, at: number, input: HeartbeatInput): Promise<boolean>;
   revoke(tenantId: string, id: string, at: number): Promise<boolean>;
-  appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number): Promise<WorkerEvent | null>;
+  appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number, roomTaskId?: string): Promise<WorkerEvent | null>;
+  hasRoomDispatch(tenantId: string, workerId: string, roomTaskId: string): Promise<boolean>;
   /** Oldest first, at most `limit`, strictly after `since`. */
   eventsAfter(workerId: string, since: number, limit: number): Promise<WorkerEvent[]>;
 }
@@ -142,6 +149,15 @@ export function cleanCapabilities(value: unknown): WorkerCapabilities {
   const out: WorkerCapabilities = {};
   const kinds = cleanList(raw.kinds);
   const agents = cleanList(raw.agents);
+  if (Array.isArray(raw.roomAssignments)) {
+    out.roomAssignments = raw.roomAssignments.flatMap((entry: unknown) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const { employeeId, projectId } = entry as Partial<RoomAssignment>;
+      return [employeeId, projectId].every((v) => typeof v === 'string' && v.length > 0 && v.length <= 128)
+        ? [{ employeeId: employeeId!, projectId: projectId! }]
+        : [];
+    }).slice(0, 32);
+  }
   if (kinds) out.kinds = kinds;
   if (agents) out.agents = agents;
   return out;
@@ -179,13 +195,21 @@ export async function authenticateWorker(registry: WorkerRegistry, token: string
 export class MemoryWorkerRegistry implements WorkerRegistry {
   private readonly rows = new Map<string, WorkerRecord>();
   private readonly events: WorkerEvent[] = [];
+  private readonly roomDispatches = new Map<string, WorkerEvent>();
 
-  async appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number): Promise<WorkerEvent | null> {
+  async hasRoomDispatch(tenantId: string, workerId: string, roomTaskId: string): Promise<boolean> {
+    return this.roomDispatches.get(JSON.stringify([tenantId, roomTaskId]))?.workerId === workerId;
+  }
+
+  async appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number, roomTaskId?: string): Promise<WorkerEvent | null> {
     const row = this.rows.get(workerId);
     if (!row || row.tenantId !== tenantId || row.revokedAt !== null) return null;
+    const dispatchKey = roomTaskId ? JSON.stringify([tenantId, roomTaskId]) : null;
+    if (dispatchKey && this.roomDispatches.has(dispatchKey)) return null;
     const seq = this.events.filter((e) => e.workerId === workerId).length + 1;
     const event: WorkerEvent = { seq, workerId, kind, payload: structuredClone(payload), createdBy, createdAt: at };
     this.events.push(event);
+    if (dispatchKey) this.roomDispatches.set(dispatchKey, event);
     return structuredClone(event);
   }
 
