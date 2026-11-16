@@ -36,7 +36,7 @@ describe('browser sign-in', () => {
   it('an expired session goes back through the sign-in redirect instead of calling the API unauthenticated', async () => {
     const redirect = vi.fn(async () => undefined);
     __setClientForTest(
-      { acquireTokenSilent: async () => { throw new InteractionRequiredAuthError('login_required'); }, acquireTokenRedirect: redirect } as unknown as IPublicClientApplication,
+      { acquireTokenSilent: async () => { throw new InteractionRequiredAuthError('login_required', 'Sign-in required'); }, acquireTokenRedirect: redirect } as unknown as IPublicClientApplication,
       account,
       ['s'],
     );

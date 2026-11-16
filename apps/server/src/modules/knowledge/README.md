@@ -33,3 +33,21 @@ Remote production connectors currently support mail bodies and text files. Non-t
 `PUT /space {name}` updates only the logical namespace label. `POST /manual-roles {name,description}` creates an explicitly manual, human-locked role with no document evidence and does not unlock analysis. Inferred roles still require confirmed evidence. Human-locked metadata remains visible as stale after a permitted source version changes; old quotes are withheld and edits/adoption require valid current evidence.
 
 The 51 original T-40 assertion IDs are real browser cases in `apps/e2e/tests/knowledge.spec.ts`. Explicit synthetic external drivers are documented in `docs/e2e/KNOWLEDGE-COVERAGE.md`; no live cloud access is claimed.
+
+## Read confirmed knowledge over MCP
+
+Configure a native or server-side MCP client with **Streamable HTTP** and the URL
+`https://<super-agent-host>/api/v1/knowledge/mcp`. Set the request header to
+`Authorization: Bearer <Entra access token>`. Obtain an access token from the deployment's
+Entra tenant for the Super Agent API, using the delegated scope
+`api://<ENTRA_CLIENT_ID>/access_as_user`. The client must be able to supply and refresh its
+token. This endpoint uses the existing API authentication and does not provide an MCP OAuth
+discovery or interactive sign-in flow. Browser cross-origin requests are refused.
+
+- `search_knowledge` takes `query` and returns excerpts, source IDs, version IDs, and citations.
+- `read_knowledge` takes `sourceId` and `version` from a search result and returns positioned
+  text chunks. The `truncated` flag signals the existing 200,000-character preview limit.
+
+Both tools require a confirmed current version and enforce the caller's tenant, project, and
+source permissions. Connected sources must pass a current permission check. The server
+exposes no mutation tools.

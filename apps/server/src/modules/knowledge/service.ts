@@ -223,19 +223,34 @@ export class KnowledgeService {
     requireManager(ctx);
     return this.deps.repo.transact(ctx, async s => { const item = s.source.items.find(i => i.id === sourceId || hash(i.id) === sourceId); if (!item || !this.allowed(s, ctx, item, false)) throw new KnowledgeError('source_denied', '当前资料权限不足。', 403); await this.checkLiveAcl(s, ctx, item); confirmSource(s, ctx, item.id, version); return { confirmed: true }; });
   }
-  async preview(ctx: UserContext, sourceId: string, version: string) {
+  async preview(ctx: UserContext, sourceId: string, version: string, { confirmedOnly = false } = {}) {
     const state = await this.deps.repo.read(ctx), item = state.source.items.find(i => hash(i.id) === sourceId || i.id === sourceId);
-    if (!item || !this.allowed(state, ctx, item, false)) throw new KnowledgeError('not_found', '当前资料不可读取。', 404);
+    if (!item || !this.allowed(state, ctx, item, confirmedOnly)) throw new KnowledgeError('not_found', '当前资料不可读取。', 404);
     await this.checkLiveAcl(state, ctx, item);
     if (item.version !== version) throw new KnowledgeError('version_changed', '资料版本已变化，请刷新后核对。', 409);
     let remaining = 200_000;
     const chunks = positionedChunks(state, item).flatMap(c => { if (remaining <= 0) return []; const text = c.text.slice(0, remaining); remaining -= text.length; return [{ text, locator: c.locator, start: c.start, end: c.start + text.length }]; });
     return { id: hash(item.id), title: item.title, version: item.version, locator: item.locator, chunks, truncated: remaining === 0 };
   }
-  async search(ctx: UserContext, query: string): Promise<{ answer: string; hits: SearchHit[] }> {
+  async search(ctx: UserContext, query: string, { checkSourceAccess = false } = {}): Promise<{ answer: string; hits: SearchHit[] }> {
     bounded(query, 200, '检索词'); const hits = await this.deps.repo.search(ctx, query.trim(), 12);
     // Recheck live state before returning citations; projection and mutation commit atomically in PG.
-    const state = await this.deps.repo.read(ctx), valid = hits.filter(e => this.valid(state, ctx, e));
+    const state = await this.deps.repo.read(ctx);
+    let valid = hits.filter(e => this.valid(state, ctx, e));
+    if (checkSourceAccess && valid.length) {
+      const sourceIds = new Set(valid.map(hit => hit.sourceId));
+      const readable = new Set<string>();
+      await Promise.all(state.source.items.filter(item => sourceIds.has(item.id)).map(async item => {
+        try {
+          await this.checkLiveAcl(state, ctx, item);
+          readable.add(item.id);
+        } catch {
+          // Deny the source if access was revoked or its connector cannot verify the permission.
+        }
+      }));
+      const current = await this.deps.repo.read(ctx);
+      valid = valid.filter(hit => readable.has(hit.sourceId) && this.valid(current, ctx, hit));
+    }
     return { answer: valid.length ? valid.map(e => `${e.quote}\n[${e.locator}]`).join('\n\n') : '无依据', hits: valid };
   }
   async startAnalysis(ctx: UserContext) {
