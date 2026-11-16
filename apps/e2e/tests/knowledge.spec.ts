@@ -34,7 +34,21 @@ async function response<T>(incoming: Promise<APIResponse>, statuses = [200, 201,
 const getOverview = (page: Page) => response<Overview>(page.request.get(`${ROOT}/overview`));
 const post = <T = Record<string, unknown>>(page: Page, path: string, data: unknown = {}) => response<T>(page.request.post(ROOT + path, { data }));
 const control = (page: Page, data: unknown) => response(page.request.post('/__test/knowledge/control', { data }));
-async function refresh(page: Page) { await page.reload(); await expect(page.getByRole('heading', { name: '企业知识', exact: true })).toBeVisible(); await expect(page.getByTestId('plugin-local-file')).toBeVisible(); }
+/**
+ * Since the guided 3-step layout (#77), space naming, the read-only database panel and manual roles sit in the
+ * collapsed 高级 section. The prototype assertions below predate that and expect them on the page, so every load
+ * opens it the way a person would.
+ */
+async function openAdvanced(page: Page) {
+  const advanced = page.locator('details.knowledge-advanced');
+  if (!(await advanced.evaluate(el => (el as HTMLDetailsElement).open))) await advanced.locator('summary').click();
+  await expect(advanced.locator('.knowledge-advanced-body')).toBeVisible();
+}
+/** Opens a source card's own connection form (the global form was replaced by per-card 配置连接 in #77). */
+async function configureCard(page: Page, pluginId: string) {
+  await page.getByTestId(`plugin-${pluginId}`).getByRole('button', { name: '配置连接', exact: true }).click();
+}
+async function refresh(page: Page) { await page.reload(); await expect(page.getByRole('heading', { name: '企业知识', exact: true })).toBeVisible(); await expect(page.getByTestId('plugin-local-file')).toBeVisible(); await openAdvanced(page); }
 async function install(page: Page, id: string) { await post(page, `/plugins/${id}/install`); }
 async function confirmItems(page: Page) {
   for (const item of (await getOverview(page)).items.filter(item => !item.confirmed)) await post(page, `/items/${item.id}/confirm`, { version: item.version });
@@ -107,6 +121,7 @@ test.beforeEach(async ({ page }) => {
   await response(page.request.post('/__test/knowledge/reset', { data: {} }));
   await page.goto('/#knowledge');
   await expect(page.getByTestId('plugin-local-file')).toBeVisible();
+  await openAdvanced(page);
 });
 
 test('[qa-enablement#1] New company begins without invented knowledge', async ({ page }) => {
@@ -200,7 +215,7 @@ test('[qa-source-plugins#3] Catalog install has no implied connection or source'
 test('[qa-source-plugins#6] Import does not imply source confirmation', async ({ page }) => { await localFile(page, false); await expect(page.getByRole('button', { name: '确认此版本', exact: true })).toBeVisible(); expect((await getOverview(page)).items[0]!.confirmed).toBe(false); });
 test('[qa-source-plugins#7] Mail plugin installation creates no connection or source', async ({ page }) => { await page.getByRole('button', { name: '安装企业邮件插件', exact: true }).click(); await expect(page.getByTestId('plugin-email')).toContainText('已启用'); expect((await getOverview(page)).connections).toEqual([]); expect((await getOverview(page)).items).toEqual([]); });
 test('[qa-source-plugins#9] Connection requires explicit read-only scope', async ({ page }) => {
-  await install(page, 'email'); await refresh(page); await page.getByRole('combobox', { name: /来源插件/ }).selectOption('email'); await page.getByLabel('连接名称', { exact: true }).fill('邮件范围'); await expect(page.getByRole('button', { name: '创建连接草案', exact: true })).toBeDisabled(); await assertDenied(page, '/connections', { name: 'forged mail', pluginId: 'email', scope: { resourceId: MAIL_RESOURCE_ID } }); await page.getByLabel('我已核对来源范围，并确认仅以只读方式接入', { exact: true }).check(); const created = page.waitForResponse(result => result.url().endsWith('/knowledge/connections') && result.request().method() === 'POST'); await page.getByRole('button', { name: '创建连接草案', exact: true }).click(); expect((await created).status()).toBe(201); expect((await getOverview(page)).connections[0]).toMatchObject({ name: '邮件范围', status: 'draft' });
+  await install(page, 'email'); await refresh(page); await configureCard(page, 'email'); await expect(page.getByRole('combobox', { name: /来源插件/ })).toHaveValue('email'); await page.getByLabel('连接名称', { exact: true }).fill('邮件范围'); await expect(page.getByRole('button', { name: '创建连接草案', exact: true })).toBeDisabled(); await assertDenied(page, '/connections', { name: 'forged mail', pluginId: 'email', scope: { resourceId: MAIL_RESOURCE_ID } }); await page.getByLabel('我已核对来源范围，并确认仅以只读方式接入', { exact: true }).check(); const created = page.waitForResponse(result => result.url().endsWith('/knowledge/connections') && result.request().method() === 'POST'); await page.getByRole('button', { name: '创建连接草案', exact: true }).click(); expect((await created).status()).toBe(201); expect((await getOverview(page)).connections[0]).toMatchObject({ name: '邮件范围', status: 'draft' });
 });
 test('[qa-source-plugins#11] Preview shows mailbox folder and date scope', async ({ page }) => {
   const connection = await remoteSource(page, 'email', false); const row = page.locator('.knowledge-source-list > li').filter({ has: page.getByText(connection.name, { exact: true }) }); await row.getByRole('button', { name: '预览来源范围与资料', exact: true }).click(); const preview = page.getByRole('region', { name: `${connection.name} 来源元数据预览` }); await expect(preview).toContainText('finance@synthetic.invalid'); await expect(preview).toContainText('Inbox'); await expect(preview).toContainText('2026-01-01'); await expect(preview).toContainText('权限受限资料：1'); await expect(preview).not.toContainText('禁止泄露的私人薪资标题');
@@ -225,7 +240,7 @@ test('[qa-source-plugins#25] Forged source confirmation cannot override revoked 
 test('[qa-source-plugins#28] Paused knowledge plugin blocks its source references', async ({ page }) => {
   await remoteSource(page, 'email'); await analyse(page); await page.getByRole('button', { name: '暂停企业邮件插件', exact: true }).click(); await expect(page.getByTestId('plugin-email')).toContainText('已暂停'); expect((await getOverview(page)).items).toEqual([]); expect((await getOverview(page)).recommendations).toEqual([]); const search = await response<{ hits: unknown[] }>(page.request.get(`${ROOT}/search?q=${encodeURIComponent('采购')}`)); expect(search.hits).toEqual([]); await expect(card(page, '采购专员')).toHaveCount(0);
 });
-test('[qa-source-plugins#29] Database plugin leads to existing scoped read-only configuration', async ({ page }) => { await page.getByRole('button', { name: '安装只读数据库插件', exact: true }).click(); await page.getByRole('button', { name: '配置只读数据库来源', exact: true }).click(); await expect(page.getByRole('heading', { name: '只读数据库来源', exact: true })).toBeInViewport(); await expect(page.getByLabel('DBA 批准的资源')).toBeVisible(); await expect(page.locator('.database-source-scope')).toContainText('approved_lots'); });
+test('[qa-source-plugins#29] Database plugin leads to existing scoped read-only configuration', async ({ page }) => { await page.getByRole('button', { name: '安装只读数据库插件', exact: true }).click(); await configureCard(page, 'database'); await expect(page.getByRole('heading', { name: '只读数据库来源', exact: true })).toBeInViewport(); await expect(page.getByLabel('DBA 批准的资源')).toBeVisible(); await expect(page.locator('.database-source-scope')).toContainText('approved_lots'); });
 test('[qa-source-plugins#30] Installing knowledge plugins did not install employee business tools', async ({ page }) => { const before = await response(page.request.get('/api/v1/tools/')); for (const id of ['database', 'email', 'sharepoint']) await install(page, id); expect(await response(page.request.get('/api/v1/tools/'))).toEqual(before); expect((await getOverview(page)).connections).toEqual([]); await refresh(page); await expect(page.getByTestId('plugin-email')).toContainText('已启用'); });
 
 test('[qa-enablement#52] No browser errors or imported script execution', async ({ page }) => {
