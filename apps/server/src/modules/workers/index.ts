@@ -187,6 +187,9 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) || JSON.stringify(payload).length > 16_384) {
       return reply.code(400).send({ error: 'bad_payload' });
     }
+    if (body.kind === 'wake' && Object.hasOwn(payload, 'roomTaskId')) {
+      return reply.code(400).send({ error: 'reserved_room_dispatch' });
+    }
     const event = await workersState.registry.appendEvent(user.tenantId, id, body.kind as WorkerEventKind, payload as Record<string, unknown>, user.userId, workersState.now());
     if (!event) return reply.code(404).send({ error: 'not_found' });
     return reply.code(201).send({ event });
@@ -318,7 +321,7 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
    */
   app.post('/poll', async (req, reply) => {
     const worker = req.worker!;
-    const body = (req.body ?? {}) as { waitMs?: unknown; since?: unknown };
+    const body = (req.body ?? {}) as { waitMs?: unknown; since?: unknown; eventsOnly?: unknown };
     const waitMs = typeof body.waitMs === 'number' && Number.isFinite(body.waitMs) ? Math.min(Math.max(0, body.waitMs), LONG_POLL_MAX_MS) : LONG_POLL_MAX_MS;
     if (body.since !== undefined && !(typeof body.since === 'number' && Number.isSafeInteger(body.since) && body.since >= 0)) {
       return reply.code(400).send({ error: 'bad_cursor' });
@@ -335,7 +338,7 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
         const now = workersState.now();
         if (!(await workersState.registry.heartbeat(worker.id, now, {}))) return reply.code(401).send({ error: 'bad_worker_token' });
         const events = await workersState.registry.eventsAfter(worker.id, since, EVENTS_PAGE);
-        const task = await claimFor(worker, now);
+        const task = body.eventsOnly === true ? null : await claimFor(worker, now);
         const cursor = events.length ? events[events.length - 1]!.seq : since;
         if (task || events.length) return { task, events, cursor, ...(task ? { leaseMs: LEASE_MS } : {}) };
         if (closed || now - start >= waitMs) return { task: null, events, cursor, retryAfterMs: 0 };
