@@ -34,9 +34,10 @@ export const CLAIM_TASK_KIND_SQL = CLAIM_TASK_SQL.replace(
 
 export const HEARTBEAT_TASK_SQL = `
 UPDATE tasks
-SET lease_until = now() + ($3::int * interval '1 millisecond')
+SET lease_until = now() + ($4::int * interval '1 millisecond')
 WHERE id = $1
   AND lease_owner = $2
+  AND attempt = $3
   AND dead_letter = false
   AND lease_until > now()
 RETURNING id;
@@ -50,9 +51,10 @@ SET status = 'assigned',
     lease_until = NULL
 WHERE id = $1
   AND lease_owner = $2
+  AND attempt = $3
   AND dead_letter = false
   AND lease_until > now()
-  AND attempt < $3
+  AND attempt < $4
 RETURNING id;
 `.trim();
 
@@ -64,6 +66,7 @@ SET status = 'reported',
     lease_until = NULL
 WHERE id = $1
   AND lease_owner = $2
+  AND attempt = $3
   AND dead_letter = false
   AND lease_until > now()
 RETURNING id;
@@ -126,14 +129,15 @@ WITH updated AS (
       lease_until = NULL
   WHERE id = $1
     AND lease_owner = $2
+    AND attempt = $3
     AND dead_letter = false
     AND lease_until > now()
-    AND attempt >= $3
+    AND attempt >= $4
   RETURNING id, tenant_id, identity_snapshot
 )
 INSERT INTO human_work_items (id, tenant_id, kind, renderer, task_id, target, payload_version, status)
 SELECT gen_random_uuid(), tenant_id, 'exception_ruling', 'issue_list', id,
-       jsonb_build_object('reason', $4::text, 'source', 'dead_letter', 'identity', identity_snapshot), 1, 'open'
+       jsonb_build_object('reason', $5::text, 'source', 'dead_letter', 'identity', identity_snapshot), 1, 'open'
 FROM updated
 RETURNING task_id;
 `.trim();

@@ -33,13 +33,13 @@ export async function claimTask(
   return result.rows[0] ?? null;
 }
 
-export async function heartbeatTask(db: Queryable, taskId: string, workerId: string, leaseMs: number): Promise<boolean> {
-  const result = await db.query<{ id: string }>(HEARTBEAT_TASK_SQL, [taskId, workerId, leaseMs]);
+export async function heartbeatTask(db: Queryable, taskId: string, workerId: string, attempt: number, leaseMs: number): Promise<boolean> {
+  const result = await db.query<{ id: string }>(HEARTBEAT_TASK_SQL, [taskId, workerId, attempt, leaseMs]);
   return result.rows.length === 1;
 }
 
-export async function succeedTask(db: Queryable, taskId: string, workerId: string): Promise<boolean> {
-  const result = await db.query<{ id: string }>(SUCCEED_TASK_SQL, [taskId, workerId]);
+export async function succeedTask(db: Queryable, taskId: string, workerId: string, attempt: number): Promise<boolean> {
+  const result = await db.query<{ id: string }>(SUCCEED_TASK_SQL, [taskId, workerId, attempt]);
   return result.rows.length === 1;
 }
 
@@ -47,9 +47,10 @@ export async function releaseTask(
   db: Queryable,
   taskId: string,
   workerId: string,
+  attempt: number,
   maxAttempts: number,
 ): Promise<boolean> {
-  const result = await db.query<{ id: string }>(RELEASE_TASK_SQL, [taskId, workerId, maxAttempts]);
+  const result = await db.query<{ id: string }>(RELEASE_TASK_SQL, [taskId, workerId, attempt, maxAttempts]);
   return result.rows.length === 1;
 }
 
@@ -58,10 +59,11 @@ export async function deadLetterTask(
   db: Queryable,
   taskId: string,
   workerId: string,
+  attempt: number,
   maxAttempts: number,
   reason: string,
 ): Promise<boolean> {
-  const result = await db.query<{ task_id: string }>(DEAD_LETTER_SQL, [taskId, workerId, maxAttempts, reason]);
+  const result = await db.query<{ task_id: string }>(DEAD_LETTER_SQL, [taskId, workerId, attempt, maxAttempts, reason]);
   return result.rows.length === 1;
 }
 

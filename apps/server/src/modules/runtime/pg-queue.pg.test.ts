@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { expect, it } from 'vitest';
-import { claimTask, deadLetterTask, releaseTask } from './pg-queue.js';
+import { claimTask, deadLetterTask, heartbeatTask, releaseTask, succeedTask } from './pg-queue.js';
 import { CLAIM_TASK_SQL, OPEN_WORK_INDEX_SQL } from './sql.js';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -133,13 +133,18 @@ live('a failed claim retries once, then dead-letter opens a single exception ite
     const claimed = await claimTask(db, 'worker-a', 30_000, 2, LIVE_TENANT);
     expect(claimed?.id).toBe(taskId);
     expect(claimed?.attempt).toBe(1);
-    expect(await releaseTask(db, taskId, 'worker-a', 2)).toBe(true);
+    expect(await releaseTask(db, taskId, 'worker-a', 1, 2)).toBe(true);
 
     const again = await claimTask(db, 'worker-a', 30_000, 2, LIVE_TENANT);
     expect(again?.attempt).toBe(2);
-    expect(await deadLetterTask(db, taskId, 'worker-b', 2, 'boom')).toBe(false);
-    expect(await deadLetterTask(db, taskId, 'worker-a', 2, 'boom')).toBe(true);
-    expect(await deadLetterTask(db, taskId, 'worker-a', 2, 'boom')).toBe(false);
+    expect(await heartbeatTask(db, taskId, 'worker-a', 1, 30_000)).toBe(false);
+    expect(await heartbeatTask(db, taskId, 'worker-a', 2, 30_000)).toBe(true);
+    expect(await succeedTask(db, taskId, 'worker-a', 1)).toBe(false);
+    expect(await releaseTask(db, taskId, 'worker-a', 1, 3)).toBe(false);
+    expect(await deadLetterTask(db, taskId, 'worker-a', 1, 1, 'stale')).toBe(false);
+    expect(await deadLetterTask(db, taskId, 'worker-b', 2, 2, 'boom')).toBe(false);
+    expect(await deadLetterTask(db, taskId, 'worker-a', 2, 2, 'boom')).toBe(true);
+    expect(await deadLetterTask(db, taskId, 'worker-a', 2, 2, 'boom')).toBe(false);
     expect(await claimTask(db, 'worker-c', 30_000, 2, LIVE_TENANT)).toBeNull();
 
     const client = await pool.connect();

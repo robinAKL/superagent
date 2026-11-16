@@ -23,6 +23,10 @@ export function resetRuntime(): void {
   runtimeState.db = null;
 }
 
+function isLeaseAttempt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= 2_147_483_647;
+}
+
 function attemptCeiling(value: unknown): number | null {
   if (value === undefined) return 3;
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) return null;
@@ -67,10 +71,11 @@ export const runtimeModule: FastifyPluginAsync = async (app) => {
 
   app.post('/tasks/:id/succeed', async (req, reply) => {
     const params = req.params as { id: string };
-    const body = (req.body ?? {}) as { workerId?: string };
+    const body = (req.body ?? {}) as { workerId?: string; attempt?: number };
     if (!body.workerId) return reply.code(400).send({ error: 'missing_worker' });
     if (runtimeState.db) {
-      const ok = await succeedTask(runtimeState.db, params.id, body.workerId);
+      if (!isLeaseAttempt(body.attempt)) return reply.code(400).send({ error: 'bad_attempt' });
+      const ok = await succeedTask(runtimeState.db, params.id, body.workerId, body.attempt);
       if (!ok) return reply.code(409).send({ error: 'lease_lost' });
       return { id: params.id, status: 'reported' };
     }
@@ -97,25 +102,27 @@ export const runtimeModule: FastifyPluginAsync = async (app) => {
 
   app.post('/tasks/:id/heartbeat', async (req, reply) => {
     const params = req.params as { id: string };
-    const body = (req.body ?? {}) as { workerId?: string };
+    const body = (req.body ?? {}) as { workerId?: string; attempt?: number };
     if (!body.workerId) return reply.code(400).send({ error: 'missing_worker' });
     if (runtimeState.db) {
-      return { ok: await heartbeatTask(runtimeState.db, params.id, body.workerId, LEASE_MS) };
+      if (!isLeaseAttempt(body.attempt)) return reply.code(400).send({ error: 'bad_attempt' });
+      return { ok: await heartbeatTask(runtimeState.db, params.id, body.workerId, body.attempt, LEASE_MS) };
     }
     return { ok: runtimeState.queue.heartbeat(params.id, body.workerId, Date.now()) };
   });
 
   app.post('/tasks/:id/fail', async (req, reply) => {
     const params = req.params as { id: string };
-    const body = (req.body ?? {}) as { workerId?: string; reason?: string; maxAttempts?: number };
+    const body = (req.body ?? {}) as { workerId?: string; attempt?: number; reason?: string; maxAttempts?: number };
     if (!body.workerId || !body.reason) return reply.code(400).send({ error: 'missing_fail' });
     if (runtimeState.db) {
       const maxAttempts = attemptCeiling(body.maxAttempts);
       if (maxAttempts === null) return reply.code(400).send({ error: 'bad_attempts' });
-      if (await releaseTask(runtimeState.db, params.id, body.workerId, maxAttempts)) {
+      if (!isLeaseAttempt(body.attempt)) return reply.code(400).send({ error: 'bad_attempt' });
+      if (await releaseTask(runtimeState.db, params.id, body.workerId, body.attempt, maxAttempts)) {
         return { deadLettered: false };
       }
-      if (await deadLetterTask(runtimeState.db, params.id, body.workerId, maxAttempts, body.reason)) {
+      if (await deadLetterTask(runtimeState.db, params.id, body.workerId, body.attempt, maxAttempts, body.reason)) {
         return { deadLettered: true };
       }
       return reply.code(409).send({ error: 'lease_lost' });
