@@ -80,7 +80,7 @@ describe('employee wall', () => {
     expect(html.match(/class="emp-card"/g)).toHaveLength(2);
     expect(html).toContain('新增岗位');
     expect(html).toContain('href="#employees?view=draft"');
-    expect(html).toContain('href="#employees?view=draft&amp;role=rec1"');
+    expect(html).toContain('href="#employees?manage=emp-org-rec1"');
     expect(html).toContain('未连接');
     expect(html).toContain('在线');
     expect(html).toContain('dev-owner');
