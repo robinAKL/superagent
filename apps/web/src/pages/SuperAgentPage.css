@@ -39,10 +39,10 @@ textarea { border-radius: var(--radius-sm); border: 1px solid var(--color-rule);
 .agent-mcp-advanced { margin-top: var(--space-md); }
 .agent-mcp-advanced summary { cursor: pointer; font-weight: 600; }
 .org-publish { margin-top: var(--space-md); }
-.agent-context-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--space-md); align-items: start; }
-.agent-context-grid .panel { min-width: 0; }
-.agent-context-grid .btn { justify-self: start; }
-.agent-context-grid h3 { margin: 0; font-size: 1rem; }
+.company-setup { min-width: 0; }
+.company-setup .btn { justify-self: start; }
+.company-setup h3 { margin: 0; font-size: 1rem; }
+.company-setup-ready { display: grid; gap: var(--space-sm); padding-top: var(--space-md); border-top: 1px solid var(--color-soft-rule); }
 .agent-readiness { margin: 0; display: grid; gap: var(--space-xs); }
 .agent-readiness > div, .agent-workflow-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2xs) var(--space-sm); }
 .agent-readiness dd { margin: 0; color: var(--color-muted); }
@@ -60,7 +60,7 @@ textarea { border-radius: var(--radius-sm); border: 1px solid var(--color-rule);
 .run-responsible { color: var(--color-muted); }
 .pack-item input[type="checkbox"] { inline-size: 1rem; block-size: 1rem; margin: .2em 0 0; accent-color: var(--color-accent); }
 @media (max-width: 800px) {
-  .agent-context-grid { grid-template-columns: minmax(0, 1fr); }
+  .company-setup { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (min-width: 801px) {
