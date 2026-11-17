@@ -9,6 +9,7 @@ import type { McpConnection } from './McpKnowledge';
 import { OntologyGraphView } from '../components/OntologyGraphView';
 import { AnalysisResults, SopWorkspace, useDraftRead } from './SuperAgentPage';
 import { AssertionFacts, DimensionChips, KnowledgeTimeline, RuleCard, TimeBar, dimensionsOf, objectNames, timeFromParams, visibleDraft, type Dimension, type KnowledgeTime } from './KnowledgeLenses';
+import { sopTabView } from './knowledge-sop-tab';
 
 interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string; retrievedAt?: string }
 interface Plugin { id: string; name: string; enabled: boolean; configured: boolean; capabilities: string[] }
@@ -624,7 +625,8 @@ function sopFromHash() {
   const candidate = params.get('candidate') ?? '', sop = params.get('sop') ?? '';
   const sub = params.get('sub');
   // No explicit choice: the tab picks whichever view has something to show (see KnowledgeFlows).
-  return { sop, candidate, sub: candidate || sop ? 'flows' as const : sub === 'candidates' || sub === 'flows' ? sub : 'auto' as const };
+  const explicit: 'auto' | 'flows' | 'candidates' = candidate || sop ? 'flows' : sub === 'candidates' || sub === 'flows' ? sub : 'auto';
+  return { sop, candidate, sub: explicit };
 }
 
 /** 工作流 / SOP tab: the published/draft graphs (existing editor and publish gate) and the candidates extracted from knowledge. */
@@ -646,8 +648,7 @@ function KnowledgeFlows({ t }: { t: Translate }) {
   }, []);
   const candidates = knowledge.status === 'ready'
     ? [...knowledge.drafts.recommendations, ...knowledge.drafts.mcpRecommendations].filter(draft => draft.kind === 'sop').length : null;
-  const sub = route.sub !== 'auto' ? route.sub : saved === null ? 'auto' : saved > 0 || !candidates ? 'flows' : 'candidates';
-  const empty = saved === 0 && candidates === 0;
+  const { sub, empty } = sopTabView(saved, candidates, route.sub);
   return <div className="knowledge-flows">
     <p className="helper knowledge-tab-intro">{t('sopIntro')}</p>
     <div className="knowledge-flow-switch" role="group" aria-label={t('sopSwitch')}>

@@ -437,3 +437,36 @@ test('Workflows / SOP says how to get a workflow when there is none', async ({ p
   await expect(empty.getByRole('link', { name: '打开资料库' })).toHaveAttribute('href', '#knowledge');
   await expect(page.getByLabel('选择流程')).toHaveCount(0);
 });
+
+test.describe('English Workflows / SOP empty and MCP-only panes', () => {
+  test.use({ lang: 'en' });
+
+  test('Workflows / SOP opens on the extracted flowchart when the only workflow is a private MCP draft (en)', async ({ page }) => {
+    await response(page.request.post('/__test/knowledge/seed-live-mcp', { data: {} }));
+    await page.reload();
+    await page.getByRole('navigation', { name: 'Knowledge workspace' }).getByRole('button', { name: 'Classification & candidates', exact: true }).click();
+    await page.getByRole('button', { name: 'Start analysis', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Analysis running', exact: true })).toBeDisabled();
+    await response(page.request.post('/__test/knowledge/advance', { data: {} }));
+    await page.route('**/api/v1/sop', route => route.fulfill({ status: 200, json: { sops: [] } }));
+    await page.goto('/#knowledge?view=sop');
+    await page.reload();
+    const sw = page.getByRole('group', { name: 'Workflow view' });
+    await expect(sw.getByRole('button', { name: /Extract SOP from knowledge/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sw.getByRole('button', { name: /Extract SOP from knowledge/ })).toContainText('(1)');
+    const drafts = page.getByRole('region', { name: /Workflow candidates|Analysis results/ });
+    await expect(drafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
+    await expect(drafts.getByRole('group', { name: 'Flow chart', exact: true }).locator('[data-edge="check:record"]')).toHaveAttribute('marker-end', /url/);
+  });
+
+  test('Workflows / SOP says how to get a workflow when there is none (en)', async ({ page }) => {
+    await page.route('**/api/v1/sop', route => route.fulfill({ status: 200, json: { sops: [] } }));
+    await page.goto('/#knowledge?view=sop');
+    await page.reload();
+    const empty = page.locator('.knowledge-flow-empty');
+    await expect(empty.getByRole('heading', { name: 'No workflows yet' })).toBeVisible();
+    await expect(empty.getByRole('link', { name: 'Open the Library' })).toHaveAttribute('href', '#knowledge');
+    await expect(page.getByLabel('Select workflow')).toHaveCount(0);
+    await expect(page.getByLabel('选择流程')).toHaveCount(0);
+  });
+});
