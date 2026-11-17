@@ -41,16 +41,19 @@ test('[qa-enablement#49] the tool list shows the same current step as the card',
   });
   expect(created.status()).toBe(200);
   await page.goto('/#tools');
-  const row = page.getByRole('list', { name: '工具列表' }).getByRole('listitem').filter({ hasText: id });
-  await expect(row.locator('[aria-current="step"]')).toContainText('占位');
-  await row.getByRole('button', { name: id }).click();
+  const row = page.getByRole('list', { name: '工具列表' }).locator(`[data-tool-id="${id}"]`);
+  const summary = row.getByRole('button', { name: /List progress/ });
+  await expect(summary).toContainText('占位');
+  await expect(summary).toHaveAttribute('aria-expanded', 'false');
+  await expect(row.locator('.steps')).toHaveCount(0);
+  await summary.click();
   const cardSteps = page.getByRole('list', { name: '工具进度' });
   await expect(cardSteps.locator('[aria-current="step"]')).toContainText('占位');
 
   expect((await request.post(`/api/v1/tools/${id}/confirm`)).status()).toBe(200);
   await page.reload();
-  await expect(row.locator('[aria-current="step"]')).toContainText('获取');
-  await row.getByRole('button', { name: id }).click();
+  await expect(summary).toContainText('获取');
+  await summary.click();
   await expect(cardSteps.locator('[aria-current="step"]')).toContainText('获取');
 });
 

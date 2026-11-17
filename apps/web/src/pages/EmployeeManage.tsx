@@ -17,7 +17,7 @@ export interface RegistryEmployee extends WallEmployee {
 const TEXT = {
   en: {
     title: 'Manage {name}', close: 'Close', duty: 'Responsibilities', owner: 'Owner',
-    ownerUnknown: 'Not set', prompt: 'Prompt version', promptValue: 'v{n}',
+    ownerUnknown: 'Not set', ownerYou: 'You', prompt: 'Prompt version', promptValue: 'v{n}',
     promptEdit: 'New prompt text', promptSave: 'Save as new version', promptHint: 'Saving creates a new version. Running work keeps the snapshot it already claimed.',
     tools: 'Tool authorizations', toolsEmpty: 'No tools installed on this employee yet.',
     toolsLink: 'Open employee tools', pause: 'Pause', resume: 'Resume', paused: 'Paused',
@@ -25,7 +25,7 @@ const TEXT = {
   },
   zh: {
     title: '管理 {name}', close: '关闭', duty: '职责', owner: '负责人',
-    ownerUnknown: '未设置', prompt: '提示词版本', promptValue: 'v{n}',
+    ownerUnknown: '未设置', ownerYou: '你', prompt: '提示词版本', promptValue: 'v{n}',
     promptEdit: '新的提示词', promptSave: '保存为新版本', promptHint: '保存会新增一个版本。正在跑的任务继续用它领取时的快照。',
     tools: '工具授权', toolsEmpty: '这名员工还没有安装工具。',
     toolsLink: '打开员工工具', pause: '暂停', resume: '恢复', paused: '已暂停',
@@ -84,7 +84,7 @@ export function EmployeeManage({ employee, lang, onClose, onChanged }: {
     {notice ? <p role="status">{notice}</p> : null}
     <dl className="emp-drawer-facts">
       <div><dt>{t('duty')}</dt><dd>{employee.duty}</dd></div>
-      <div><dt>{t('owner')}</dt><dd>{employee.owner || t('ownerUnknown')}</dd></div>
+      <div><dt>{t('owner')}</dt><dd>{employee.ownerIsViewer ? t('ownerYou') : employee.ownerDisplayName || t('ownerUnknown')}</dd></div>
       <div><dt>{t('prompt')}</dt><dd>{t('promptValue', { n: employee.promptVersion ?? 1 })}</dd></div>
     </dl>
     <form className="stack" onSubmit={savePrompt}>

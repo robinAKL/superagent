@@ -57,6 +57,7 @@ export const executionState = {
     inbox: () => inboxState.current,
     gateway: gatewayState.current,
     tools: toolInfo,
+    resolveToolId: toolId => toolsState.current.canonicalToolId(toolId),
     connectors,
     reviewerOf: (run) => run.startedBy,
     authorize,

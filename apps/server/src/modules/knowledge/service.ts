@@ -1,5 +1,5 @@
 import type { KnowledgeSourcePlugin, SourceContent, UserContext } from '@superagent/shared';
-import { confirmSource, evidenceValid, hash, hydrate, id, invalidateAnalyses, KnowledgeError, mayRead, positionedChunks, selectedItem, requireManager, signature, snapshot, stamp, type KnowledgeState, type Evidence, type Recommendation } from './domain.js';
+import { confirmSource, evidenceValid, hash, hydrate, id, invalidateAnalyses, KnowledgeError, mayRead, positionedChunks, selectedItem, requireManager, signature, snapshot, stamp, type KnowledgeState, type Evidence, type Recommendation, type OrganizationRecord } from './domain.js';
 import { managedSource, publicSourceScope, sourceScope, type SourceResource } from './sources.js';
 import type { Connection, Item } from './store.js';
 import type { AuditSink } from '../audit/audit.js';
@@ -17,7 +17,7 @@ import { publicMcpEndpoint } from './plugins/mcp-public-http.js';
 import { liveMcpSelection, type LiveMcpKnowledge } from './live-mcp.js';
 import { MAX_MCP_ANALYSIS_SOURCES, mcpEvidenceValid, mcpSelectionsCurrent } from './mcp-analysis.js';
 import type { AnalysisGateway } from '../analysis/gateway-model.js';
-import { orgEmployeeId, type OrganizationSink } from '../employees/organization.js';
+import { orgEmployeeId, organizationToolName, type OrganizationSink } from '../employees/organization.js';
 import { mergeByOverlap, TEAM_SIZE_MAX, TeamPlanError, validateTeamPlan, type PlanRole, type PlanSourceRole, type TeamPlan } from './team-plan.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
@@ -570,9 +570,10 @@ export class KnowledgeService {
     }
     for (const [recId, t] of Object.entries(org.tools)) {
       if (t.match !== 'placeholder' || sink.present('tool', t.toolId)) continue;
-      sink.ensureToolPlaceholder({ recId, name: t.name, purpose: t.purpose ?? t.name, consumers: t.consumers ?? [], maintainer: org.confirmedBy });
+      sink.ensureToolPlaceholder({ recId, toolId: t.toolId, name: t.name, purpose: t.purpose ?? t.name, consumers: t.consumers ?? [], maintainer: org.confirmedBy });
       restored++;
     }
+    this.applyToolAliases(org.toolAliases);
     return restored;
   }
   /** Startup hook: restore every confirmed organization of these tenants into the registries of this process. */
@@ -594,7 +595,7 @@ export class KnowledgeService {
     return {
       ...draft,
       teamPlan: this.teamPlanView(s, ctx),
-      confirmation: org ? { confirmedAt: org.confirmedAt, confirmedBy: org.confirmedBy, revision: org.revision, employees: Object.keys(org.employees).length, tools: Object.keys(org.tools).length } : null,
+      confirmation: org ? { confirmedAt: org.confirmedAt, confirmedBy: org.confirmedBy, revision: org.revision, employees: Object.keys(org.employees).length, tools: new Set(Object.values(org.tools).map(tool => tool.toolId)).size } : null,
       changedSinceConfirmation: changed, missing,
       blocked: this.organizationBlock(s, ctx, draft.employees.length),
       canConfirm: ctx.roles.some(role => role === 'owner' || role === 'admin') && !!this.deps.organization,
@@ -607,7 +608,12 @@ export class KnowledgeService {
   async confirmOrganization(ctx: UserContext) {
     requireManager(ctx);
     if (!this.deps.organization) throw new KnowledgeError('organization_unavailable', '数字员工服务暂不可用。', 503);
-    return this.deps.repo.transact(ctx, s => this.applyConfirmedOrganization(s, ctx));
+    const { result, aliases } = await this.deps.repo.transact(ctx, s => ({
+      result: this.applyConfirmedOrganization(s, ctx),
+      aliases: s.organization?.toolAliases,
+    }));
+    this.applyToolAliases(aliases);
+    return result;
   }
   /** Writes the current role draft into the employee registry. Caller already holds the knowledge transaction. */
   private applyConfirmedOrganization(s: KnowledgeState, ctx: UserContext) {
@@ -618,7 +624,7 @@ export class KnowledgeService {
     if (block === 'analysis_stale') throw new KnowledgeError(block, '资料在分析期间发生变化，请重新分析后再确认。', 409);
     if (block === 'no_employees') throw new KnowledgeError(block, '组织草案里还没有岗位。', 409);
     const org = s.organization ?? { confirmedAt: '', confirmedBy: '', revision: 0, employees: {}, tools: {} };
-    let createdEmployees = 0, createdTools = 0;
+    let createdEmployees = 0;
     for (const e of draft.employees) {
       const result = sink.ensureEmployee({ recId: e.id, name: e.name, duty: e.duty, prompt: e.prompt, owner: ctx.userId, manual: e.origin === 'manual' });
       if (result.created && !org.employees[e.id]) createdEmployees++;
@@ -645,19 +651,75 @@ export class KnowledgeService {
       if (sink.retireEmployee?.(id) ?? false) { retiredEmployees++; delete org.created?.[id]; }
       else busyEmployees.push(name);
     }
-    for (const t of draft.tools) {
-      const known = org.tools[t.id];
-      if (known?.match === 'existing') continue;
-      const match = known ? null : sink.matchTool(t.name, t.description);
-      if (match) { org.tools[t.id] = { toolId: match.toolId, name: t.name, match: 'existing' }; continue; }
-      const consumers = draft.employees.filter(e => e.tools.includes(t.key)).map(e => org.employees[e.id]!.employeeId);
-      const placeholder = sink.ensureToolPlaceholder({ recId: t.id, name: t.name, purpose: t.description, consumers, maintainer: ctx.userId });
-      if (placeholder.created && !known) createdTools++;
-      org.tools[t.id] = { toolId: placeholder.toolId, name: t.name, match: 'placeholder', purpose: t.description.slice(0, 1000), consumers };
-    }
+    const createdTools = this.confirmOrganizationTools(s, draft, org, sink, ctx.userId);
     Object.assign(org, { confirmedAt: stamp(), confirmedBy: ctx.userId, revision: org.revision + 1 });
     s.organization = org;
-    return { revision: org.revision, employees: Object.values(org.employees), tools: Object.values(org.tools), createdEmployees, createdTools, retiredEmployees, busyEmployees };
+    const tools = [...new Map(Object.values(org.tools).map(tool => [tool.toolId, tool])).values()];
+    return { revision: org.revision, employees: Object.values(org.employees), tools, createdEmployees, createdTools, retiredEmployees, busyEmployees };
+  }
+
+  private applyToolAliases(aliases?: Record<string, string>): void {
+    for (const [fromId, toId] of Object.entries(aliases ?? {})) this.deps.organization?.mergeToolPlaceholder?.(fromId, toId);
+  }
+
+  private confirmOrganizationTools(
+    state: KnowledgeState, draft: ReturnType<KnowledgeService['organizationDraft']>, org: OrganizationRecord,
+    sink: OrganizationSink, maintainer: string,
+  ): number {
+    const recommendations = new Map(state.recommendations.filter(rec => rec.kind === 'tool').map(rec => [rec.id, rec]));
+    const groups = new Map<string, typeof draft.tools>();
+    const previous = new Map<string, [string, OrganizationRecord['tools'][string]][]>();
+    const groupKey = (recId: string, name: string, toolId?: string) => {
+      const normalized = organizationToolName(name);
+      const rec = recommendations.get(recId);
+      const canMerge = rec && normalized && sink.canMergeToolPlaceholder && (!toolId || sink.canMergeToolPlaceholder(toolId));
+      return canMerge ? JSON.stringify([rec.mcpScope ?? null, normalized]) : toolId ?? recId;
+    };
+
+    for (const tool of draft.tools) {
+      const known = org.tools[tool.id];
+      if (known?.match === 'existing') continue;
+      const match = known ? null : sink.matchTool(tool.name, tool.description);
+      if (match) {
+        org.tools[tool.id] = { toolId: match.toolId, name: tool.name, match: 'existing' };
+        continue;
+      }
+      const key = groupKey(tool.id, known?.name ?? tool.name, known?.toolId);
+      const group = groups.get(key) ?? [];
+      group.push(tool);
+      groups.set(key, group);
+    }
+    for (const [recId, tool] of Object.entries(org.tools)) {
+      if (tool.match !== 'placeholder') continue;
+      const key = groupKey(recId, tool.name, tool.toolId);
+      if (!groups.has(key)) continue;
+      const rows = previous.get(key) ?? [];
+      rows.push([recId, tool]);
+      previous.set(key, rows);
+    }
+
+    let created = 0;
+    for (const [key, group] of groups) {
+      const rows = previous.get(key) ?? [];
+      const keep = rows[0]?.[1];
+      const first = group[0]!;
+      const keys = new Set(group.map(tool => tool.key));
+      const consumers = draft.employees.filter(employee => employee.tools.some(key => keys.has(key)))
+        .map(employee => org.employees[employee.id]!.employeeId);
+      const name = keep?.name ?? first.name;
+      const purpose = (keep?.purpose ?? first.description).slice(0, 1000);
+      const placeholder = sink.ensureToolPlaceholder({
+        recId: first.id, toolId: keep?.toolId, name, purpose, consumers, maintainer, syncConsumers: true,
+      });
+      if (placeholder.created && !keep) created++;
+      const record = { toolId: placeholder.toolId, name, match: 'placeholder' as const, purpose, consumers };
+      for (const tool of group) org.tools[tool.id] = record;
+      for (const [recId, old] of rows) {
+        org.tools[recId] = record;
+        if (old.toolId !== record.toolId) (org.toolAliases ??= {})[old.toolId] = record.toolId;
+      }
+    }
+    return created;
   }
   private planSources(s: KnowledgeState, ctx: UserContext) {
     const draft = this.organizationDraft(s, ctx);
@@ -722,7 +784,7 @@ export class KnowledgeService {
   async adoptTeamPlan(ctx: UserContext, input: Record<string, unknown>) {
     requireManager(ctx);
     const planId = bounded(input.planId, 100, '方案');
-    return this.deps.repo.transact(ctx, s => {
+    const { result, aliases } = await this.deps.repo.transact(ctx, s => {
       const plan = s.teamPlan;
       if (!plan || plan.id !== planId || plan.createdBy !== ctx.userId) throw new KnowledgeError('plan_not_found', '这个方案已不存在，请重新规划。', 404);
       const { basis } = this.planSources(s, ctx);
@@ -749,8 +811,13 @@ export class KnowledgeService {
       }
       delete s.teamPlan;
       const confirmed = hadTeam ? this.applyConfirmedOrganization(s, ctx) : null;
-      return { adopted: plan.id, roles: created.map(r => ({ id: r.id, name: r.name })), ...confirmed };
+      return {
+        result: { adopted: plan.id, roles: created.map(r => ({ id: r.id, name: r.name })), ...confirmed },
+        aliases: s.organization?.toolAliases,
+      };
     });
+    this.applyToolAliases(aliases);
+    return result;
   }
   async adoptRecommendation(ctx: UserContext, recId: string) {
     requireManager(ctx); return this.deps.repo.transact(ctx, s => {

@@ -11,7 +11,11 @@ export interface OrganizationSink {
   ensureEmployee(input: { recId: string; name: string; duty: string; prompt: string; owner: string; manual: boolean }): { employeeId: string; created: boolean };
   /** An already-available capability this tool draft can reuse, if any. */
   matchTool(name: string, description: string): { toolId: string; name: string } | null;
-  ensureToolPlaceholder(input: { recId: string; name: string; purpose: string; consumers: string[]; maintainer: string }): { toolId: string; created: boolean };
+  ensureToolPlaceholder(input: {
+    recId: string; toolId?: string; name: string; purpose: string; consumers: string[]; maintainer: string; syncConsumers?: boolean;
+  }): { toolId: string; created: boolean };
+  canMergeToolPlaceholder?(toolId: string): boolean;
+  mergeToolPlaceholder?(fromId: string, toId: string): void;
   /** Whether an id recorded at confirmation still exists in this process (false after a restart until re-applied). */
   present(kind: 'employee' | 'tool', id: string): boolean;
   /** Removes an employee whose role left the organization; false (kept) while it still has active work. */
@@ -22,6 +26,10 @@ export const orgEmployeeId = (recId: string) => `emp-org-${recId}`;
 export const orgToolId = (recId: string) => `tool-org-${recId}`;
 
 const norm = (s: string) => s.toLowerCase().replace(/[\s\-_·.,，。、/()（）]+/g, '');
+
+export function organizationToolName(name: string): string {
+  return norm(name.normalize('NFKC').replace(/\(([^()]+?)\s+(?:action|tool)\)\s*$/i, '($1)'));
+}
 
 export function createOrganizationSink(employees: () => EmployeeService, tools: () => ToolService): OrganizationSink {
   return {
@@ -37,15 +45,21 @@ export function createOrganizationSink(employees: () => EmployeeService, tools: 
       }));
       return hit ? { toolId: hit.toolId, name: hit.name.zh } : null;
     },
-    ensureToolPlaceholder({ recId, name, purpose, consumers, maintainer }) {
-      const svc = tools(), toolId = orgToolId(recId);
-      try { svc.get(toolId); return { toolId, created: false }; } catch { /* not created yet */ }
+    ensureToolPlaceholder({ recId, toolId = orgToolId(recId), name, purpose, consumers, maintainer, syncConsumers }) {
+      const svc = tools();
+      try {
+        const existing = svc.get(toolId);
+        if (syncConsumers) existing.consumers = consumers;
+        return { toolId: existing.toolId, created: false };
+      } catch { /* not created yet */ }
       svc.createPlaceholder({
         name, consumers, maintainer, acceptanceCases: [],
         contract: { toolId, action: toolId, purpose: purpose.slice(0, 1000), targetSystem: 'to-be-decided', effect: 'read', input: { type: 'object' }, output: { type: 'object' }, risk: 'low', requiresExactApproval: false },
       });
       return { toolId, created: true };
     },
+    canMergeToolPlaceholder(toolId) { return tools().canMergePlaceholder(toolId); },
+    mergeToolPlaceholder(fromId, toId) { tools().mergePlaceholder(fromId, toId); },
     retireEmployee(employeeId) {
       const svc = employees();
       if (!svc.has(employeeId)) return true;

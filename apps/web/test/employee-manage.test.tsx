@@ -14,12 +14,13 @@ describe('employee manage drawer', () => {
   });
 
   it('renders duty, prompt version, owner, pause and an honest empty feedback region', () => {
-    const employee = { id: 'emp-1', name: '订单审核员', duty: '核对额度', status: 'online', owner: 'dev-owner', promptVersion: 2 };
+    const employee = { id: 'emp-1', name: '订单审核员', duty: '核对额度', status: 'online', owner: 'dev-owner', ownerDisplayName: '实际负责人', promptVersion: 2 };
     const drawer = renderToStaticMarkup(<LangProvider initial="zh"><EmployeeManage employee={employee} lang="zh" onClose={() => undefined} onChanged={() => undefined} /></LangProvider>);
     expect(drawer).toContain('管理 订单审核员');
     expect(drawer).toContain('核对额度');
     expect(drawer).toContain('v2');
-    expect(drawer).toContain('dev-owner');
+    expect(drawer).toContain('实际负责人');
+    expect(drawer).not.toContain('dev-owner');
     expect(drawer).toContain('暂停');
     expect(drawer).toContain('href="#tools?employee=emp-1"');
     const en = renderToStaticMarkup(<LangProvider initial="en"><EmployeeFeedback employees={[]} /></LangProvider>);

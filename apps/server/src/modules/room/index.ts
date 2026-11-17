@@ -360,7 +360,8 @@ export const roomModule: FastifyPluginAsync = async (app) => {
       const viewer = viewerFrom(req.headers, req.user);
       const current = roomState.current.task(req.params.id, viewer);
       const { toolsState } = await import('../tools/index.js');
-      const toolUsable = !!current.hold && toolsState.current.callable(current.employeeId).some((row) => row.toolId === current.hold?.toolId);
+      const toolId = current.hold ? toolsState.current.canonicalToolId(current.hold.toolId) : null;
+      const toolUsable = !!toolId && toolsState.current.callable(current.employeeId).some((row) => row.toolId === toolId);
       const result = roomState.current.releaseHold(req.params.id, viewer, body.clientMessageId, { toolUsable });
       await flushRoom();
       return result;

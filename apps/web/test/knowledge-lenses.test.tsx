@@ -95,8 +95,8 @@ describe('knowledge lenses', () => {
 describe('employee wall', () => {
   it('shows one card per employee with status, owner and a manage link to its role', () => {
     const html = render('zh', <EmployeeWall hasDraft employees={[
-      { id: 'emp-org-rec1', name: '订单审核员', duty: '核对订单', status: 'unconnected', owner: 'dev-owner', source: 'recommended' },
-      { id: 'emp-2', name: '客服', duty: '回复客户', status: 'online', source: 'manual' },
+      { id: 'emp-org-rec1', name: '订单审核员', duty: '核对订单', status: 'unconnected', owner: 'dev-owner', ownerIsViewer: true, toolCount: 2, source: 'recommended' },
+      { id: 'emp-2', name: '客服', duty: '回复客户', status: 'online', ownerDisplayName: '实际负责人', toolCount: 0, source: 'manual' },
     ]} />);
     expect(html.match(/class="emp-card"/g)).toHaveLength(2);
     expect(html).toContain('新增岗位');
@@ -104,7 +104,11 @@ describe('employee wall', () => {
     expect(html).toContain('href="#employees?manage=emp-org-rec1"');
     expect(html).toContain('未连接');
     expect(html).toContain('在线');
-    expect(html).toContain('dev-owner');
+    expect(html).not.toContain('dev-owner');
+    expect(html).toContain('<dd>你</dd>');
+    expect(html).toContain('<dd>实际负责人</dd>');
+    expect(html).toContain('2 个工具');
+    expect(html).toContain('0 个工具');
     expect(render('en', <EmployeeWall hasDraft={false} employees={[]} />)).toContain('href="#knowledge?view=analysis"');
   });
 });

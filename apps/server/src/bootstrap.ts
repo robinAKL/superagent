@@ -77,6 +77,21 @@ export async function createRuntime(env: NodeJS.ProcessEnv = process.env, factor
     config: { mode: 'production', platformTenantId: env.PLATFORM_TENANT_ID!, blobUrl: env.BLOB_URL!, docIntelEndpoint: env.DOC_INTEL_ENDPOINT!, ...(sourceDatabases.length ? { sourceDatabases } : {}), ...(sourceResources.length ? { sourceResources } : {}) },
     app: {
       auth: { ...auth, platformTenantId: env.PLATFORM_TENANT_ID! },
+      async employeeOwnerNames(tenantId, ownerIds) {
+        const { rows } = await pool.query<{ entra_oid: string; id: string; display_name: string }>(
+          `SELECT id::text, entra_oid, display_name FROM users
+           WHERE tenant_id = $1 AND (entra_oid = ANY($2::text[]) OR id::text = ANY($2::text[]))`,
+          [tenantId, ownerIds],
+        );
+        const names = new Map<string, string>();
+        for (const { id, entra_oid, display_name } of rows) {
+          const name = display_name.trim();
+          if (!name || UUID.test(name)) continue;
+          names.set(id, name);
+          names.set(entra_oid, name);
+        }
+        return names;
+      },
       setupDeps: { repo, secrets, allowlist: new PgAllowlist(pool) },
       readiness: [{ name: 'postgres', check: async () => (await pool.query('SELECT 1 AS ok')).rows[0]?.ok === 1 }],
     },

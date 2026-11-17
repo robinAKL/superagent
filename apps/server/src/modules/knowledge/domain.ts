@@ -45,6 +45,8 @@ export interface OrganizationRecord {
   /** Every employee this tenant's confirmations created, so cleanup only ever touches this tenant's employees. */
   created?: Record<string, string>;
   tools: Record<string, { toolId: string; name: string; match: 'existing' | 'placeholder'; purpose?: string; consumers?: string[] }>;
+  /** Retired placeholder ids retained for workflows that referenced them before confirmation. */
+  toolAliases?: Record<string, string>;
 }
 export interface AnalysisRun {
   id: string; actor: UserContext; status: 'queued' | 'running' | 'completed' | 'failed' | 'stale' | 'outcome_unknown';

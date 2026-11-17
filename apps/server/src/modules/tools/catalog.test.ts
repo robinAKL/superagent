@@ -100,4 +100,35 @@ describe('preset tool catalog', () => {
     expect(listBody.find((t) => t.toolId === 'knowledge.search')?.stage).toBe('available');
     expect(toolsState.current.callable(emp.id).some((c) => c.toolId === 'knowledge.search')).toBe(true);
   });
+
+  it('lists tenant-scoped owner display names and counts each employee’s assigned tools once', async () => {
+    const app = await buildApp({
+      async employeeOwnerNames(tenantId, ownerIds) {
+        expect(tenantId).toBe('default');
+        expect(ownerIds).toEqual(['known-owner', 'unknown-owner']);
+        return new Map([['known-owner', 'Actual Owner']]);
+      },
+    });
+    const self = employeesState.current.create({ name: 'Me', duty: 'Audit', prompt: 'Audit', owner: 'dev-owner' });
+    const other = employeesState.current.create({ name: 'Other', duty: 'Review', prompt: 'Review', owner: 'known-owner' });
+    const unknown = employeesState.current.create({ name: 'Unknown', duty: 'Help', prompt: 'Help', owner: 'unknown-owner' });
+    const created = await app.inject({
+      method: 'POST', url: '/api/v1/tools/', headers: DEV_OWNER,
+      payload: {
+        name: 'Assigned to other only', consumers: [other.id, other.id], acceptanceCases: [],
+        contract: { toolId: 'custom.assignment', action: 'Review', purpose: 'Review', effect: 'read' },
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    expect((await app.inject({
+      method: 'POST', url: '/api/v1/tools/catalog/knowledge.search/install', headers: DEV_OWNER,
+      payload: { employeeId: self.id },
+    })).statusCode).toBe(200);
+    const response = await app.inject({ url: '/api/v1/employees/', headers: DEV_OWNER });
+    expect(response.json()).toMatchObject([
+      { id: self.id, ownerIsViewer: true, ownerDisplayName: null, toolCount: 1 },
+      { id: other.id, ownerIsViewer: false, ownerDisplayName: 'Actual Owner', toolCount: 1 },
+      { id: unknown.id, ownerIsViewer: false, ownerDisplayName: null, toolCount: 0 },
+    ]);
+  });
 });

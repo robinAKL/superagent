@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useLang, useT, type Dict } from '../i18n';
 import './ToolsPage.css';
@@ -64,7 +64,7 @@ type TextKey =
   | 'custom.subtitle'
   | 'custom.empty'
   | 'custom.listLabel'
-  | 'custom.compactLabel'
+  | 'custom.loading'
   | 'custom.toolIdLabel'
   | 'custom.toolIdPlaceholder'
   | 'custom.openBtn'
@@ -116,10 +116,10 @@ const TEXT: Dict<TextKey> = {
     'store.installSuccess': 'Installed {tool} for {employee}.',
     'store.installFailed': 'Install failed: {reason}',
     'custom.title': 'Custom tools',
-    'custom.subtitle': 'One card per tool: Placeholder → Acquire → Test → Release → Deploy → Install → Available',
+    'custom.subtitle': 'Open a tool to see its lifecycle and release history.',
     'custom.empty': 'No tools yet.',
     'custom.listLabel': 'Tool list',
-    'custom.compactLabel': 'Compact progress',
+    'custom.loading': 'Loading tool…',
     'custom.toolIdLabel': 'Tool ID',
     'custom.toolIdPlaceholder': 'e.g. invoice.lookup',
     'custom.openBtn': 'Open tool card',
@@ -170,10 +170,10 @@ const TEXT: Dict<TextKey> = {
     'store.installSuccess': '已将 {tool} 安装给 {employee}。',
     'store.installFailed': '安装失败：{reason}',
     'custom.title': '自定义工具',
-    'custom.subtitle': '每个工具一张卡：占位 → 获取 → 测试 → 发布 → 部署 → 安装 → 可用',
+    'custom.subtitle': '打开工具可查看阶段进度和发布记录。',
     'custom.empty': '还没有工具。',
     'custom.listLabel': '工具列表',
-    'custom.compactLabel': '紧凑进度',
+    'custom.loading': '正在读取工具…',
     'custom.toolIdLabel': '工具 ID',
     'custom.toolIdPlaceholder': '例如 invoice.lookup',
     'custom.openBtn': '打开工具卡',
@@ -200,21 +200,13 @@ const TEXT: Dict<TextKey> = {
 
 const STEP_IDS: Stage[] = ['placeholder', 'acquire', 'test', 'release', 'deploy', 'install', 'available'];
 
-/** The list endpoint only returns the current stage. Steps before it are done; available means all seven are done. */
-function progressFromStage(stage: Stage): ToolView['progress'] {
-  if (stage === 'available') return { done: [...STEP_IDS], current: 'available' };
-  const index = STEP_IDS.indexOf(stage);
-  const at = index < 0 ? 0 : index;
-  return { done: STEP_IDS.slice(0, at), current: STEP_IDS[at] ?? 'placeholder' };
-}
-
 /** Tool card progress (accepted in T-32): done ✓ / current (highlighted, with blocker) / not started. */
-export function ToolProgress({ p, label }: { p: ToolView['progress']; label?: string }) {
+export function ToolProgress({ p }: { p: ToolView['progress'] }) {
   const t = useT(TEXT);
   const allDone = p.done.length === STEP_IDS.length;
   return (
     <div>
-      <ol className="steps" aria-label={label ?? t('progress.label')}>
+      <ol className="steps" aria-label={t('progress.label')}>
         {STEP_IDS.map((id, i) => {
           const done = p.done.includes(id);
           const current = !allDone && p.current === id;
@@ -233,6 +225,18 @@ export function ToolProgress({ p, label }: { p: ToolView['progress']; label?: st
         <p className="warn">{t('progress.blocker', { blocker: p.blocker })}</p>
       ) : null}
     </div>
+  );
+}
+
+function ToolDetails({ tool }: { tool: ToolView }) {
+  const t = useT(TEXT);
+  const releases = tool.releases.map(release => `${release.version}${release.healthy === false ? t('custom.deployFailed') : ''}`).join(', ');
+  return (
+    <section className="panel stack">
+      <h2 className="h2">{tool.name} · {tool.toolId}</h2>
+      <ToolProgress p={tool.progress} />
+      <p className="helper">{t('custom.activeVersion', { version: tool.activeVersion ?? t('custom.none'), releases: releases || t('custom.none') })}</p>
+    </section>
   );
 }
 
@@ -258,10 +262,12 @@ export function ToolsPage() {
   const [category, setCategory] = useState<'all' | CatalogTool['effect']>('all');
 
   const [toolId, setToolId] = useState('');
+  const [openedId, setOpenedId] = useState('');
   const [tool, setTool] = useState<ToolView | null>(null);
   const [tools, setTools] = useState<{ toolId: string; name: string; stage: Stage }[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [msg, setMsg] = useState('');
+  const openRequest = useRef(0);
 
   function queryFor(empId: string): string {
     return empId ? `?employeeId=${encodeURIComponent(empId)}` : '';
@@ -333,21 +339,45 @@ export function ToolsPage() {
   }
 
   async function open(id: string) {
+    if (!id) return;
+    const request = ++openRequest.current;
     setToolId(id);
-    const r = await api<ToolView & { message?: string }>(`/api/v1/tools/${encodeURIComponent(id)}${queryFor(selectedEmpId)}`);
-    if (r.status === 200) {
-      setTool(r.body);
-      setMsg('');
-    } else {
-      setTool(null);
-      setMsg(r.body.message ?? t('custom.notFound'));
+    setOpenedId(id);
+    setTool(null);
+    setMsg('');
+    try {
+      const r = await api<ToolView & { message?: string }>(`/api/v1/tools/${encodeURIComponent(id)}${queryFor(selectedEmpId)}`);
+      if (request !== openRequest.current) return;
+      if (r.status === 200) setTool(r.body);
+      else setMsg(r.body.message ?? t('custom.notFound'));
+    } catch {
+      if (request === openRequest.current) setMsg(t('custom.notFound'));
     }
   }
 
   async function load(e?: FormEvent) {
     e?.preventDefault();
-    await open(toolId);
+    await open(toolId.trim());
   }
+
+  function toggleTool(id: string) {
+    if (openedId !== id) {
+      void open(id);
+      return;
+    }
+    closeTool();
+  }
+
+  function closeTool() {
+    openRequest.current++;
+    setOpenedId('');
+    setTool(null);
+    setMsg('');
+  }
+
+  const toolDetails = tool ? <ToolDetails tool={tool} /> : msg
+    ? <p className="helper" role="alert">{msg}</p>
+    : <p className="helper" role="status">{t('custom.loading')}</p>;
 
   function employeeNames(ids: string[]): string {
     return ids.map((id) => employees.find((e) => e.id === id)?.name ?? id).join(', ');
@@ -369,7 +399,7 @@ export function ToolsPage() {
           {employees.length > 0 ? (
             <label className="tool-store-filter">
               <span>{t('store.filterLabel')}</span>
-              <select value={selectedEmpId} onChange={(e) => setSelectedEmpId(e.target.value)}>
+              <select value={selectedEmpId} onChange={(e) => { closeTool(); setSelectedEmpId(e.target.value); }}>
                 <option value="">{t('store.allEmployees')}</option>
                 {employees.map((emp) => (
                   <option key={emp.id} value={emp.id}>
@@ -483,11 +513,12 @@ export function ToolsPage() {
         {tools.length > 0 ? (
           <ul className="tool-list" aria-label={t('custom.listLabel')}>
             {tools.map((item) => (
-              <li key={item.toolId}>
-                <button className="btn" type="button" onClick={() => void open(item.toolId)}>
-                  {item.name} · {item.toolId}
+              <li key={item.toolId} data-tool-id={item.toolId}>
+                <button className="btn tool-list-summary" type="button" aria-expanded={openedId === item.toolId} onClick={() => toggleTool(item.toolId)}>
+                  <span>{item.name}</span>
+                  <span className="tool-list-stage">{t(`step.${item.stage}`)}</span>
                 </button>
-                <ToolProgress p={progressFromStage(item.stage)} label={t('custom.compactLabel')} />
+                {openedId === item.toolId ? toolDetails : null}
               </li>
             ))}
           </ul>
@@ -501,26 +532,9 @@ export function ToolsPage() {
           <button className="btn" type="submit">
             {t('custom.openBtn')}
           </button>
-          {msg ? <p className="helper">{msg}</p> : null}
         </form>
 
-        {tool ? (
-          <section className="panel stack">
-            <h2 className="h2">
-              {tool.name} · {tool.toolId}
-            </h2>
-            <ToolProgress p={tool.progress} />
-            <p className="helper">
-              {t('custom.activeVersion', {
-                version: tool.activeVersion ?? t('custom.none'),
-                releases:
-                  tool.releases
-                    .map((r) => `${r.version}${r.healthy === false ? t('custom.deployFailed') : ''}`)
-                    .join(', ') || t('custom.none'),
-              })}
-            </p>
-          </section>
-        ) : null}
+        {openedId && !tools.some(item => item.toolId === openedId) ? toolDetails : null}
       </section>
     </>
   );

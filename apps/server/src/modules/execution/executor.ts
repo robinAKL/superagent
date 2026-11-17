@@ -65,6 +65,7 @@ export interface ExecutorDeps {
   inbox: () => WorkInbox;
   gateway: ToolGateway;
   tools: (toolId: string) => ToolInfo | null;
+  resolveToolId?: (toolId: string) => string;
   connectors: Map<string, Connector>;
   employeeUnavailable?: (employeeId: string) => string | null;
   /** Who receives approvals and exceptions (the SOP owner by default). */
@@ -158,8 +159,9 @@ export class SopExecutor {
     const version = this.deps.sop().get(run.versionId);
     const definition = version.definition as { employeeStatus?: string; graph?: SopGraph };
     if (definition.employeeStatus === 'paused') throw new ExecutionError('not_authorized', '流程员工已暂停，未调用外部系统', 403);
-    const toolId = definition.graph?.nodes.find((n) => n.id === step.nodeId)?.ref;
-    if (!toolId) throw new ExecutionError('not_found', '找不到可核对的原执行', 404);
+    const toolRef = definition.graph?.nodes.find((n) => n.id === step.nodeId)?.ref;
+    if (!toolRef) throw new ExecutionError('not_found', '找不到可核对的原执行', 404);
+    const toolId = this.deps.resolveToolId?.(toolRef) ?? toolRef;
     const employeeId = this.employeeFor(run, step.nodeId);
     const refusal = this.deps.authorize(structuredClone(run), toolId, employeeId);
     if (refusal) throw new ExecutionError('not_authorized', refusal, 403);
@@ -379,7 +381,8 @@ export class SopExecutor {
     run.status = 'completed';
   }
 
-  private async runTool(run: Execution, step: ExecutionStep, toolId: string): Promise<boolean> {
+  private async runTool(run: Execution, step: ExecutionStep, toolRef: string): Promise<boolean> {
+    const toolId = this.deps.resolveToolId?.(toolRef) ?? toolRef;
     const tool = this.deps.tools(toolId);
     const connector = this.deps.connectors.get(toolId);
     if (!tool || !tool.available) return this.block(run, step, `工具 ${toolId} 不可用（未发布、未部署或未完成账号绑定）`, 'readiness');

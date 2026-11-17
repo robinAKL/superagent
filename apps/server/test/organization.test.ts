@@ -106,6 +106,43 @@ describe('organization draft → confirmed team (PRD §3.3)', () => {
     expect(after.employees.find(e => e.key === 'order-reviewer')!.tools).toEqual(['kb-qa']);
   });
 
+  it('reuses one tool for normalized recommendations and preserves old placeholder references across restart', async () => {
+    const f = await fixture();
+    const firstName = 'record_supplier_order (CRM action)';
+    const duplicateName = 'record_supplier_order (CRM)';
+    await f.repo.transact(owner, s => {
+      s.recommendations.find(rec => rec.key === 'crm-entry')!.name = firstName;
+    });
+    const first = await f.service.confirmOrganization(owner);
+    const retained = first.tools.find(tool => tool.name === firstName)!;
+    const oldId = f.sink.ensureToolPlaceholder({ recId: 'legacy-crm', name: duplicateName, purpose: 'Register supplier orders', consumers: [], maintainer: owner.userId }).toolId;
+    const unrelated = f.sink.ensureToolPlaceholder({ recId: 'unrelated-crm', name: duplicateName, purpose: 'Separate organization', consumers: [], maintainer: 'another-owner' });
+    await f.repo.transact(owner, s => {
+      const primary = s.recommendations.find(rec => rec.key === 'crm-entry')!;
+      s.recommendations.push({ ...primary, id: 'legacy-crm', key: 'legacy-crm', name: duplicateName });
+      s.recommendations.push({ ...primary, id: 'new-crm', key: 'new-crm', name: 'RECORD SUPPLIER ORDER (CRM tool)' });
+      s.organization!.tools['legacy-crm'] = { name: duplicateName, toolId: oldId, match: 'placeholder' };
+      const analyst = s.recommendations.find(rec => rec.key === 'credit-analyst')!;
+      analyst.assignment!.tools.push('legacy-crm', 'new-crm');
+    });
+
+    const result = await f.service.confirmOrganization(owner);
+    expect(result.createdTools).toBe(0);
+    expect(result.tools.filter(tool => tool.match === 'placeholder')).toHaveLength(1);
+    expect(f.tools().list().map(tool => tool.toolId)).toEqual([retained.toolId, unrelated.toolId]);
+    expect(f.tools().get(oldId).toolId).toBe(retained.toolId);
+    expect(f.tools().get(retained.toolId).consumers.sort()).toEqual(result.employees.map(employee => employee.employeeId).sort());
+    const org = await f.service.organization(owner);
+    expect(org.tools.filter(tool => tool.match === 'placeholder').map(tool => tool.toolId)).toEqual([retained.toolId, retained.toolId, retained.toolId]);
+    expect(org.confirmation?.tools).toBe(2);
+
+    f.restart();
+    await f.service.organization(owner);
+    expect(f.tools().list().map(tool => tool.toolId)).toEqual([retained.toolId]);
+    expect(f.tools().get(oldId).toolId).toBe(retained.toolId);
+    expect((await f.service.confirmOrganization(owner)).createdTools).toBe(0);
+  });
+
   it('after a restart, reading the organization restores the same employees and placeholders without a new confirmation', async () => {
     const f = await fixture();
     const first = await f.service.confirmOrganization(owner);

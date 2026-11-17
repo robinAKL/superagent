@@ -112,3 +112,16 @@
   display: grid;
   gap: var(--space-md);
 }
+
+.btn.tool-list-summary {
+  display: flex;
+  justify-self: stretch;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-sm);
+  text-align: start;
+}
+
+.tool-list-summary span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.tool-list-stage { flex-shrink: 0; color: var(--color-muted); font-size: 12px; }
+.tool-list-summary[aria-expanded="true"] { border-color: var(--color-accent); }

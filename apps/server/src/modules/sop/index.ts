@@ -57,7 +57,8 @@ export async function hydrateSop(): Promise<void> {
 /** Latest version must itself be published. A newer draft means the flow is no longer the confirmed one. */
 function resumeFacts(toolId: string, target: string): { sopConfirmed: boolean; toolUsable: boolean } {
   const sopConfirmed = sopState.current.list().some((row) => row.latest.status === 'published');
-  const toolUsable = toolsState.current.callable(target).some((row) => row.toolId === toolId);
+  const canonicalId = toolsState.current.canonicalToolId(toolId);
+  const toolUsable = toolsState.current.callable(target).some((row) => row.toolId === canonicalId);
   return { sopConfirmed, toolUsable };
 }
 

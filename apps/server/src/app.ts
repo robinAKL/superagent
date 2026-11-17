@@ -11,6 +11,7 @@ import { longWorkModule, mailWebhook, type LongWorkDeps } from './modules/longwo
 import { workerLinkModule } from './modules/workers/index.js';
 import { MCP_CALLBACK, MCP_CLIENT_DOCUMENT, mcpClientDocument } from './modules/knowledge/mcp-oauth.js';
 import { publicMcpEndpoint } from './modules/knowledge/plugins/mcp-public-http.js';
+import type { EmployeeOwnerNames } from './modules/employees/index.js';
 
 export interface ReadinessCheck {
   name: string;
@@ -25,6 +26,7 @@ export interface AppOptions {
   setupDeps?: SetupDeps;
   knowledgeDeps?: KnowledgeDeps;
   longWorkDeps?: LongWorkDeps;
+  employeeOwnerNames?: EmployeeOwnerNames;
   readiness?: ReadinessCheck[];
 }
 
@@ -93,7 +95,8 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
       await api.register(async (scoped) => {
         if (m.roles) scoped.addHook('preHandler', requireRole(...m.roles));
         const deps = m.prefix === 'setup' ? opts.setupDeps : m.prefix === 'knowledge' ? opts.knowledgeDeps : m.prefix === 'work-items' ? opts.longWorkDeps : undefined;
-        await scoped.register(m.plugin, { ...(deps ? { deps } : {}), tenantOf: (req: any) => req.user?.tenantId ?? 'default' });
+        const owners = m.prefix === 'employees' ? opts.employeeOwnerNames : undefined;
+        await scoped.register(m.plugin, { ...(deps ? { deps } : {}), ...(owners ? { ownerNames: owners } : {}), tenantOf: (req: any) => req.user?.tenantId ?? 'default' });
       }, { prefix: `/api/v1/${m.prefix}` });
     }
   });

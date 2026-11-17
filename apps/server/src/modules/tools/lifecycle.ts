@@ -57,12 +57,13 @@ export interface AcquireInput {
 
 export class ToolService {
   private tools = new Map<string, ToolCard>();
+  private aliases = new Map<string, string>();
   private seq = 0;
   constructor(private now: () => Date = () => new Date()) {}
 
   createPlaceholder(input: { name: string; contract: ToolContract; acceptanceCases: string[]; consumers: string[]; maintainer: string }): ToolCard {
     const toolId = input.contract.toolId || `tool-${++this.seq}`;
-    if (this.tools.has(toolId)) throw new GateError(`tool ${toolId} already exists`);
+    if (this.tools.has(toolId) || this.aliases.has(toolId)) throw new GateError(`tool ${toolId} already exists`);
     const card: ToolCard = {
       toolId,
       name: input.name,
@@ -83,10 +84,45 @@ export class ToolService {
     return [...this.tools.values()];
   }
 
+  assignedToolCounts(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const tool of this.tools.values()) {
+      if (tool.state !== 'active') continue;
+      const employees = new Set([...tool.consumers, ...tool.installations.map(install => install.employeeId)]);
+      for (const employeeId of employees) counts.set(employeeId, (counts.get(employeeId) ?? 0) + 1);
+    }
+    return counts;
+  }
+
   get(toolId: string): ToolCard {
-    const t = this.tools.get(toolId);
+    const t = this.tools.get(this.canonicalToolId(toolId));
     if (!t) throw new GateError(`tool ${toolId} not found`);
     return t;
+  }
+
+  canonicalToolId(toolId: string): string {
+    let target = this.aliases.get(toolId);
+    while (target) {
+      toolId = target;
+      target = this.aliases.get(toolId);
+    }
+    return toolId;
+  }
+
+  canMergePlaceholder(toolId: string): boolean {
+    const card = this.tools.get(this.canonicalToolId(toolId));
+    return !card || (
+      card.state === 'active' && !card.contract.confirmed && card.contract.version === 1
+      && !card.contract.acceptanceCases.length && !card.candidate && !card.releases.length && !card.installations.length
+    );
+  }
+
+  /** Old workflow references still resolve, while collection views only list the retained card. */
+  mergePlaceholder(fromId: string, toId: string): void {
+    const retained = this.canonicalToolId(toId);
+    if (retained === fromId || !this.tools.has(retained) || !this.canMergePlaceholder(fromId)) return;
+    this.tools.delete(fromId);
+    this.aliases.set(fromId, retained);
   }
 
   confirmContract(toolId: string): void {

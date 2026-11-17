@@ -21,8 +21,8 @@ export const toolsModule: FastifyPluginAsync<{ service?: ToolService }> = async 
     const t = svc.get(toolId);
     const waitingHeld = roomState.current
       .listTasks({ userId: 'system', roles: ['owner'], projectScopes: [] })
-      .filter((task) => task.status === 'waiting' && task.hold?.toolId === toolId);
-    const unreadyHeld = waitingHeld.find((task) => !svc.callable(task.employeeId).some((c) => c.toolId === toolId));
+      .filter((task) => task.status === 'waiting' && task.hold && svc.canonicalToolId(task.hold.toolId) === t.toolId);
+    const unreadyHeld = waitingHeld.find((task) => !svc.callable(task.employeeId).some((c) => c.toolId === t.toolId));
     if (unreadyHeld) return unreadyHeld.employeeId;
     if (waitingHeld[0]) return waitingHeld[0].employeeId;
     return t.consumers[0];
@@ -30,7 +30,7 @@ export const toolsModule: FastifyPluginAsync<{ service?: ToolService }> = async 
 
   const view = (toolId: string, employeeId?: string) => {
     const t = svc.get(toolId);
-    return { toolId, name: t.name, state: t.state, contractVersion: t.contract.version, activeVersion: t.activeVersion, releases: t.releases.map((r) => ({ version: r.version, healthy: r.deploy?.healthy ?? null })), progress: svc.stage(toolId, resolveEmployee(toolId, employeeId)) };
+    return { toolId: t.toolId, name: t.name, state: t.state, contractVersion: t.contract.version, activeVersion: t.activeVersion, releases: t.releases.map((r) => ({ version: r.version, healthy: r.deploy?.healthy ?? null })), progress: svc.stage(t.toolId, resolveEmployee(t.toolId, employeeId)) };
   };
 
   app.post<{ Body: { name: string; contract: ToolContract; acceptanceCases: string[]; consumers: string[] } }>('/', async (req) => {
