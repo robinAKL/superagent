@@ -9,6 +9,7 @@ import { createKnowledgeDeps } from '../src/modules/knowledge/runtime.js';
 import { createLongWorkDeps } from '../src/modules/longwork/runtime.js';
 import { runAnalysis, type AnalysisModel } from '../src/modules/analysis/service.js';
 import type { Evidence } from '../src/modules/knowledge/domain.js';
+import { mergeByOverlap } from '../src/modules/knowledge/team-plan.js';
 
 const { createRuntime } = await import('../src/bootstrap.js');
 const runtime = await createRuntime({ ...process.env, AUTH_MODE: 'dev', APP_ROLE: 'web' });
@@ -61,6 +62,19 @@ const scripted: AnalysisModel = {
       },
     ];
   },
+};
+// Scripted team re-planning: merge by shared work when shrinking; split the broadest role when growing.
+scripted.planTeam = async ({ roles, target }) => {
+  if (target < roles.length) return mergeByOverlap(roles.map(r => ({ ...r, edited: false })), target, { join: '与', more: (f, n) => `${f}等${n}岗` })
+    .map(r => ({ ...r, name: r.from.length > 1 ? `${r.name.split('与')[0]}（综合）` : r.name }));
+  const out = roles.map(r => ({ name: r.name, duty: r.duty, tools: [...r.tools], sops: [...r.sops], from: [r.id] }));
+  while (out.length < target) {
+    const widest = out.reduce((a, b) => (b.tools.length + b.sops.length > a.tools.length + a.sops.length ? b : a));
+    const half = Math.ceil(widest.tools.length / 2);
+    out.push({ name: `${widest.name.replace(/（.*）$/, '')}（专项 ${out.length - roles.length + 1}）`, duty: `分担「${widest.name}」的部分工作：${widest.duty}`, tools: widest.tools.slice(half), sops: [...widest.sops], from: [...widest.from] });
+    widest.tools = widest.tools.slice(0, half) .length ? widest.tools.slice(0, half) : widest.tools;
+  }
+  return out;
 };
 knowledge.model = scripted;
 knowledge.enqueue = async (ctx, runId) => { setTimeout(() => void runAnalysis(knowledge.repo, scripted, ctx, runId), 1500); };

@@ -14,6 +14,8 @@ export interface OrganizationSink {
   ensureToolPlaceholder(input: { recId: string; name: string; purpose: string; consumers: string[]; maintainer: string }): { toolId: string; created: boolean };
   /** Whether an id recorded at confirmation still exists in this process (false after a restart until re-applied). */
   present(kind: 'employee' | 'tool', id: string): boolean;
+  /** Removes an employee whose role left the organization; false (kept) while it still has active work. */
+  retireEmployee?(employeeId: string): boolean;
 }
 
 export const orgEmployeeId = (recId: string) => `emp-org-${recId}`;
@@ -43,6 +45,11 @@ export function createOrganizationSink(employees: () => EmployeeService, tools: 
         contract: { toolId, action: toolId, purpose: purpose.slice(0, 1000), targetSystem: 'to-be-decided', effect: 'read', input: { type: 'object' }, output: { type: 'object' }, risk: 'low', requiresExactApproval: false },
       });
       return { toolId, created: true };
+    },
+    retireEmployee(employeeId) {
+      const svc = employees();
+      if (!svc.has(employeeId)) return true;
+      try { svc.remove(employeeId); return true; } catch { return false; }
     },
     present(kind, id) {
       if (kind === 'employee') return employees().has(id);

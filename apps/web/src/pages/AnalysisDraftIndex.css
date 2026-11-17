@@ -1,11 +1,13 @@
-.analysis-draft-index { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); grid-template-rows: auto auto; column-gap: var(--space-md); row-gap: var(--space-sm); align-items: stretch; }
-.analysis-draft-filter { grid-column: 1; max-width: 260px; }
+.analysis-draft-index { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); grid-template-rows: auto auto; column-gap: var(--space-md); row-gap: var(--space-sm); align-items: stretch; }
+.analysis-draft-filter { grid-column: 1; max-width: 280px; }
 .analysis-draft-filter select { width: 100%; }
-.analysis-draft-sidebar { grid-column: 1; grid-row: 2; position: relative; min-width: 0; min-height: 22rem; }
-.analysis-draft-detail { grid-column: 2; grid-row: 2; min-width: 0; align-self: start; }
+.analysis-draft-sidebar { grid-column: 1; grid-row: 2; min-width: 0; display: flex; }
+/* The detail stretches to the row so both boxes end on the same line. */
+.analysis-draft-detail { grid-column: 2; grid-row: 2; min-width: 0; display: flex; flex-direction: column; }
 .analysis-draft-detail > * { margin-top: 0; }
-/* The list takes the row height (set by the detail, at least 22rem) and scrolls inside it. */
-.analysis-draft-nav { position: absolute; inset: 0; list-style: none; margin: 0; padding: var(--space-2xs); overflow: auto; border: 1px solid var(--color-rule); border-radius: var(--radius); background: var(--color-paper); }
+.analysis-draft-detail > :only-child { flex: 1 1 auto; }
+/* The list is as tall as its items (up to about one screen) — never squeezed into a small box by a short detail. */
+.analysis-draft-nav { flex: 1 1 auto; list-style: none; margin: 0; padding: var(--space-2xs); max-height: min(40rem, 72vh); overflow: auto; border: 1px solid var(--color-rule); border-radius: var(--radius); background: var(--color-paper); }
 .analysis-draft-nav li + li { border-top: 1px solid var(--color-soft-rule); }
 .analysis-draft-nav button { display: grid; gap: 2px; width: 100%; min-height: var(--control); padding: var(--space-xs) var(--space-sm); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-ink); font: inherit; text-align: start; cursor: pointer; overflow-wrap: anywhere; }
 .analysis-draft-nav button:focus-visible { outline-offset: -2px; }
@@ -17,6 +19,5 @@
   .analysis-draft-index { grid-template-columns: minmax(0, 1fr); }
   .analysis-draft-filter { max-width: none; }
   .analysis-draft-sidebar, .analysis-draft-detail { grid-column: 1; grid-row: auto; }
-  .analysis-draft-sidebar { min-height: 0; }
-  .analysis-draft-nav { position: static; max-height: 14rem; }
+  .analysis-draft-nav { max-height: 16rem; }
 }

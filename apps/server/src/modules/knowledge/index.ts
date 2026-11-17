@@ -93,6 +93,9 @@ export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = asy
   app.post<{ Params: { id: string } }>('/recommendations/:id/merge', req => service!.mergeRecommendation(req.user!, req.params.id, body(req)));
   app.get('/organization', req => service!.organization(req.user!));
   app.post('/organization/confirm', req => service!.confirmOrganization(req.user!));
+  app.post('/organization/plan', { bodyLimit: 4 * 1024 }, req => service!.planTeam(req.user!, body(req)));
+  app.post('/organization/plan/adopt', req => service!.adoptTeamPlan(req.user!, body(req)));
+  app.post('/organization/plan/discard', req => service!.discardTeamPlan(req.user!));
   app.post<{ Params: { id: string } }>('/recommendations/:id/adopt', req => service!.adoptRecommendation(req.user!, req.params.id));
   app.post<{ Params: { id: string } }>('/plugins/:id', req => { const enabled = body(req).enabled; if (typeof enabled !== 'boolean') throw new KnowledgeError('invalid_input', '插件状态无效。'); return service!.togglePlugin(req.user!, req.params.id, enabled); });
 };

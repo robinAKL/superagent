@@ -42,14 +42,14 @@ const TEXT = {
   },
 };
 
-const charWidth = (ch: string) => (/[⺀-￿]/.test(ch) ? 14 : 7.6);
-function fitLabel(name: string, max = 168): { label: string; width: number } {
+const charWidth = (ch: string) => (/[⺀-￿]/.test(ch) ? 16 : 8.8);
+function fitLabel(name: string, max = 196): { label: string; width: number } {
   let width = 0, label = '';
   for (const ch of name) {
-    if (width + charWidth(ch) > max) return { label: `${label}…`, width: width + 10 + 28 };
+    if (width + charWidth(ch) > max) return { label: `${label}…`, width: width + 12 + 50 };
     width += charWidth(ch); label += ch;
   }
-  return { label, width: Math.max(width + 28, 64) };
+  return { label, width: Math.max(width + 50, 80) };
 }
 
 /** Pure: objects become nodes, relations whose two ends exist become links; parallel links get separate lanes. */
@@ -82,7 +82,7 @@ export function buildOntologyGraph(drafts: OntologyDraft[]): { nodes: GraphNode[
 const endpoint = (end: string | GraphNode) => (typeof end === 'string' ? undefined : end);
 /** Point where the line towards (tx,ty) leaves a node's rounded box, so arrows stop at the border. */
 function boxExit(n: GraphNode, tx: number, ty: number) {
-  const x = n.x ?? 0, y = n.y ?? 0, dx = tx - x, dy = ty - y, hw = n.width / 2 + 3, hh = 19;
+  const x = n.x ?? 0, y = n.y ?? 0, dx = tx - x, dy = ty - y, hw = n.width / 2 + 3, hh = 24;
   if (!dx && !dy) return { x, y };
   const s = Math.min(dx ? hw / Math.abs(dx) : Infinity, dy ? hh / Math.abs(dy) : Infinity);
   return { x: x + dx * s, y: y + dy * s };
@@ -138,19 +138,19 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
     linkSel.append('path').attr('class', 'onto-link-hit');
     linkSel.append('path').attr('class', 'onto-link-line').attr('marker-end', 'url(#onto-arrow)');
     const labelSel = linkSel.append('g').attr('class', 'onto-link-label');
-    labelSel.append('rect').attr('rx', 5).attr('height', 20);
+    labelSel.append('rect').attr('rx', 6).attr('height', 24);
     labelSel.append('text').attr('dy', '0.35em').attr('text-anchor', 'middle').text(l => fitLabel(l.label, 120).label);
     labelSel.each(function () {
       const text = (this as SVGGElement).querySelector('text') as SVGTextElement;
       const bw = (text.getComputedTextLength?.() || 60) + 12;
-      d3.select(this).select('rect').attr('x', -bw / 2).attr('y', -10).attr('width', bw);
+      d3.select(this).select('rect').attr('x', -bw / 2).attr('y', -12).attr('width', bw);
     });
 
     const nodeSel = root.append('g').selectAll<SVGGElement, GraphNode>('g').data(nodes).join('g').attr('class', 'onto-node')
       .on('click', (event: MouseEvent, n) => { event.stopPropagation(); selectRef.current(n.id); });
-    nodeSel.append('rect').attr('x', n => -n.width / 2).attr('y', -18).attr('width', n => n.width).attr('height', 36).attr('rx', 10);
-    nodeSel.append('circle').attr('cx', n => -n.width / 2 + 13).attr('r', 4);
-    nodeSel.append('text').attr('x', 7).attr('dy', '0.35em').attr('text-anchor', 'middle').text(n => n.label);
+    nodeSel.append('rect').attr('x', n => -n.width / 2).attr('y', -22).attr('width', n => n.width).attr('height', 44).attr('rx', 12);
+    nodeSel.append('circle').attr('cx', n => -n.width / 2 + 16).attr('r', 5);
+    nodeSel.append('text').attr('x', 10).attr('dy', '0.35em').attr('text-anchor', 'middle').text(n => n.label);
     nodeSel.append('title').text(n => n.name);
 
     const sim = d3.forceSimulation<GraphNode>(nodes)
@@ -180,7 +180,7 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
       const padding = cw < 480 ? 18 : 30;
       const [x0, x1] = [Math.min(...xs) - padding, Math.max(...xs) + padding];
       const [y0, y1] = [Math.min(...ys) - padding, Math.max(...ys) + padding];
-      const k = Math.min(1.4, cw / (x1 - x0), ch / (y1 - y0));
+      const k = Math.min(1.6, cw / (x1 - x0), ch / (y1 - y0));
       const transform = d3.zoomIdentity.translate(cw / 2 - k * (x0 + x1) / 2, ch / 2 - k * (y0 + y1) / 2).scale(k);
       svg.interrupt().call(zoom.transform, transform);
     };
@@ -257,7 +257,7 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
     {scope === 'personal' ? <p className="onto-note">{t('personalNote')}</p> : null}
     <div className="onto-body">
       <div className="onto-canvas">
-        <svg ref={svgRef} role="img" aria-label={`${t('canvas')}: ${t('summary', { objects: graph.nodes.length, relations: graph.links.length })}`} style={{ height }} />
+        <svg ref={svgRef} role="img" aria-label={`${t('canvas')}: ${t('summary', { objects: graph.nodes.length, relations: graph.links.length })}`} />
         <p className="onto-hint">{t('hint')}</p>
       </div>
       <aside className="onto-panel" aria-live="polite">

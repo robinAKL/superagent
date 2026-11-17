@@ -35,7 +35,7 @@ describe('ontology graph model', () => {
     const [node] = buildOntologyGraph([long]).nodes;
     expect(node!.name).toBe(long.name);
     expect(node!.label.endsWith('…')).toBe(true);
-    expect(node!.width).toBeLessThanOrEqual(210);
+    expect(node!.width).toBeLessThanOrEqual(260);
   });
 });
 

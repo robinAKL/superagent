@@ -8,6 +8,10 @@ export interface AnalysisModel {
   recommend(input: { tenantId: string; runId: string; evidence: Evidence[]; maxOutputTokens: number; focus?: string }): Promise<unknown>;
   /** Optional: title/category/summary labels for one uploaded material. Output is validated and only ever a review aid. */
   profile?(input: { tenantId: string; taskId: string; name: string; excerpt: string; categories: readonly string[]; maxOutputTokens: number }): Promise<unknown>;
+  /** Optional: re-plan the role drafts into exactly `target` roles. Output is validated by the caller (team-plan.ts). */
+  planTeam?(input: { tenantId: string; taskId: string; target: number; maxOutputTokens: number;
+    roles: { id: string; name: string; duty: string; tools: string[]; sops: string[] }[];
+    tools: { key: string; name: string; description: string }[]; sops: { key: string; name: string; description: string }[] }): Promise<unknown>;
 }
 function boundedText(input: unknown, max: number): string | undefined {
   return typeof input === 'string' && input.length <= max && input.trim() ? input.trim() : undefined;
