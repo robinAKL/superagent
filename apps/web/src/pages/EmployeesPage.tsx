@@ -312,7 +312,7 @@ export function EmployeesPage() {
     <ol className="org-steps" aria-label={t('title')}>
       <li className="is-done"><a href="#knowledge">{t('stepKnowledge')}</a></li>
       <li aria-current="step">{t('stepTeam')}</li>
-      <li className={confirmedState ? 'is-next' : ''}><a href="#brain">{t('stepFlow')}</a></li>
+      <li className={confirmedState ? 'is-next' : ''}><a href="#brain?org=1">{t('stepFlow')}</a></li>
       <li><a href="#room">{t('stepRun')}</a></li>
     </ol>
 
@@ -398,7 +398,7 @@ export function EmployeesPage() {
           : t('summaryNew', { e: newEmployees, t: newTools })}</p>
         {confirmedState ? <div className="org-row">
           <a className="btn" href="#tools">{t('openTools')}</a>
-          <a className="btn primary" href="#brain">{t('nextFlow')}</a>
+          <a className="btn primary" href="#brain?org=1">{t('nextFlow')}</a>
         </div> : <button className="btn primary" type="button" disabled={busy || !!org.blocked} onClick={() => void confirm()}>
           {busy ? t('confirming') : org.confirmation ? t('applyBtn') : t('confirmBtn')}
         </button>}

@@ -67,7 +67,7 @@ const READ_TIMEOUT_MS = 15_000;
 const TEXT = {
   en: {
     title: 'Super Agent', subtitle: 'Company context and operating workflows',
-    context: 'Company context', candidates: 'Workflow candidates', useCandidate: 'Open in workflow editor',
+    allDrafts: 'All analysis drafts', context: 'Company context', candidates: 'Workflow candidates', useCandidate: 'Open in workflow editor',
     workflowTitle: 'Workflow name', completion: 'Expected deliverable', runWorkflow: 'Open in command room',
     results: 'Analysis results', sop: 'Workflows', ontology: 'Ontology', mcp: 'MCP knowledge',
     loadingDrafts: 'Loading analysis drafts…', draftError: 'Could not load analysis drafts.',
@@ -86,7 +86,7 @@ const TEXT = {
   },
   zh: {
     title: '超级智能体', subtitle: '企业上下文与运行流程',
-    context: '企业上下文', candidates: '候选流程', useCandidate: '在流程编辑器中打开',
+    allDrafts: '所有分析草案', context: '企业上下文', candidates: '候选流程', useCandidate: '在流程编辑器中打开',
     workflowTitle: '流程名称', completion: '预期交付', runWorkflow: '在指挥室运行',
     results: '分析结果', sop: '流程', ontology: '本体关系', mcp: 'MCP 知识',
     loadingDrafts: '正在读取分析草案…', draftError: '无法读取分析草案。',
@@ -218,7 +218,11 @@ function AnalysisResults({ knowledge, retryKnowledge, initialKind, fromOrganizat
   return <section className="panel stack" aria-labelledby="agent-results-heading">
     <div className="agent-results-head">
       <h2 className="h2" id="agent-results-heading">{t(initialKind ? 'results' : 'candidates')}</h2>
-      <a href="#knowledge?view=analysis">{t('reviewDrafts')}</a>
+      <div className="workflow-actions">
+        {!initialKind && knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.length
+          ? <a href={`#brain?tab=results&type=all${fromOrganization ? '&org=1' : ''}`}>{t('allDrafts')}</a> : null}
+        <a href="#knowledge?view=analysis">{t('reviewDrafts')}</a>
+      </div>
     </div>
     <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />
     {knowledge.status === 'ready' ? drafts.length ? <AnalysisDraftIndex drafts={drafts} initialKind={initialKind} renderDraft={draft =>

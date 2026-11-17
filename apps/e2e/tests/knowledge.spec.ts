@@ -173,6 +173,8 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   const role = page.getByRole('article', { name: '退货专员' });
   await expect(role.getByText('来自你的 MCP 来源', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: '3 发布流程', exact: true }).click();
+  await page.getByRole('link', { name: '审阅候选流程', exact: true }).click();
+  await page.getByRole('link', { name: '所有分析草案', exact: true }).click();
   const privateDrafts = page.getByRole('region', { name: '分析结果' });
   await expect(privateDrafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
   await privateDrafts.getByLabel('草案类型').selectOption('employee');

@@ -258,7 +258,7 @@ function ResumeRun({ run, numericField, onResumed }: {
     setBusy(true);
     setError(false);
     try {
-      const supplied = Object.fromEntries(fields.map(field => [field, Object.hasOwn(input, field) ? input[field] : '']));
+      const supplied = Object.fromEntries(fields.map(field => [field, Object.hasOwn(input, field) ? (input[field] ?? '') : '']));
       const response = await api<ExecutionView>(`/api/v1/executions/${encodeURIComponent(run.id)}/resume`, {
         method: 'POST', body: JSON.stringify({ input: workflowInput(supplied, numericField) }),
       });
@@ -275,7 +275,7 @@ function ResumeRun({ run, numericField, onResumed }: {
     <div className="agent-fields">
       {fields.map(field => <label className="field" key={field}><span>{field}</span>
         <input required disabled={busy} type={field === numericField ? 'number' : 'text'} step="any"
-          value={Object.hasOwn(input, field) ? input[field] : ''} onChange={event => setInput({ ...input, [field]: event.target.value })} />
+          value={Object.hasOwn(input, field) ? (input[field] ?? '') : ''} onChange={event => setInput({ ...input, [field]: event.target.value })} />
       </label>)}
     </div>
     <button className="btn" disabled={busy} type="submit">{t(busy ? 'resuming' : fields.length ? 'provision' : 'resume')}</button>
