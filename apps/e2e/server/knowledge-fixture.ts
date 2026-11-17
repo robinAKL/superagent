@@ -7,7 +7,7 @@ import { DatabaseGateway, type DatabaseResource } from '../../server/src/modules
 import { textWithLineAnchors } from '../../server/src/modules/knowledge/plugins/local-file.js';
 import { tickKnowledge } from '../../server/src/modules/knowledge/worker.js';
 import type { KnowledgeDeps } from '../../server/src/modules/knowledge/service.js';
-import type { Evidence } from '../../server/src/modules/knowledge/domain.js';
+import type { Evidence, RecommendedWorkflow } from '../../server/src/modules/knowledge/domain.js';
 import type { AuditEntry } from '../../server/src/modules/audit/audit.js';
 import type { SourceResource } from '../../server/src/modules/knowledge/sources.js';
 import { LiveMcpKnowledge } from '../../server/src/modules/knowledge/live-mcp.js';
@@ -99,8 +99,8 @@ export function createKnowledgeFixture(): { deps: KnowledgeDeps; attach(app: Fas
         if (!modelAvailable) throw new Error('synthetic model unavailable');
         reads.model++;
         const proposals: {
-          key: string; kind: 'employee' | 'tool' | 'sop' | 'relation'; name: string; description: string; evidence: Evidence[];
-          relation?: { from: string; to: string; label: string };
+          key: string; kind: 'employee' | 'tool' | 'sop' | 'relation' | 'object'; name: string; description: string; evidence: Evidence[];
+          relation?: { from: string; to: string; label: string }; workflow?: RecommendedWorkflow;
         }[] = [];
         for (const evidence of input.evidence) {
           for (const match of evidence.quote.matchAll(/(角色|工具)：([^；\n]+)；(?:责任|职责)：([^\n]+)/g)) {
@@ -118,9 +118,21 @@ export function createKnowledgeFixture(): { deps: KnowledgeDeps; attach(app: Fas
         }
         const handbook = input.evidence.find(evidence => evidence.locator.endsWith('handbook://procedures/returns'));
         if (handbook) {
-          proposals.push({ key: 'returns', kind: 'sop', name: '退货审核流程', description: '核对收货记录后登记退款。', evidence: [handbook] });
+          const role = proposals.find(proposal => proposal.name === '退货专员')?.key;
+          proposals.push({
+            key: 'returns', kind: 'sop', name: '退货审核流程', description: '核对收货记录后登记退款。', evidence: [handbook],
+            workflow: { steps: [
+              { key: 'arrived', kind: 'trigger', label: '收到退货', after: [], citations: [1] },
+              { key: 'check', kind: 'employee', label: '核对收货记录', after: ['arrived'], citations: [1], employeeKey: role },
+              { key: 'record', kind: 'tool', label: '登记退款', after: ['check'], citations: [1] },
+            ] },
+          });
+          proposals.push({ key: 'return-document', kind: 'object', name: '退货记录', description: '记录已收到的退货。', evidence: [handbook] });
+          proposals.push({ key: 'refund', kind: 'object', name: '退款', description: '退货核对后登记的退款。', evidence: [handbook] });
+          proposals.push({ key: 'return-refund', kind: 'relation', name: '退货退回款项', description: '核对退货后登记退款。', evidence: [handbook],
+            relation: { from: 'return-document', to: 'refund', label: '登记退款' } });
           proposals.push({ key: 'return-receipt', kind: 'relation', name: '退货关联收货记录', description: '登记前需要核对记录。', evidence: [handbook],
-            relation: { from: 'return', to: 'receipt', label: '关联' } });
+            relation: { from: 'return-document', to: 'receipt', label: '关联' } });
         }
         return proposals;
       },

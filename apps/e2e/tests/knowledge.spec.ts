@@ -177,6 +177,11 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await page.getByRole('link', { name: '所有分析草案', exact: true }).click();
   const privateDrafts = page.getByRole('region', { name: '分析结果' });
   await expect(privateDrafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
+  const diagram = privateDrafts.getByRole('group', { name: '流程图', exact: true });
+  await expect(diagram.locator('[data-edge="check:record"]')).toHaveAttribute('marker-end', /url/);
+  await diagram.getByRole('button', { name: /核对收货记录/ }).click();
+  await expect(privateDrafts.getByRole('complementary', { name: '步骤依据' })).toContainText('退货手册 MCP');
+  await expect(privateDrafts.getByRole('link', { name: '在流程编辑器中打开' })).toHaveCount(0);
   await privateDrafts.getByLabel('草案类型').selectOption('employee');
   await expect(privateDrafts.getByRole('heading', { name: '退货专员' })).toBeVisible();
   await privateDrafts.getByLabel('草案类型').selectOption('sop');

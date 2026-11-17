@@ -2,7 +2,7 @@
  * Pure rules behind the SOP workspace (T-48): validation freshness, regression-case completeness, SOP packs from
  * the knowledge analysis, and the impact of knowledge changes on a draft. Kept free of React so they are unit-tested.
  */
-import type { SopGraph } from '@superagent/shared';
+import type { SopGraph, SopNodeKind } from '@superagent/shared';
 
 /** The ten runtime gates run as regression cases on every validation (T-41 runtime). */
 export const REGRESSION_CASES = [
@@ -25,6 +25,14 @@ export interface KnowledgeEvidence {
   quote: string;
 }
 
+export interface RecommendedWorkflow {
+  completion?: string;
+  steps: {
+    key: string; kind: SopNodeKind; label: string; detail?: string; after: string[];
+    employeeKey?: string; toolKey?: string; citations: number[];
+  }[];
+}
+
 export interface PackItem {
   id: string;
   kind: 'trigger' | 'rule';
@@ -37,6 +45,7 @@ export interface SopPack {
   key: string;
   name: string;
   items: PackItem[];
+  workflow?: RecommendedWorkflow;
 }
 
 export interface GateReport {
@@ -84,32 +93,51 @@ interface SopRecommendation {
   name: string;
   description: string;
   evidence: KnowledgeEvidence[];
+  workflow?: RecommendedWorkflow;
 }
 
-/**
- * An SOP recommendation from the knowledge analysis becomes a pack: one trigger and one rule per cited passage,
- * each carrying its evidence and starting UNCONFIRMED. Nothing is invented beyond the cited text.
- */
+/** Retain legacy citations for old drafts. New packs have one evidence item per concrete node. */
 export function packFromRecommendation(r: SopRecommendation): SopPack {
+  const items = r.workflow?.steps.map(step => ({
+    id: `${r.key}:step:${step.key}`, kind: step.kind === 'trigger' ? 'trigger' as const : 'rule' as const,
+    text: step.label, confirmed: false,
+    evidence: step.citations.flatMap(reference => r.evidence[reference - 1] ?? []),
+  })) ?? [
+    { id: `${r.key}:trigger`, kind: 'trigger' as const, text: r.name, confirmed: false, evidence: r.evidence.slice(0, 1) },
+    ...r.evidence.map((e, i) => ({ id: `${r.key}:rule:${i + 1}`, kind: 'rule' as const, text: e.quote, confirmed: false, evidence: [e] })),
+  ];
+  return { key: r.key, name: r.name, items, workflow: r.workflow };
+}
+
+interface WorkflowRefs {
+  employees?: ReadonlyMap<string, string>;
+  tools?: ReadonlyMap<string, string>;
+}
+
+/** Copy the actual dependencies and bind only capabilities already recorded by organization confirmation. */
+export function graphFromWorkflow(workflow: RecommendedWorkflow, refs: WorkflowRefs = {}): SopGraph {
   return {
-    key: r.key,
-    name: r.name,
-    items: [
-      { id: `${r.key}:trigger`, kind: 'trigger', text: `触发：${r.name}`, confirmed: false, evidence: r.evidence.slice(0, 1) },
-      ...r.evidence.map((e, i) => ({ id: `${r.key}:rule:${i + 1}`, kind: 'rule' as const, text: e.quote, confirmed: false, evidence: [e] })),
-    ],
+    nodes: workflow.steps.map(step => {
+      const ref = step.kind === 'employee' && step.employeeKey ? refs.employees?.get(step.employeeKey)
+        : step.kind === 'tool' && step.toolKey ? refs.tools?.get(step.toolKey) : undefined;
+      return { id: step.key, kind: step.kind, label: step.label, ...(ref && { ref }) };
+    }),
+    edges: workflow.steps.flatMap(step => step.after.map(from => ({ from, to: step.key }))),
   };
 }
 
-/** Skeleton graph for a pack: trigger → super agent → human review (owner adds employees and tools). */
-export function graphFromPack(p: SopPack): SopGraph {
+/** Older recommendations can already contain an explicit ordered flow in their retained description. */
+export function legacyWorkflow(description: string): RecommendedWorkflow | undefined {
+  const sequence = description.split(/\r?\n/).find(line => /→|->/.test(line));
+  if (!sequence) return;
+  const labels = sequence.trim().replace(/^(?:流程|步骤|workflow|steps)\s*[:：]\s*/i, '')
+    .split(/\s*(?:→|->)\s*/).map(line => line.trim().replace(/[。；;.]$/, ''));
+  if (labels.length < 2 || labels.length > 12 || labels.some(label => !label || label.length > 160)) return;
   return {
-    nodes: [
-      { id: 't', kind: 'trigger', label: p.name, ref: `pack:${p.key}` },
-      { id: 'a', kind: 'agent', label: '超级智能体分派' },
-      { id: 'h', kind: 'human_review', label: '人工确认' },
-    ],
-    edges: [{ from: 't', to: 'a' }, { from: 'a', to: 'h' }],
+    steps: labels.map((label, index) => ({
+      key: `legacy-${index + 1}`, kind: index === 0 ? 'trigger' : 'agent', label,
+      after: index === 0 ? [] : [`legacy-${index}`], citations: [],
+    })),
   };
 }
 

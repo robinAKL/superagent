@@ -1,5 +1,5 @@
-import type { UserContext } from '@superagent/shared';
-import { evidenceValid, hash, id, KnowledgeError, mayRead, mergeRecommendations, positionedChunks, signature, type AnalysisRun, type Evidence, type KnowledgeState, type Recommendation } from '../knowledge/domain.js';
+import { SOP_NODE_KINDS, type SopNodeKind, type UserContext } from '@superagent/shared';
+import { evidenceValid, hash, id, KnowledgeError, mayRead, mergeRecommendations, positionedChunks, signature, type AnalysisRun, type Evidence, type KnowledgeState, type Recommendation, type RecommendedWorkflow } from '../knowledge/domain.js';
 import type { KnowledgeRepository } from '../knowledge/repository.js';
 import { matchesExcerpt, mcpEvidenceValid, mcpSelectionsCurrent } from '../knowledge/mcp-analysis.js';
 export interface AnalysisModel {
@@ -9,6 +9,40 @@ export interface AnalysisModel {
   /** Optional: title/category/summary labels for one uploaded material. Output is validated and only ever a review aid. */
   profile?(input: { tenantId: string; taskId: string; name: string; excerpt: string; categories: readonly string[]; maxOutputTokens: number }): Promise<unknown>;
 }
+function boundedText(input: unknown, max: number): string | undefined {
+  return typeof input === 'string' && input.length <= max && input.trim() ? input.trim() : undefined;
+}
+
+/** Optional workflow detail is kept only when every step has a direct citation and connects to the trigger. */
+function recommendedWorkflow(input: unknown, evidenceCount: number): RecommendedWorkflow | undefined {
+  if (!input || typeof input !== 'object') return;
+  const { steps, completion } = input as Record<string, unknown>;
+  if (!Array.isArray(steps) || steps.length < 2 || steps.length > 12) return;
+
+  const seen = new Set<string>();
+  const workflow: RecommendedWorkflow = { steps: [], completion: boundedText(completion, 500) };
+  for (const [index, value] of steps.entries()) {
+    if (!value || typeof value !== 'object') return;
+    const key = boundedText(value.key, 80);
+    const label = boundedText(value.label, 160);
+    const kind = value.kind as SopNodeKind;
+    const after = value.after as unknown;
+    const citations = value.citations as unknown;
+    if (!key || !label || seen.has(key) || !SOP_NODE_KINDS.includes(kind) || (index === 0) !== (kind === 'trigger')) return;
+    if (!Array.isArray(after) || after.length > 6 || (index === 0) !== (after.length === 0) ||
+        after.some(parent => typeof parent !== 'string' || !seen.has(parent))) return;
+    if (!Array.isArray(citations) || !citations.length || citations.length > 3 ||
+        citations.some(citation => !Number.isInteger(citation) || citation < 1 || citation > evidenceCount)) return;
+    seen.add(key);
+    workflow.steps.push({
+      key, kind, label, detail: boundedText(value.detail, 500),
+      after: [...new Set<string>(after)], citations: [...new Set<number>(citations)],
+      employeeKey: boundedText(value.employeeKey, 120), toolKey: boundedText(value.toolKey, 120),
+    });
+  }
+  return workflow;
+}
+
 export function validateProposals(value: unknown): Omit<Recommendation, 'id' | 'humanLocked' | 'deleted'>[] {
   if (!Array.isArray(value) || value.length > 30) throw new KnowledgeError('invalid_model_output', '分析返回的草案结构无效。', 422);
   return value.map(v => {
@@ -22,7 +56,8 @@ export function validateProposals(value: unknown): Omit<Recommendation, 'id' | '
     const evidence = (p.evidence as Evidence[]).map(({ sourceId, version, locator, start, end, quote }) => ({ sourceId, version, locator, start, end, quote }));
     const keys = (value: unknown) => Array.isArray(value) ? [...new Set(value.filter((k): k is string => typeof k === 'string' && !!k.trim() && k.length <= 120).map(k => k.trim()))].slice(0, 12) : [];
     const assignment = p.kind === 'employee' && (p.uses !== undefined || p.sops !== undefined) ? { assignment: { tools: keys(p.uses), sops: keys(p.sops) } } : {};
-    return { key: p.key as string, name: p.name as string, description: p.description as string, kind: p.kind as Recommendation['kind'], evidence, ...assignment, ...(p.kind==='relation'?{relation:{from:relation!.from as string,to:relation!.to as string,label:relation!.label as string}}:{}) };
+    const workflow = p.kind === 'sop' ? recommendedWorkflow(p.workflow, evidence.length) : undefined;
+    return { workflow, key: p.key as string, name: p.name as string, description: p.description as string, kind: p.kind as Recommendation['kind'], evidence, ...assignment, ...(p.kind==='relation'?{relation:{from:relation!.from as string,to:relation!.to as string,label:relation!.label as string}}:{}) };
   });
 }
 

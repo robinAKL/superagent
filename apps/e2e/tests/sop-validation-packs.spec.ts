@@ -13,8 +13,13 @@ const ev = (sourceId: string, version: string, quote: string, line: number) => (
 
 async function knowledge(page: Page, versions: { s1: string; s2: string | null }) {
   const evidence = [ev('s1', versions.s1, '收到发票后先核对采购单', 4), ...(versions.s2 ? [ev('s2', versions.s2, '金额超过 5000 需经理审批', 9)] : [])];
+  const workflow = { steps: [
+    { key: 'received', kind: 'trigger', label: '收到供应商发票', after: [], citations: [1] },
+    { key: 'match', kind: 'agent', label: '核对采购单', after: ['received'], citations: [1] },
+    ...(versions.s2 ? [{ key: 'approval', kind: 'human_review', label: '经理审批', after: ['match'], citations: [2] }] : []),
+  ] };
   await page.route('**/api/v1/knowledge/recommendations', (route) =>
-    route.fulfill({ json: { recommendations: [{ id: 'k1', key: 'invoice-intake', kind: 'sop', name: '发票受理', description: '受理供应商发票', evidence, humanLocked: false, deleted: false }], mcpRecommendations: [] } }),
+    route.fulfill({ json: { recommendations: [{ id: 'k1', key: 'invoice-intake', kind: 'sop', name: '发票受理', description: '受理供应商发票', evidence, workflow, humanLocked: false, deleted: false }], mcpRecommendations: [] } }),
   );
 }
 const rules = { requiredFields: ['invoiceNo', 'amount'], threshold: { field: 'amount', max: 5000 } };
@@ -72,10 +77,17 @@ test('a validation report missing baseline regression cases blocks publishing', 
 test('a pack starts as a draft with every rule and trigger unconfirmed; it cannot be validated or published until confirmed', async ({ page }) => {
   await knowledge(page, { s1: 'v1', s2: 'v1' });
   await page.goto('/#brain?tab=results');
+  const preview = page.getByRole('group', { name: '流程图', exact: true });
+  await expect(preview.locator('[data-edge="received:match"]')).toHaveAttribute('marker-end', /url/);
+  await preview.getByRole('button', { name: /核对采购单/ }).click();
+  await expect(page.getByRole('complementary', { name: '步骤依据' })).toContainText('付款制度.md#L4');
   await page.getByRole('link', { name: '在流程编辑器中打开' }).click();
   await page.getByLabel('新流程编号').fill('e2e.invoice-intake');
   await page.locator('[data-pack="invoice-intake"]').getByRole('button', { name: '套用到草稿' }).click();
   await expect(page.getByRole('status')).toContainText('已保存为草稿 v1');
+  const graph = page.getByRole('group', { name: '流程图', exact: true });
+  await expect(graph.locator('[data-node="match"]')).toHaveText(/核对采购单/);
+  await expect(graph.locator('[data-edge="match:approval"]')).toHaveAttribute('marker-end', /url/);
   const items = page.getByRole('group', { name: '流程包确认' }).getByRole('checkbox');
   await expect(items).toHaveCount(3);
   for (const c of await items.all()) await expect(c).not.toBeChecked(); // nothing auto-confirmed
@@ -141,6 +153,6 @@ test('knowledge changes behind a draft are shown with their impact and context',
   await page.getByLabel('选择流程').selectOption('e2e.invoice-intake');
   const impact = page.getByRole('region', { name: '知识变化影响' });
   await expect(impact).toContainText('企业知识已变化');
-  await expect(impact.locator('[data-impact="invoice-intake:rule:1"]')).toContainText('收到发票后先核对采购单（付款制度.md#L4）：依据 v1 → v2');
-  await expect(impact.locator('[data-impact="invoice-intake:rule:2"]')).toContainText('依据 v1 → 已不可用');
+  await expect(impact.locator('[data-impact="invoice-intake:step:match"]')).toContainText('核对采购单（付款制度.md#L4）：依据 v1 → v2');
+  await expect(impact.locator('[data-impact="invoice-intake:step:approval"]')).toContainText('依据 v1 → 已不可用');
 });

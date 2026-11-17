@@ -98,7 +98,7 @@ export class KnowledgeService {
         return !!current && this.allowed(s, ctx, current, false);
       });
       if (!valid && !identityAllowed) return [];
-      return [{ ...r, stale: !valid, evidence: valid ? r.evidence : [], proposedChange: r.proposedChange?.evidence.every(e => this.valid(s, ctx, e)) ? r.proposedChange : undefined }];
+      return [{ ...r, stale: !valid, evidence: valid ? r.evidence : [], workflow: valid ? r.workflow : undefined, proposedChange: r.proposedChange?.evidence.every(e => this.valid(s, ctx, e)) ? r.proposedChange : undefined }];
     });
     const objectKey = (scope: string | undefined, key: string) => JSON.stringify([scope, key]);
     const objectKeys = new Set(recs.filter(r => r.kind === 'object').map(r => objectKey(r.mcpScope, r.key)));
@@ -636,7 +636,7 @@ export class KnowledgeService {
     requireManager(ctx); return this.deps.repo.transact(ctx, s => {
       const r = s.recommendations.find(r => r.id === recId && !r.deleted && this.draftAllowed(s, ctx, r)), proposal = r?.proposedChange;
       if (!r || !proposal?.evidence.length || !proposal.evidence.every(e => this.valid(s, ctx, e))) throw new KnowledgeError('proposal_unavailable', '修改草案的依据已变化，请重新分析并核对。', 409);
-      Object.assign(r, proposal, { humanLocked: true }); delete r.proposedChange; return { id: r.id, humanLocked: true };
+      Object.assign(r, proposal, { humanLocked: true, workflow: proposal.workflow }); delete r.proposedChange; return { id: r.id, humanLocked: true };
     });
   }
   async togglePlugin(ctx: UserContext, pluginId: string, enabled: boolean) {

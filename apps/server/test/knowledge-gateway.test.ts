@@ -1,5 +1,6 @@
 import { it, expect } from 'vitest';
 import type { ChatResponse } from '@superagent/shared';
+import { validateProposals } from '../src/modules/analysis/service.js';
 import { GatewayAnalysisModel, type AnalysisGateway } from '../src/modules/analysis/gateway-model.js';
 it('analysis uses only the budget gateway, bounded output and an untrusted-source system instruction', async () => {
  let request: unknown; const gateway: AnalysisGateway = { check: async () => ({ok:true,model:'m'}), chat: async (_tenant,_tier,req) => { request=req; return {text:'[]',toolCalls:[],usage:{inputTokens:1,outputTokens:1},stopReason:'end'}; } };
@@ -32,6 +33,40 @@ it('resolves fenced drafts for uploaded files and MCP to the exact supplied cita
   },
  });
  expect(await model.recommend({tenantId:'t',runId:'r',evidence:[file,live],maxOutputTokens:4096})).toEqual([{...draft,evidence:[file,live]}]);
+});
+
+it('retains real workflow nodes only with connected dependencies and supplied step citations', async () => {
+  const excerpts = [
+    { sourceId: 'policy', version: 'v2', start: 0, end: 4, locator: 'Guide#L1', quote: '收到订单' },
+    { sourceId: 'policy', version: 'v2', start: 5, end: 13, locator: 'Guide#L2', quote: '核对客户信用额度' },
+    { sourceId: 'policy', version: 'v2', start: 14, end: 18, locator: 'Guide#L3', quote: '登记结论' },
+  ];
+  const steps = [
+    { key: 'receive', kind: 'trigger', label: '收到订单', after: [], citations: [1] },
+    { key: 'review', kind: 'employee', label: '核对客户信用额度', after: ['receive'], citations: [2], employeeKey: 'credit-reviewer' },
+  ];
+  const proposal = {
+    key: 'order-review', kind: 'sop', name: '订单审核', description: '收到订单后核对客户信用额度。',
+    evidence: [2, 1], workflow: { steps },
+  };
+  const model = new GatewayAnalysisModel({
+    check: async () => ({ ok: true, model: 'test' }),
+    chat: async () => ({ text: JSON.stringify([proposal]), toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'end' }),
+  });
+  const input = { tenantId: 't', runId: 'r', evidence: excerpts, maxOutputTokens: 4096 };
+  let [draft] = validateProposals(await model.recommend(input));
+  expect(draft?.workflow?.steps).toMatchObject([
+    { key: 'receive', citations: [2], after: [] },
+    { key: 'review', citations: [1], after: ['receive'], employeeKey: 'credit-reviewer' },
+  ]);
+  expect(draft?.evidence[0]?.locator).toBe('Guide#L2');
+  steps[1]!.after = ['unknown'];
+  [draft] = validateProposals(await model.recommend(input));
+  expect(draft?.workflow).toBeUndefined();
+  steps[1]!.after = ['receive'];
+  steps[1]!.citations = [3]; // present in the input, absent from the proposal's verified citations
+  [draft] = validateProposals(await model.recommend(input));
+  expect(draft?.workflow).toBeUndefined();
 });
 
 it('distinguishes a citation outside the uploaded file excerpts from a truncated response', async () => {
