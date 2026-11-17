@@ -1,5 +1,5 @@
 import type { Runtime } from '../../bootstrap.js';
-import type { KnowledgeDeps } from './service.js';
+import { KnowledgeService, type KnowledgeDeps } from './service.js';
 import { MemoryKnowledgeRepository, PgKnowledgeRepository } from './repository.js';
 import { AzureBinaryStore } from './binary.js';
 import { DocumentIntelligenceAdapter } from '../../plugins/document-intelligence.js';
@@ -39,4 +39,10 @@ export async function knowledgeReady(deps: KnowledgeDeps): Promise<boolean> {
   if (!(deps.repo instanceof PgKnowledgeRepository)) return true;
   const result = await deps.repo.pool.query("SELECT to_regclass('public.knowledge_tenants') IS NOT NULL AND to_regclass('public.knowledge_chunks') IS NOT NULL AND EXISTS(SELECT 1 FROM pg_extension WHERE extname='pg_trgm') AS ok");
   return result.rows[0]?.ok === true;
+}
+/** Web start-up: put every tenant's confirmed digital employees and tool placeholders back into this process's registries. */
+export async function restoreConfirmedOrganizations(deps: KnowledgeDeps): Promise<number> {
+  if (!(deps.repo instanceof PgKnowledgeRepository) || !deps.organization) return 0;
+  const tenants = await deps.repo.pool.query<{ tenant_id: string }>("SELECT tenant_id FROM knowledge_tenants WHERE doc ? 'organization'");
+  return new KnowledgeService(deps).restoreOrganizations(tenants.rows.map(row => row.tenant_id));
 }

@@ -553,9 +553,37 @@ export class KnowledgeService {
     if (latest?.status === 'stale') return 'analysis_stale';
     return employees ? null : 'no_employees';
   }
+  /**
+   * Re-creates, in this process's registries, the employees and tool placeholders a confirmation recorded — after a
+   * restart or on another web process sharing the tenant document. Same ids, same name/duty/prompt; no document write.
+   */
+  restoreOrganization(s: KnowledgeState): number {
+    const sink = this.deps.organization, org = s.organization;
+    if (!sink || !org) return 0;
+    let restored = 0;
+    for (const [recId, e] of Object.entries(org.employees)) {
+      if (sink.present('employee', e.employeeId)) continue;
+      sink.ensureEmployee({ recId, name: e.name, duty: e.duty, prompt: e.prompt, owner: org.confirmedBy, manual: false });
+      restored++;
+    }
+    for (const [recId, t] of Object.entries(org.tools)) {
+      if (t.match !== 'placeholder' || sink.present('tool', t.toolId)) continue;
+      sink.ensureToolPlaceholder({ recId, name: t.name, purpose: t.purpose ?? t.name, consumers: t.consumers ?? [], maintainer: org.confirmedBy });
+      restored++;
+    }
+    return restored;
+  }
+  /** Startup hook: restore every confirmed organization of these tenants into the registries of this process. */
+  async restoreOrganizations(tenantIds: string[]): Promise<number> {
+    let restored = 0;
+    for (const tenantId of tenantIds) restored += this.restoreOrganization(await this.deps.repo.read({ tenantId, userId: 'system:restore', roles: [], projectScopes: [] }));
+    return restored;
+  }
   /** Organization draft (PRD §3.3 step 3): roles, the tools they use and the SOPs they take part in, plus confirmation state. */
   async organization(ctx: UserContext) {
-    const s = await this.deps.repo.read(ctx), draft = this.organizationDraft(s, ctx), org = s.organization;
+    const s = await this.deps.repo.read(ctx);
+    this.restoreOrganization(s);
+    const draft = this.organizationDraft(s, ctx), org = s.organization;
     const missing = org ? Object.values(org.employees).filter(e => !this.deps.organization?.present('employee', e.employeeId)).length : 0;
     const changed = !!org && draft.employees.some(e => {
       const done = org.employees[e.id];
@@ -597,7 +625,7 @@ export class KnowledgeService {
         const consumers = draft.employees.filter(e => e.tools.includes(t.key)).map(e => org.employees[e.id]!.employeeId);
         const placeholder = sink.ensureToolPlaceholder({ recId: t.id, name: t.name, purpose: t.description, consumers, maintainer: ctx.userId });
         if (placeholder.created && !known) createdTools++;
-        org.tools[t.id] = { toolId: placeholder.toolId, name: t.name, match: 'placeholder' };
+        org.tools[t.id] = { toolId: placeholder.toolId, name: t.name, match: 'placeholder', purpose: t.description.slice(0, 1000), consumers };
       }
       Object.assign(org, { confirmedAt: stamp(), confirmedBy: ctx.userId, revision: org.revision + 1 });
       s.organization = org;

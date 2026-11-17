@@ -12,6 +12,9 @@ import type { AuditEntry } from '../../server/src/modules/audit/audit.js';
 import type { SourceResource } from '../../server/src/modules/knowledge/sources.js';
 import { LiveMcpKnowledge } from '../../server/src/modules/knowledge/live-mcp.js';
 import { InMemorySecretStore } from '../../server/src/modules/setup/secrets.js';
+import { createOrganizationSink } from '../../server/src/modules/employees/organization.js';
+import { employeesState } from '../../server/src/modules/employees/index.js';
+import { toolsState } from '../../server/src/modules/tools/index.js';
 
 export const KNOWLEDGE_OWNER = 'e2e-knowledge-owner';
 export const KNOWLEDGE_HEADER = `${KNOWLEDGE_OWNER}|owner|P-1`;
@@ -86,6 +89,7 @@ export function createKnowledgeFixture(): { deps: KnowledgeDeps; attach(app: Fas
   }
   const deps: KnowledgeDeps & { sourceResources: SourceResource[] } = {
     repo: new MemoryKnowledgeRepository(), database: new DatabaseGateway([resource]),
+    organization: createOrganizationSink(() => employeesState.current, () => toolsState.current),
     sourceResources: [], plugins: { email: remote('email'), sharepoint: remote('sharepoint') },
     enqueue: async () => undefined,
     audit: { append: async entry => { liveAudit.push(structuredClone(entry)); } },

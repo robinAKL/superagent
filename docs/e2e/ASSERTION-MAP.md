@@ -19,8 +19,8 @@ CI runs `apps/e2e/check-assertion-map.mjs`. It fails if a row has no valid statu
 | # | Assertion | Status | Where / owner |
 |---|---|---|---|
 | 1 | Queue title expanded | e2e | apps/e2e/tests/work-inbox.spec.ts |
-| 2 | sample-tenant fixtures opt in | n/a | prototype demo fixtures; the product starts empty (covered by "unbuilt modules say who owns them" and per-feature empty states) |
-| 3 | No invented business tasks before opt in | n/a | prototype demo fixtures; the product starts empty (covered by "unbuilt modules say who owns them" and per-feature empty states) |
+| 2 | sample-tenant fixtures opt in | n/a | prototype demo fixtures; the product starts empty (covered by "digital employees without an analysed draft say how to start" and per-feature empty states) |
+| 3 | No invented business tasks before opt in | n/a | prototype demo fixtures; the product starts empty (covered by "digital employees without an analysed draft say how to start" and per-feature empty states) |
 | 4 | staff member A sees only five assigned work items | e2e | apps/e2e/tests/work-inbox.spec.ts |
 | 5 | staff member A does not see manager-only exception | e2e | apps/e2e/tests/work-inbox.spec.ts |
 | 6 | Write approval waits for data confirmation | e2e | apps/e2e/tests/work-inbox.spec.ts |
