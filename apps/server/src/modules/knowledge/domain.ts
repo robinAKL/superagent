@@ -32,6 +32,8 @@ export interface Recommendation {
   mergedInto?: string;
   /** When the platform recorded this draft. Independent of business effective dates. */
   recordedAt?: string;
+  /** Object drafts demoted from a fragment SOP: they are business rules for the knowledge lenses. */
+  ruleLike?: boolean;
   /** Business effective window copied from source quotes (YYYY-MM-DD); omitted when the source does not state it. */
   effectiveFrom?: string;
   effectiveTo?: string;
@@ -206,6 +208,10 @@ export function mergeRecommendations(
   }
   if (skippedRelations && !accepted.length) {
     throw new KnowledgeError('unsupported_relation', '关系必须引用当前有依据且未删除的业务对象草案。', 422);
+  }
+  const liveSops = new Set(accepted.filter(p => p.kind === 'sop').map(p => p.key));
+  for (const r of scoped) {
+    if (r.kind === 'sop' && r.origin === 'inferred' && !r.humanLocked && !r.deleted && !liveSops.has(r.key)) r.deleted = true;
   }
   return { accepted, skippedRelations };
 }

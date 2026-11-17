@@ -22,7 +22,7 @@ interface Recommendation {
   id: string; key: string; kind: string; name: string; description: string; humanLocked: boolean; deleted: boolean; stale?: boolean;
   proposedChange?: { name: string; description: string; evidence?: Evidence[] }; evidence: Evidence[];
   relation?: { from: string; to: string; label: string };
-  recordedAt?: string; effectiveFrom?: string; effectiveTo?: string;
+  recordedAt?: string; effectiveFrom?: string; effectiveTo?: string; ruleLike?: boolean;
   assignment?: { tools: string[]; sops: string[] };
   origin?: 'manual' | 'inferred';
 }
