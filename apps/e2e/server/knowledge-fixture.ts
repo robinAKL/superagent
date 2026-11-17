@@ -94,7 +94,10 @@ export function createKnowledgeFixture(): { deps: KnowledgeDeps; attach(app: Fas
       async recommend(input) {
         if (!modelAvailable) throw new Error('synthetic model unavailable');
         reads.model++;
-        const proposals: { key: string; kind: 'employee' | 'tool'; name: string; description: string; evidence: Evidence[] }[] = [];
+        const proposals: {
+          key: string; kind: 'employee' | 'tool' | 'sop' | 'relation'; name: string; description: string; evidence: Evidence[];
+          relation?: { from: string; to: string; label: string };
+        }[] = [];
         for (const evidence of input.evidence) {
           for (const match of evidence.quote.matchAll(/(角色|工具)：([^；\n]+)；(?:责任|职责)：([^\n]+)/g)) {
             const quote = match[0], start = evidence.start + (match.index ?? 0);
@@ -108,6 +111,12 @@ export function createKnowledgeFixture(): { deps: KnowledgeDeps; attach(app: Fas
         if (schema && !proposals.some(proposal => proposal.kind === 'employee')) {
           proposals.push({ key: 'schema-data-analyst', kind: 'employee', name: '数据分析员', description: `理解批准的数据库结构并核对当前事实。${modelSuffix}`, evidence: [{ ...schema }] });
           proposals.push({ key: 'schema-query-tool', kind: 'tool', name: '只读批次查询', description: `只使用批准的参数化 SELECT 模板；仍为待配置工具草案。${modelSuffix}`, evidence: [{ ...schema }] });
+        }
+        const handbook = input.evidence.find(evidence => evidence.locator.endsWith('handbook://procedures/returns'));
+        if (handbook) {
+          proposals.push({ key: 'returns', kind: 'sop', name: '退货审核流程', description: '核对收货记录后登记退款。', evidence: [handbook] });
+          proposals.push({ key: 'return-receipt', kind: 'relation', name: '退货关联收货记录', description: '登记前需要核对记录。', evidence: [handbook],
+            relation: { from: 'return', to: 'receipt', label: '关联' } });
         }
         return proposals;
       },

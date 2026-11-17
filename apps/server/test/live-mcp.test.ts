@@ -147,7 +147,11 @@ it('discovers fresh documents, templates and tools on different MCP servers duri
       'Refunds must use the original payment method.',
     ]);
     expect(draft.evidence[0]).toMatchObject({ locator: `policies.example.net / ${resourceUri}`, retrievedAt: expect.any(String) });
+    const reader = await send('/recommendations');
+    expect(reader.headers['cache-control']).toBe('no-store');
+    expect(reader.json()).toEqual({ recommendations: [], mcpRecommendations: [draft] });
     expect((await send('/overview', undefined, 'bob|owner|')).json().mcpRecommendations).toEqual([]);
+    expect((await send('/recommendations', undefined, 'bob|owner|')).json().mcpRecommendations).toEqual([]);
     expect((await send(`/recommendations/${draft.id}/delete`, {}, 'bob|owner|')).statusCode).toBe(404);
     expect((await send('/search?q=refund')).json().hits).toEqual([]);
 
@@ -158,6 +162,7 @@ it('discovers fresh documents, templates and tools on different MCP servers duri
     const afterReconnect = (await send('/overview')).json();
     expect(afterReconnect.analyses.at(-1)).toMatchObject({ status: 'stale', error: 'mcp_analysis_scope_changed' });
     expect(afterReconnect.mcpRecommendations).toEqual([]);
+    expect((await send('/recommendations')).json().mcpRecommendations).toEqual([]);
     expect(used).toHaveLength(3);
   } finally { await app.close(); }
 });

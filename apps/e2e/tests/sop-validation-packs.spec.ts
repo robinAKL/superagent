@@ -1,7 +1,7 @@
 /**
  * T-48 / qa-outcomes: validation with regression cases, stale validation, revalidation, SOP packs from the knowledge
  * analysis, and knowledge-change impact — all on the real page. The SOP runtime is the one mounted by the e2e
- * server; the knowledge overview is answered in the analysis's response shape.
+ * server; the knowledge drafts endpoint returns synthetic recommendations.
  */
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures.js';
@@ -13,8 +13,8 @@ const ev = (sourceId: string, version: string, quote: string, line: number) => (
 
 async function knowledge(page: Page, versions: { s1: string; s2: string | null }) {
   const evidence = [ev('s1', versions.s1, '收到发票后先核对采购单', 4), ...(versions.s2 ? [ev('s2', versions.s2, '金额超过 5000 需经理审批', 9)] : [])];
-  await page.route('**/api/v1/knowledge/overview', (route) =>
-    route.fulfill({ json: { recommendations: [{ id: 'k1', key: 'invoice-intake', kind: 'sop', name: '发票受理', description: '受理供应商发票', evidence, humanLocked: false, deleted: false }] } }),
+  await page.route('**/api/v1/knowledge/recommendations', (route) =>
+    route.fulfill({ json: { recommendations: [{ id: 'k1', key: 'invoice-intake', kind: 'sop', name: '发票受理', description: '受理供应商发票', evidence, humanLocked: false, deleted: false }], mcpRecommendations: [] } }),
   );
 }
 const rules = { requiredFields: ['invoiceNo', 'amount'], threshold: { field: 'amount', max: 5000 } };
