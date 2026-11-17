@@ -1,7 +1,7 @@
 import { validateSopGraph } from '@superagent/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { toolsState } from '../tools/index.js';
-import { loadActiveWorkflows, loadSopSnapshot, saveSopSnapshot, type Queryable } from './pg-sop.js';
+import { countRunningSopInstances, loadActiveWorkflows, loadSopSnapshot, saveSopSnapshot, type Queryable } from './pg-sop.js';
 import { OriginalRequests } from './original-request.js';
 import { CompanyContextStore, contextInput } from './company-context.js';
 import { setSopGraphCheck, SopRuntime, type SopDefinition, type SopGraphContext } from './sop.js';
@@ -139,17 +139,24 @@ export const sopModule: FastifyPluginAsync = async (app) => {
 
   app.get('/versions/:id', async (req, reply) => {
     const params = req.params as { id: string };
+    let version;
     try {
-      const version = sopState.current.get(params.id);
-      return { ...version, runningInstances: sopState.current.runningInstances(version.id) };
+      version = sopState.current.get(params.id);
     } catch (error) {
       return reply.code(404).send({ error: error instanceof Error ? error.message : 'version_not_found' });
     }
+    const runningInstances = sopStore
+      ? (await countRunningSopInstances(sopStore, version.sopId, req.user?.tenantId)).get(version.id) ?? 0
+      : sopState.current.runningInstances(version.id);
+    return { ...version, runningInstances };
   });
 
   app.get('/:sopId/versions', async (req) => {
-    const params = req.params as { sopId: string };
-    return { versions: sopState.current.listVersions(params.sopId) };
+    const { sopId } = req.params as { sopId: string };
+    const versions = sopState.current.listVersions(sopId);
+    if (!sopStore) return { versions };
+    const counts = await countRunningSopInstances(sopStore, sopId, req.user?.tenantId);
+    return { versions: versions.map(version => ({ ...version, runningInstances: counts.get(version.id) ?? 0 })) };
   });
 
   app.post('/:id/validate', async (req, reply) => {

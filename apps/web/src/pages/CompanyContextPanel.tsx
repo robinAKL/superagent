@@ -79,9 +79,9 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
       if (!controller.signal.aborted) setTeam(status === 200 && Array.isArray(body)
         ? { total: body.length, ready: body.filter(row => row.status === 'online' || row.status === 'busy').length } : null);
     }).catch(() => { if (!controller.signal.aborted) setTeam(null); });
-    void api<{ stage: string }[]>('/api/v1/tools/', { signal }).then(({ status, body }) => {
+    void api<{ stage: string; state: string }[]>('/api/v1/tools/', { signal }).then(({ status, body }) => {
       if (!controller.signal.aborted) setTools(status === 200 && Array.isArray(body)
-        ? { total: body.length, ready: body.filter(row => row.stage === 'available').length } : null);
+        ? { total: body.length, ready: body.filter(row => row.stage === 'available' && row.state === 'active').length } : null);
     }).catch(() => { if (!controller.signal.aborted) setTools(null); });
     return () => controller.abort();
   }, [attempt]);
