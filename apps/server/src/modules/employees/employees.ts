@@ -60,6 +60,30 @@ export class EmployeeService {
     return e;
   }
 
+  /**
+   * Create-or-update under a caller-chosen stable id (organization confirmation). Calling it again with the same input
+   * changes nothing; a changed prompt adds a version, a changed name/duty is applied in place. Never touches status.
+   */
+  ensure(input: { id: string; name: string; duty: string; prompt: string; owner: string; source: Employee['source'] }): { employee: Employee; created: boolean } {
+    const existing = this.employees.get(input.id);
+    if (existing) {
+      existing.name = input.name;
+      existing.duty = input.duty;
+      if (this.currentPrompt(input.id).text !== input.prompt) this.updatePrompt(input.id, input.prompt, input.owner);
+      return { employee: existing, created: false };
+    }
+    const e = this.create(input);
+    this.employees.delete(e.id);
+    this.seq--;
+    e.id = input.id;
+    this.employees.set(e.id, e);
+    return { employee: e, created: true };
+  }
+
+  has(id: string): boolean {
+    return this.employees.has(id);
+  }
+
   get(id: string): Employee {
     const e = this.employees.get(id);
     if (!e) throw new Error(`employee ${id} not found`);

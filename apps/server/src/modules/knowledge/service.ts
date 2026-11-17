@@ -17,6 +17,7 @@ import { publicMcpEndpoint } from './plugins/mcp-public-http.js';
 import { liveMcpSelection, type LiveMcpKnowledge } from './live-mcp.js';
 import { MAX_MCP_ANALYSIS_SOURCES, mcpEvidenceValid, mcpSelectionsCurrent } from './mcp-analysis.js';
 import type { AnalysisGateway } from '../analysis/gateway-model.js';
+import type { OrganizationSink } from '../employees/organization.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
   plugins?: Record<string, KnowledgeSourcePlugin>;
@@ -30,6 +31,8 @@ export interface KnowledgeDeps {
   mcpAnswerGateway?: AnalysisGateway;
   close?: () => Promise<void>;
   audit?: AuditSink;
+  /** Creates employees and tool placeholders when an owner confirms the organization draft. */
+  organization?: OrganizationSink;
 }
 export const MANIFESTS = [
   { id: 'local-file', name: '本地文件', capabilities: ['文件导入', '版本与行定位'] },
@@ -481,8 +484,124 @@ export class KnowledgeService {
     return this.deps.repo.transact(ctx, s => {
       const r = s.recommendations.find(r => r.id === recId && !r.deleted && this.draftAllowed(s, ctx, r) && (remove || (r.origin === 'manual' || r.evidence.length > 0 && r.evidence.every(e => this.valid(s, ctx, e)))));
       if (!r) throw new KnowledgeError('not_found', '当前有效建议不存在。', 404);
-      if (remove) r.deleted = true; else { r.name = bounded(input.name, 160, '名称'); r.description = bounded(input.description, 4000, '说明'); r.humanLocked = true; }
+      if (remove) {
+        r.deleted = true;
+        // A deleted tool or SOP draft no longer appears in any role's assignment.
+        if (r.kind === 'tool' || r.kind === 'sop') for (const other of s.recommendations) if (other.assignment) other.assignment = {
+          tools: other.assignment.tools.filter(k => !(r.kind === 'tool' && k === r.key)), sops: other.assignment.sops.filter(k => !(r.kind === 'sop' && k === r.key)),
+        };
+      } else {
+        r.name = bounded(input.name, 160, '名称'); r.description = bounded(input.description, 4000, '说明'); r.humanLocked = true;
+        if (r.kind === 'employee') {
+          if (input.prompt !== undefined) r.prompt = typeof input.prompt === 'string' && input.prompt.trim() ? bounded(input.prompt, 8000, '提示词') : undefined;
+          if (input.assignment !== undefined) r.assignment = this.assignmentInput(s, ctx, input.assignment);
+        }
+      }
       return { id: r.id, deleted: r.deleted, humanLocked: r.humanLocked };
+    });
+  }
+  private assignmentInput(s: KnowledgeState, ctx: UserContext, value: unknown): { tools: string[]; sops: string[] } {
+    const v = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+    if (!v || !Array.isArray(v.tools) || !Array.isArray(v.sops) || v.tools.length > 30 || v.sops.length > 30) throw new KnowledgeError('invalid_input', '分工结构无效。');
+    const live = (kind: 'tool' | 'sop') => new Set(s.recommendations.filter(r => r.kind === kind && !r.deleted && this.draftAllowed(s, ctx, r)).map(r => r.key));
+    const pick = (list: unknown[], kind: 'tool' | 'sop') => { const known = live(kind); return [...new Set(list.filter((k): k is string => typeof k === 'string' && known.has(k)))]; };
+    return { tools: pick(v.tools, 'tool'), sops: pick(v.sops, 'sop') };
+  }
+  /** Merge one role draft into another: the target keeps its name and duty and takes over the source's tools and SOPs. */
+  async mergeRecommendation(ctx: UserContext, recId: string, input: Record<string, unknown>) {
+    requireManager(ctx);
+    const intoId = bounded(input.into, 100, '合并目标');
+    return this.deps.repo.transact(ctx, s => {
+      const live = (rid: string) => s.recommendations.find(r => r.id === rid && !r.deleted && r.kind === 'employee' && this.draftAllowed(s, ctx, r));
+      const from = live(recId), into = live(intoId);
+      if (!from || !into || from.id === into.id) throw new KnowledgeError('not_found', '要合并的岗位草案不存在。', 404);
+      const a = from.assignment ?? { tools: [], sops: [] }, b = into.assignment ?? { tools: [], sops: [] };
+      into.assignment = { tools: [...new Set([...b.tools, ...a.tools])], sops: [...new Set([...b.sops, ...a.sops])] };
+      into.humanLocked = true;
+      from.deleted = true; from.mergedInto = into.id;
+      return { id: into.id, merged: from.id };
+    });
+  }
+  private organizationDraft(s: KnowledgeState, ctx: UserContext) {
+    const view = this.recommendationView(s, ctx);
+    const all: (Recommendation & { stale: boolean; privateSource?: true })[] = [...view.recommendations, ...view.mcpRecommendations.map(r => ({ ...r, privateSource: true as const }))];
+    const fresh = all.filter(r => !r.stale);
+    const employees = fresh.filter(r => r.kind === 'employee'), tools = fresh.filter(r => r.kind === 'tool'), sops = fresh.filter(r => r.kind === 'sop');
+    const toolKeys = new Set(tools.map(t => t.key)), sopKeys = new Set(sops.map(t => t.key));
+    const org = s.organization;
+    return {
+      employees: employees.map(e => ({
+        id: e.id, key: e.key, name: e.name, duty: e.description, prompt: e.prompt ?? defaultPrompt(e.name, e.description),
+        promptEdited: !!e.prompt, origin: e.origin ?? 'inferred', humanLocked: e.humanLocked, evidence: e.evidence, privateSource: !!e.privateSource,
+        tools: (e.assignment?.tools ?? []).filter(k => toolKeys.has(k)), sops: (e.assignment?.sops ?? []).filter(k => sopKeys.has(k)),
+        employeeId: org?.employees[e.id]?.employeeId ?? null,
+      })),
+      tools: tools.map(t => {
+        const confirmed = org?.tools[t.id];
+        const match = confirmed ? null : this.deps.organization?.matchTool(t.name, t.description) ?? null;
+        return {
+          id: t.id, key: t.key, name: t.name, description: t.description, evidence: t.evidence, privateSource: !!t.privateSource,
+          toolId: confirmed?.toolId ?? match?.toolId ?? null, match: confirmed?.match ?? (match ? 'existing' as const : 'placeholder' as const), matchName: match?.name ?? null,
+        };
+      }),
+      sops: sops.map(p => ({ id: p.id, key: p.key, name: p.name, description: p.description, evidence: p.evidence, privateSource: !!p.privateSource })),
+    };
+  }
+  private organizationBlock(s: KnowledgeState, ctx: UserContext, employees: number): 'analysis_running' | 'analysis_stale' | 'no_employees' | null {
+    const latest = s.analyses.filter(r => r.actor.userId === ctx.userId).at(-1);
+    if (latest && ['queued', 'running'].includes(latest.status)) return 'analysis_running';
+    if (latest?.status === 'stale') return 'analysis_stale';
+    return employees ? null : 'no_employees';
+  }
+  /** Organization draft (PRD §3.3 step 3): roles, the tools they use and the SOPs they take part in, plus confirmation state. */
+  async organization(ctx: UserContext) {
+    const s = await this.deps.repo.read(ctx), draft = this.organizationDraft(s, ctx), org = s.organization;
+    const missing = org ? Object.values(org.employees).filter(e => !this.deps.organization?.present('employee', e.employeeId)).length : 0;
+    const changed = !!org && draft.employees.some(e => {
+      const done = org.employees[e.id];
+      return !done || done.name !== e.name || done.duty !== e.duty || done.prompt !== e.prompt;
+    }) || draft.tools.some(t => !org?.tools[t.id]);
+    return {
+      ...draft,
+      confirmation: org ? { confirmedAt: org.confirmedAt, confirmedBy: org.confirmedBy, revision: org.revision, employees: Object.keys(org.employees).length, tools: Object.keys(org.tools).length } : null,
+      changedSinceConfirmation: changed, missing,
+      blocked: this.organizationBlock(s, ctx, draft.employees.length),
+      canConfirm: ctx.roles.some(role => role === 'owner' || role === 'admin') && !!this.deps.organization,
+    };
+  }
+  /**
+   * "确认组织": creates one unconnected employee per role draft and a tool placeholder per missing capability.
+   * Ids derive from draft ids and are recorded in the knowledge document, so a repeat (or retried) confirmation reuses them.
+   */
+  async confirmOrganization(ctx: UserContext) {
+    requireManager(ctx);
+    const sink = this.deps.organization;
+    if (!sink) throw new KnowledgeError('organization_unavailable', '数字员工服务暂不可用。', 503);
+    return this.deps.repo.transact(ctx, s => {
+      const draft = this.organizationDraft(s, ctx), block = this.organizationBlock(s, ctx, draft.employees.length);
+      if (block === 'analysis_running') throw new KnowledgeError(block, '分析仍在进行，完成后再确认组织。', 409);
+      if (block === 'analysis_stale') throw new KnowledgeError(block, '资料在分析期间发生变化，请重新分析后再确认。', 409);
+      if (block === 'no_employees') throw new KnowledgeError(block, '组织草案里还没有岗位。', 409);
+      const org = s.organization ?? { confirmedAt: '', confirmedBy: '', revision: 0, employees: {}, tools: {} };
+      let createdEmployees = 0, createdTools = 0;
+      for (const e of draft.employees) {
+        const result = sink.ensureEmployee({ recId: e.id, name: e.name, duty: e.duty, prompt: e.prompt, owner: ctx.userId, manual: e.origin === 'manual' });
+        if (result.created && !org.employees[e.id]) createdEmployees++;
+        org.employees[e.id] = { employeeId: result.employeeId, name: e.name, duty: e.duty, prompt: e.prompt };
+      }
+      for (const t of draft.tools) {
+        const known = org.tools[t.id];
+        if (known?.match === 'existing') continue;
+        const match = known ? null : sink.matchTool(t.name, t.description);
+        if (match) { org.tools[t.id] = { toolId: match.toolId, name: t.name, match: 'existing' }; continue; }
+        const consumers = draft.employees.filter(e => e.tools.includes(t.key)).map(e => org.employees[e.id]!.employeeId);
+        const placeholder = sink.ensureToolPlaceholder({ recId: t.id, name: t.name, purpose: t.description, consumers, maintainer: ctx.userId });
+        if (placeholder.created && !known) createdTools++;
+        org.tools[t.id] = { toolId: placeholder.toolId, name: t.name, match: 'placeholder' };
+      }
+      Object.assign(org, { confirmedAt: stamp(), confirmedBy: ctx.userId, revision: org.revision + 1 });
+      s.organization = org;
+      return { revision: org.revision, employees: Object.values(org.employees), tools: Object.values(org.tools), createdEmployees, createdTools };
     });
   }
   async adoptRecommendation(ctx: UserContext, recId: string) {
@@ -534,4 +653,9 @@ export class KnowledgeService {
     await this.deps.audit?.append({tenantId:ctx.tenantId,actor:ctx.userId,action:'knowledge.current_fact_queried',objectType:'knowledge',objectId:template.id,versionRef:hash(result.schemaVersion),result:'ok',detail:{connectionId,rowCount:result.rowCount,queriedAt:result.queriedAt}});
     return result;
   }
+}
+
+/** Starting prompt for a role the owner has not written one for; it is shown and editable before confirmation. */
+function defaultPrompt(name: string, duty: string): string {
+  return `你是「${name}」。职责：${duty}\n只使用已安装并授权的工具；资料不足、缺少授权或需要审批时，停下来说明缺什么并交给负责人。每次交付都附上依据和可回读的结果。`;
 }

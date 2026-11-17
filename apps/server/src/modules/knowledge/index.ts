@@ -90,6 +90,9 @@ export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = asy
   app.post('/analyses', { bodyLimit: 8 * 1024 }, (req, reply) => { reply.code(202); return service!.startAnalysis(req.user!, req.body === undefined ? {} : body(req)); });
   app.post<{ Params: { id: string } }>('/recommendations/:id/lock', req => service!.editRecommendation(req.user!, req.params.id, body(req)));
   app.post<{ Params: { id: string } }>('/recommendations/:id/delete', req => service!.editRecommendation(req.user!, req.params.id, {}, true));
+  app.post<{ Params: { id: string } }>('/recommendations/:id/merge', req => service!.mergeRecommendation(req.user!, req.params.id, body(req)));
+  app.get('/organization', req => service!.organization(req.user!));
+  app.post('/organization/confirm', req => service!.confirmOrganization(req.user!));
   app.post<{ Params: { id: string } }>('/recommendations/:id/adopt', req => service!.adoptRecommendation(req.user!, req.params.id));
   app.post<{ Params: { id: string } }>('/plugins/:id', req => { const enabled = body(req).enabled; if (typeof enabled !== 'boolean') throw new KnowledgeError('invalid_input', '插件状态无效。'); return service!.togglePlugin(req.user!, req.params.id, enabled); });
 };

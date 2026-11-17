@@ -20,7 +20,9 @@ export function validateProposals(value: unknown): Omit<Recommendation, 'id' | '
     if(p.kind==='relation'&&(!relation||typeof relation!=='object'||Array.isArray(relation)||['from','to','label'].some(k=>typeof relation[k]!=='string'||!(relation[k] as string).trim()||(relation[k] as string).length>(k==='label'?160:120))))throw new KnowledgeError('invalid_model_output','关系端点与说明无效。',422);
     for (const e of p.evidence) if (!e || typeof e !== 'object' || typeof e.sourceId !== 'string' || typeof e.version !== 'string' || typeof e.locator !== 'string' || typeof e.quote !== 'string' || e.quote.length > 1200 || !Number.isSafeInteger(e.start) || !Number.isSafeInteger(e.end)) throw new KnowledgeError('invalid_model_output', '草案引用无效。', 422);
     const evidence = (p.evidence as Evidence[]).map(({ sourceId, version, locator, start, end, quote }) => ({ sourceId, version, locator, start, end, quote }));
-    return { key: p.key as string, name: p.name as string, description: p.description as string, kind: p.kind as Recommendation['kind'], evidence, ...(p.kind==='relation'?{relation:{from:relation!.from as string,to:relation!.to as string,label:relation!.label as string}}:{}) };
+    const keys = (value: unknown) => Array.isArray(value) ? [...new Set(value.filter((k): k is string => typeof k === 'string' && !!k.trim() && k.length <= 120).map(k => k.trim()))].slice(0, 12) : [];
+    const assignment = p.kind === 'employee' && (p.uses !== undefined || p.sops !== undefined) ? { assignment: { tools: keys(p.uses), sops: keys(p.sops) } } : {};
+    return { key: p.key as string, name: p.name as string, description: p.description as string, kind: p.kind as Recommendation['kind'], evidence, ...assignment, ...(p.kind==='relation'?{relation:{from:relation!.from as string,to:relation!.to as string,label:relation!.label as string}}:{}) };
   });
 }
 
