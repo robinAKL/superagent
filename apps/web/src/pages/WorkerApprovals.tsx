@@ -72,6 +72,8 @@ export function WorkerApprovals() {
     }
   }
 
+  // Prototype: confirmations appear only when an agent is actually waiting (or loading them failed).
+  if (!error && !items?.length) return null;
   const now = Date.now();
   return (
     <section className="panel exec-approvals" aria-label={t('title')}>
