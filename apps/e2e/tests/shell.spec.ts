@@ -13,20 +13,32 @@ test('owner navigation has the 7 accepted entries in 3 groups, routed by hash', 
   await expect(nav.locator('[aria-current="page"]')).toHaveText('管理设置');
 });
 
-test('page heading and subtitle share one row and are vertically centred (qa-room-header)', async ({ page, isMobile }) => {
-  test.skip(isMobile, 'single-row header is the desktop rule; mobile stacks');
-  await page.goto('/#settings');
-  const h1 = await page.locator('.page-head h1').boundingBox();
-  const sub = await page.locator('.page-head p').boundingBox();
-  expect(h1 && sub).toBeTruthy();
-  const mid = (b: { y: number; height: number }) => b.y + b.height / 2;
-  expect(Math.abs(mid(h1!) - mid(sub!))).toBeLessThanOrEqual(4);
-  expect(sub!.x).toBeGreaterThan(h1!.x + h1!.width - 1); // subtitle to the right of the title, same row
+const PAGES = ['room', 'work', 'knowledge', 'employees', 'tools', 'brain', 'settings'];
+
+test('every page has the same head: title, subtitle under it, actions top-right (prototype v12)', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop rule; phones stack the actions under the title');
+  for (const hash of PAGES) {
+    await page.goto(`/#${hash}`);
+    const head = page.locator('main .page-head').first();
+    await expect(head, `#${hash}`).toBeVisible();
+    const h1 = await head.locator('h1').boundingBox();
+    const sub = await head.locator('p').first().boundingBox();
+    expect(h1 && sub, `#${hash}`).toBeTruthy();
+    expect(Math.abs(sub!.x - h1!.x), `#${hash} subtitle aligned under the title`).toBeLessThanOrEqual(1);
+    expect(sub!.y, `#${hash} subtitle below the title`).toBeGreaterThanOrEqual(h1!.y + h1!.height - 1);
+    expect(await head.locator('h1').evaluate(el => getComputedStyle(el).fontSize), `#${hash}`).toBe('28px');
+    const actions = head.locator('.page-head-actions');
+    if (await actions.count()) {
+      const box = (await actions.boundingBox())!;
+      expect(box.x, `#${hash} actions to the right`).toBeGreaterThan(h1!.x + h1!.width);
+      expect(Math.abs(box.y - h1!.y), `#${hash} actions top-aligned`).toBeLessThanOrEqual(16);
+    }
+  }
 });
 
 test('no horizontal page scroll at phone width', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'phone-width rule');
-  for (const hash of ['room', 'settings', 'tools', 'knowledge', 'brain']) {
+  for (const hash of PAGES) {
     await page.goto(`/#${hash}`);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, `#${hash}`).toBeLessThanOrEqual(0);

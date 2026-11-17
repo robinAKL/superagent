@@ -28,8 +28,7 @@
 .knowledge-preview-items { list-style: none; margin: var(--space-sm) 0; padding: 0; max-height: 300px; overflow: auto; }
 .knowledge-preview-items li { display: block; padding: var(--space-xs) 0; }
 .knowledge-manual-role { margin-bottom: var(--space-lg); }
-.knowledge-head { flex-wrap: wrap; justify-content: space-between; align-items: center; margin-bottom: var(--space-sm); }
-.knowledge-head h1 { font-size: 30px; letter-spacing: -.03em; }
+.knowledge-head { margin-bottom: var(--space-sm); }
 .knowledge-section { margin-bottom: var(--space-lg); min-width: 0; }
 .knowledge-section-head { display: flex; gap: var(--space-sm); align-items: flex-start; margin-bottom: var(--space-lg); }
 .knowledge-section-head > div { flex: 1; min-width: 0; }
@@ -261,7 +260,7 @@
 .knowledge-paste .btn { justify-self: start; }
 
 /* Prototype v12 layout: subtitle under the title, time lenses under the tabs, workflow switch. */
-.knowledge-subtitle { margin: 4px 0 0; color: var(--color-muted); font-size: 14px; }
+.knowledge-subtitle { margin: 4px 0 0; }
 .knowledge-lenses { display: grid; gap: var(--space-sm); }
 .knowledge-tab-intro { max-width: 72ch; line-height: 1.6; }
 .knowledge-flows { display: grid; gap: var(--space-md); }

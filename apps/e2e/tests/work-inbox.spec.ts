@@ -279,3 +279,35 @@ test('an executed approval does not offer revise, stage, or reopen', async ({ pa
   await expect(pane.getByRole('button', { name: '暂存修改' })).toHaveCount(0);
   await expect(pane.getByRole('button', { name: '重新打开' })).toHaveCount(0);
 });
+
+test.describe('in English', () => {
+  test.use({ lang: 'en' });
+
+  test('the list and every drawer read in English when the work itself is in English', async ({ page }) => {
+    const staff = uid('en');
+    const ids = [
+      await item(page, { kind: 'data_check', assigneeUserId: staff, projectId: 'P-EN', payload: { title: 'Check invoice amount', amount: 120, due: '2026-11-20' } }),
+      await item(page, { kind: 'action_approval', assigneeUserId: staff, projectId: 'P-EN', payload: { title: 'Approve payment entry', amount: 120 } }),
+      await item(page, { kind: 'manual_execution', assigneeUserId: staff, projectId: 'P-EN', waitingOn: 'Supplier', payload: { title: 'Record in the customer system', due: 'Friday' } }),
+      await item(page, { kind: 'branch_choice', assigneeUserId: staff, projectId: 'P-EN', payload: { title: 'Choose the quote path', options: ['Standard', 'Exception'] } }),
+      await item(page, { kind: 'exception_ruling', assigneeUserId: staff, projectId: 'P-EN', payload: { title: 'Rule on an unsupported discount', reason: 'no_rule' } }),
+    ];
+    await page.setExtraHTTPHeaders({ 'x-dev-user': `${staff}|employee|P-EN` });
+    await page.goto('/#work');
+    await page.reload();
+    await expect(page.locator('#page-title')).toHaveText('My work');
+    const han = /[\u3400-\u9FFF]/;
+    const main = page.locator('main');
+    await expect(page.locator('[data-item]')).toHaveCount(ids.length);
+    expect(await main.innerText(), 'list').not.toMatch(han);
+    await expect(main).toContainText('No due date');
+    await expect(main).toContainText('Approve an exact action');
+    for (const id of ids) {
+      await page.locator(`[data-item="${id}"]`).click();
+      const aside = page.getByRole('complementary', { name: 'Work item' });
+      await expect(aside).toBeVisible();
+      expect(await aside.innerText(), `drawer ${id}`).not.toMatch(han);
+      expect(await main.innerText(), `page with drawer ${id}`).not.toMatch(han);
+    }
+  });
+});
