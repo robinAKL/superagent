@@ -63,9 +63,9 @@ it('retries a confirmed output limit once through the budget gateway with fewer 
    return {text:stopped ? '[' : '[{"evidence":[1]}]',toolCalls:[],usage:{inputTokens:1,outputTokens:1},stopReason:stopped ? 'length' : 'stop'};
   },
  });
- await expect(model.recommend({tenantId:'t',runId:'r',evidence:[file],maxOutputTokens:8192})).resolves.toEqual([{evidence:[file]}]);
+ await expect(model.recommend({tenantId:'t',runId:'r',evidence:[file],maxOutputTokens:16384})).resolves.toEqual([{evidence:[file]}]);
  expect(requests).toEqual([
-  {maxOutputTokens:4096,limit:'at most 8 distinct drafts',taskId:'r'},
-  {maxOutputTokens:8192,limit:'at most 3 distinct drafts',taskId:'r'},
+  {maxOutputTokens:8192,limit:'at most 15 distinct drafts',taskId:'r'},
+  {maxOutputTokens:16384,limit:'at most 8 distinct drafts',taskId:'r'},
  ]);
 });

@@ -61,11 +61,11 @@ export class GatewayAnalysisModel implements AnalysisModel {
         { role: 'user', content: JSON.stringify({ task: 'Recommend evidence-backed drafts from these approved sources.', focus: input.focus, evidence }) },
       ],
     }).catch(analysisGatewayError);
-    const initialLimit = Math.min(input.maxOutputTokens, 4096);
-    let response = await requestDrafts(initialLimit, 8);
+    const initialLimit = Math.min(input.maxOutputTokens, 8192);
+    let response = await requestDrafts(initialLimit, 15);
     if (outputTruncated(response) && input.maxOutputTokens > initialLimit) {
       // A returned length stop is a settled call. The gateway separately reserves the retry.
-      response = await requestDrafts(input.maxOutputTokens, 3);
+      response = await requestDrafts(input.maxOutputTokens, 8);
     }
     if (response.toolCalls.length || response.text.length > 100_000) throw new KnowledgeError('invalid_model_output', '分析输出无效，未生成草案。', 422);
     if (outputTruncated(response)) throw new KnowledgeError('analysis_output_truncated', '模型达到输出上限，未完成草案生成。请重新开始分析。', 422);

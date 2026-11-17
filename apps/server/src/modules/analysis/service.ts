@@ -35,6 +35,29 @@ function snapshotCurrent(state: KnowledgeState, ctx: UserContext, run: AnalysisR
   return false;
 }
 
+const EXCERPT_LENGTH = 1200;
+export const DOCUMENT_EVIDENCE_CHARS = 60_000;
+
+/** Takes excerpts from every readable document in turn, so early documents cannot use up the budget alone. */
+export function documentEvidence(documents: { item: { id: string; version: string }; chunks: ReturnType<typeof positionedChunks> }[]): Evidence[] {
+  const queues = documents.map(({ item, chunks }) => chunks.filter(c => c.text.length).map(c => ({
+    sourceId: item.id, version: item.version, start: c.start, end: Math.min(c.end, c.start + EXCERPT_LENGTH),
+    locator: c.locator, quote: c.text.slice(0, EXCERPT_LENGTH),
+  })));
+  const evidence: Evidence[] = [];
+  let remaining = DOCUMENT_EVIDENCE_CHARS;
+  for (let round = 0; queues.some(queue => round < queue.length); round++) {
+    for (const queue of queues) {
+      const excerpt = queue[round];
+      if (!excerpt) continue;
+      if (excerpt.quote.length > remaining) return evidence;
+      remaining -= excerpt.quote.length;
+      evidence.push(excerpt);
+    }
+  }
+  return evidence;
+}
+
 /** Reference-only durable queue handler. Worker retries are safe; source changes during model calls discard results. */
 export async function runAnalysis(
   repo: KnowledgeRepository, model: AnalysisModel, ctx: UserContext, runId: string,
@@ -48,12 +71,7 @@ export async function runAnalysis(
     if (run.status === 'running' && ['read_mcp', 'recommend'].includes(run.stage)) { run.status = 'outcome_unknown'; run.error = 'model_outcome_unknown'; return null; }
     if (!snapshotCurrent(s, ctx, run)) return null;
     Object.assign(run, { status: 'running', stage: run.mcpSources?.length ? 'read_mcp' : 'extract', leaseToken, leaseUntil: Date.now() + 300_000 });
-    const evidence: Evidence[] = [];
-    for (const i of s.source.items.filter(i => mayRead(s, ctx, i))) for (const c of positionedChunks(s, i)) {
-      if (evidence.length >= 40) break;
-      if (c.text.length) evidence.push({ sourceId: i.id, version: i.version, start: c.start, end: Math.min(c.end, c.start + 1200), locator: c.locator, quote: c.text.slice(0, 1200) });
-    }
-    return { run, evidence };
+    return { run, evidence: documentEvidence(s.source.items.filter(i => mayRead(s, ctx, i)).map(i => ({ item: i, chunks: positionedChunks(s, i) }))) };
   });
   if (!input) return;
   try {
@@ -69,7 +87,7 @@ export async function runAnalysis(
       return true;
     });
     if (!active) return;
-    const result = validateProposals(await model.recommend({ tenantId: ctx.tenantId, runId, evidence, maxOutputTokens: 8192, focus: input.run.focus }));
+    const result = validateProposals(await model.recommend({ tenantId: ctx.tenantId, runId, evidence, maxOutputTokens: 16384, focus: input.run.focus }));
     await repo.transact(ctx, s => {
       const run = s.analyses.find(r => r.id === runId)!;
       if (run.status !== 'running' || run.leaseToken !== leaseToken || !snapshotCurrent(s, ctx, run)) return;
