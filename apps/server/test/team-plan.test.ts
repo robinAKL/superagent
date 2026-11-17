@@ -49,8 +49,8 @@ function evidence(s: KnowledgeState, needle: string): Evidence {
   const i = s.source.items.find(i => i.current)!, c = s.source.chunks.find(c => c.itemId === i.id && c.text.includes(needle))!;
   return { sourceId: i.id, version: i.version, start: c.start, end: c.end, locator: c.locator, quote: c.text };
 }
-async function fixture(model?: AnalysisModel) {
-  const repo = new MemoryKnowledgeRepository(), employees = new EmployeeService(), tools = new ToolService();
+async function fixture(model?: AnalysisModel, busy: Set<string> = new Set()) {
+  const repo = new MemoryKnowledgeRepository(), employees = new EmployeeService(id => (busy.has(id) ? 1 : 0)), tools = new ToolService();
   const service = new KnowledgeService({ repo, model, organization: createOrganizationSink(() => employees, () => tools) });
   const conn = await service.createConnection(owner, { name: '资料', pluginId: 'local-file' });
   await service.confirmConnection(owner, conn.id);
@@ -139,6 +139,29 @@ describe('team plan flow (按人数重新规划)', () => {
     const confirmed = await f.service.confirmOrganization(owner);
     expect(confirmed).toMatchObject({ createdEmployees: 1, retiredEmployees: 3 });
     expect(f.employees.list()).toHaveLength(1);
+  });
+
+  it('confirming also removes team employees no record points at, and names the ones it cannot remove', async () => {
+    const busy = new Set<string>();
+    const f = await fixture(undefined, busy);
+    await f.service.confirmOrganization(owner);
+    // Left over from an earlier confirmation that no longer has a record (e.g. before roles were retired).
+    f.employees.ensure({ id: 'emp-org-ghost', name: '旧岗位', duty: '旧职责', prompt: 'p', owner: 'alice', source: 'recommended' });
+    f.employees.ensure({ id: 'emp-org-busy', name: '忙碌的旧岗位', duty: '旧职责', prompt: 'p', owner: 'alice', source: 'recommended' });
+    busy.add('emp-org-busy');
+    // A hand-made employee is not part of the organization and is never touched.
+    f.employees.ensure({ id: 'emp-manual', name: '手工员工', duty: 'x', prompt: 'p', owner: 'alice', source: 'manual' });
+    expect(f.employees.list()).toHaveLength(6);
+
+    const { plan } = await f.service.planTeam(owner, { count: 2 });
+    await f.service.adoptTeamPlan(owner, { planId: plan.id });
+    const confirmed = await f.service.confirmOrganization(owner);
+    expect(confirmed).toMatchObject({ createdEmployees: 2, retiredEmployees: 4, busyEmployees: ['忙碌的旧岗位'] });
+    expect(f.employees.list().map(e => e.id).sort()).toEqual([...confirmed.employees.map(e => e.employeeId), 'emp-manual', 'emp-org-busy'].sort());
+
+    busy.clear();
+    expect(await f.service.confirmOrganization(owner)).toMatchObject({ retiredEmployees: 1, busyEmployees: [] });
+    expect(f.employees.list().filter(e => e.id.startsWith('emp-org-'))).toHaveLength(2);
   });
 
   it('discarding removes the preview', async () => {
