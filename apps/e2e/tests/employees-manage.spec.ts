@@ -31,7 +31,10 @@ test('the card wall manage button opens a drawer that pauses on the employees AP
   await expect(drawer).toBeVisible();
   await expect(drawer.getByText('核对信用额度')).toBeVisible();
   await expect(drawer.getByText('v1')).toBeVisible();
+  await expect(drawer.getByRole('link', { name: '打开员工工具' })).toHaveAttribute('href', `#tools?employee=${employee.id}`);
   const paused = page.waitForResponse(r => r.url().includes(`/api/v1/employees/${employee.id}/pause`) && r.request().method() === 'POST');
   await drawer.getByRole('button', { name: '暂停' }).click();
   expect((await paused).ok()).toBeTruthy();
+  await drawer.getByRole('link', { name: '打开员工工具' }).click();
+  await expect(page).toHaveURL(new RegExp(`#tools\\?employee=${employee.id}`));
 });
