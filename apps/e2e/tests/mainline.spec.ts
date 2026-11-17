@@ -43,12 +43,12 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
   await test.step('company context is saved and reloaded from the Super Agent entry point', async () => {
     await page.goto('/#brain');
     await page.getByLabel('企业名称').fill('测试财务部');
-    await page.getByLabel('业务目标').fill('核对供应商发票并完成付款登记');
-    await page.getByLabel('决策边界').fill('审批人确认后才能登记付款');
-    await page.getByRole('button', { name: '保存企业上下文' }).click();
-    await expect(page.getByRole('status').filter({ hasText: '已保存上下文' })).toBeVisible();
+    await page.getByLabel('希望交给数字团队的工作').fill('核对供应商发票并完成付款登记');
+    await page.getByLabel('必须遵守的边界').fill('审批人确认后才能登记付款');
+    await page.getByRole('button', { name: '保存配置' }).click();
+    await expect(page.getByRole('status').filter({ hasText: '已保存配置' })).toBeVisible();
     await page.reload();
-    await expect(page.getByLabel('业务目标')).toHaveValue('核对供应商发票并完成付款登记');
+    await expect(page.getByLabel('希望交给数字团队的工作')).toHaveValue('核对供应商发票并完成付款登记');
   });
 
   let employeeId = '';

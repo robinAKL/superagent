@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import './execution.css';
 import { api } from '../api';
+import { useT } from '../i18n';
 
 /**
  * 待我处理 (PRD §3.8): only the items the server assigns to the signed-in user, grouped, with the exact content
@@ -105,6 +106,34 @@ export function fieldsOf(payload: Record<string, unknown>): [string, string][] {
   return Object.entries(payload ?? {}).filter(([key]) => !INTERNAL_FIELDS.has(key)).map(([key, value]): [string, string] => [key, text(value)]);
 }
 
+/** Inbox kinds that are human approvals — not guessed from titles. */
+export const APPROVAL_KIND = 'action_approval';
+/** Tool lifecycle stages that still need a person (test / release / deploy). Placeholders are missing capability, not a release. */
+export const TOOL_PUBLISH_STAGES = new Set(['test', 'release', 'deploy']);
+export function approvalCount(items: { kind: string }[]): number {
+  return items.filter(item => item.kind === APPROVAL_KIND).length;
+}
+export function toolsAwaitingPublish(tools: { stage?: string }[]): number {
+  return tools.filter(tool => tool.stage && TOOL_PUBLISH_STAGES.has(tool.stage)).length;
+}
+
+const CHROME = {
+  en: {
+    summary: 'Approvals {approvals} · Tools awaiting publish {tools} · All {all}',
+    summaryAria: 'Inbox summary',
+    emptyTitle: 'Nothing needs your decision right now',
+    emptyBody: 'Approvals from running work and tools waiting to be published show up here. If this is empty, check in-progress tasks in the command room or install a capability on Employee tools.',
+    openRoom: 'Open command room', openTools: 'Open employee tools',
+  },
+  zh: {
+    summary: '审批 {approvals} · 工具待发布 {tools} · 全部 {all}',
+    summaryAria: '待办汇总',
+    emptyTitle: '现在没有需要你处理的事项',
+    emptyBody: '运行中的审批和待发布的工具会汇总在这里。没有事项时先看指挥室里进行中的任务，或到员工工具安装能力。',
+    openRoom: '打开指挥室', openTools: '打开员工工具',
+  },
+};
+
 /** A successful list replaces whatever was shown. An empty list stays empty — there is no sample data. */
 export function inboxFromServer(items: ServerWorkItem[] | undefined): InboxItem[] | null {
   if (!items) return null;
@@ -124,7 +153,9 @@ export function inboxFromServer(items: ServerWorkItem[] | undefined): InboxItem[
 }
 
 export function WorkInboxPage() {
+  const t = useT(CHROME);
   const [items, setItems] = useState<ServerWorkItem[] | null>(null);
+  const [toolStages, setToolStages] = useState<{ stage?: string }[]>([]);
   const [failed, setFailed] = useState(false);
   const [group, setGroup] = useState<Group | 'all'>('all');
   const [project, setProject] = useState('');
@@ -145,6 +176,12 @@ export function WorkInboxPage() {
       }
       setFailed(false);
       setItems(r.body.items);
+      try {
+        const tools = await api<{ stage?: string }[]>('/api/v1/tools/');
+        setToolStages(tools.status === 200 && Array.isArray(tools.body) ? tools.body : []);
+      } catch {
+        setToolStages([]);
+      }
       if (!project && !exceptionsOnly) {
         const ids = r.body.items.flatMap((i) => [i.projectId, ...(i.rows ?? []).map((row) => row.projectId)]);
         setProjects([...new Set(ids.filter((p): p is string => !!p))].sort());
@@ -207,13 +244,13 @@ export function WorkInboxPage() {
           <div className="exec-scroll">
             {failed ? <p className="helper" role="alert">没能读取待办，请稍后重试。</p> : null}
             {items === null && !failed ? <p className="helper">正在读取…</p> : null}
-            {items !== null ? <div className="work-summary" aria-label="待办汇总">
-              <p>审批 {items.filter(i => i.kind === 'action_approval').length} · 工具发布相关 {items.filter(i => /tool|release|install/i.test(i.kind + String(i.payload.title ?? ''))).length} · 全部 {items.length}</p>
+            {items !== null ? <div className="work-summary" aria-label={t('summaryAria')}>
+              <p>{t('summary', { approvals: approvalCount(items), tools: toolsAwaitingPublish(toolStages), all: items.length })}</p>
             </div> : null}
             {items !== null && visible.length === 0 ? <div className="room-tasks-empty" role="status">
-              <strong>现在没有需要你处理的事项</strong>
-              <p className="helper">审批和工具发布会汇总在这里。没有事项时先看指挥室里进行中的任务，或到员工工具安装能力。</p>
-              <p><a href="#room">打开指挥室</a> · <a href="#tools">打开员工工具</a></p>
+              <strong>{t('emptyTitle')}</strong>
+              <p className="helper">{t('emptyBody')}</p>
+              <p><a href="#room">{t('openRoom')}</a> · <a href="#tools">{t('openTools')}</a></p>
             </div> : null}
             {GROUPS.map((section) => {
               const rows = visible.filter((item) => groupOf(item) === section.id);

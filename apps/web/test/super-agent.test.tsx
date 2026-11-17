@@ -22,6 +22,12 @@ describe('SOP graph view', () => {
     expect(zh).toContain('数字岗位与工作量');
     expect(zh).toContain('确认并发布配置，生成数字员工');
     expect(zh).toContain('启用前请确认这三项');
+    expect(zh).toContain('设定交给数字团队的工作、必须遵守的边界，并生成数字岗位');
+    expect(zh).toContain('企业配置');
+    expect(zh).toContain('团队与流程就绪');
+    expect(zh).not.toContain('业务目标');
+    expect(zh).not.toContain('运行就绪情况');
+    expect(zh).not.toContain('企业上下文与运行流程');
     expect(zh).toContain('高级：MCP 知识');
     expect(zh).not.toMatch(/role="tab"[^>]*>MCP 知识/);
     const en = renderToStaticMarkup(<SuperAgentPage />);

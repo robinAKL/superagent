@@ -88,7 +88,7 @@ interface DraftViewProps { knowledge: DraftRead; retryKnowledge: () => void }
 const READ_TIMEOUT_MS = 15_000;
 const TEXT = {
   en: {
-    title: 'Super Agent', subtitle: 'Company context and operating workflows',
+    title: 'Super Agent', subtitle: 'Set the work for the digital team, the boundaries they must keep, and the roles to generate',
     tabConfig: 'Company setup & digital org', tabFlow: 'Company workflows',
     allDrafts: 'All analysis drafts', context: 'Company context', candidates: 'Workflow candidates', useCandidate: 'Open in workflow editor',
     noStepMap: 'Run analysis again to generate source-backed steps for this workflow.',
@@ -115,7 +115,7 @@ const TEXT = {
     employeeDraft: 'Role', toolDraft: 'Tool',
   },
   zh: {
-    title: '超级智能体', subtitle: '企业上下文与运行流程',
+    title: '超级智能体', subtitle: '设定交给数字团队的工作、必须遵守的边界，并生成数字岗位',
     tabConfig: '企业配置与数字组织', tabFlow: '企业流程',
     allDrafts: '所有分析草案', context: '企业上下文', candidates: '候选流程', useCandidate: '在流程编辑器中打开',
     noStepMap: '重新分析来源，即可为这个流程生成带依据的步骤。',
