@@ -346,7 +346,21 @@ export function EmployeesPage() {
       setError(key ? planT(key) : describe(caught));
     } finally { setBusy(false); setPlanning(false); }
   }
-  const adoptPlan = (planId: string) => void run(() => post('/organization/plan/adopt', { planId }), planT('afterAdopt')).then(ok => { if (ok) setPlanFallback(false); });
+  const adoptPlan = (planId: string) => void (async () => {
+    setBusy(true); setError(null); setNotice(null);
+    try {
+      const result = await post('/organization/plan/adopt', { planId }) as { createdEmployees?: number; createdTools?: number; retiredEmployees?: number; busyEmployees?: string[] };
+      setPlanFallback(false);
+      if (result.createdEmployees != null) {
+        const done = result.retiredEmployees
+          ? t('confirmedRetired', { e: result.createdEmployees, r: result.retiredEmployees, t: result.createdTools ?? 0 })
+          : t('confirmed', { e: result.createdEmployees, t: result.createdTools ?? 0 });
+        setNotice(result.busyEmployees?.length ? `${done} ${t('busyKept', { names: result.busyEmployees.join(t('sep')) })}` : done);
+      } else setNotice(planT('afterAdopt'));
+      await load();
+    } catch (caught) { setError(describe(caught)); }
+    finally { setBusy(false); }
+  })();
   const discardPlan = () => void run(() => post('/organization/plan/discard'), '').then(() => setPlanFallback(false));
   async function confirm() {
     setBusy(true); setError(null); setNotice(null);

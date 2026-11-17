@@ -4,7 +4,7 @@ import { useT } from '../i18n';
 /**
  * "Team size" on Digital employees: the owner types how many roles they want and the super agent re-plans the
  * role drafts to exactly that number. The proposal is a preview with its provenance (which roles each new one
- * comes from); nothing changes until it is adopted, and the team is then confirmed as usual.
+ * comes from). Preview does not change the live team. Adopting a plan when a team already exists also confirms it.
  */
 export interface TeamPlanView {
   id: string; target: number; method: 'model' | 'merge'; createdAt: string; stale: boolean; replaces: number; editedReplaced: number;
@@ -21,7 +21,7 @@ export const PLAN_TEXT = {
     replaces: 'Replaces all {n} current roles', editedWarn: '{n} of them were edited by you; their edits guided this plan but the roles themselves will be replaced.',
     mergedFrom: 'Merged from: {list}', splitFrom: 'Split from: {list}', keptFrom: 'From: {list}',
     tools: 'Tools', sops: 'Workflows', none: 'None',
-    adopt: 'Use this plan', discard: 'Discard', afterAdopt: 'After using it, confirm the organization to update the team.',
+    adopt: 'Use this plan and update the live team', discard: 'Discard', afterAdopt: 'The live team is updated in this step.',
     stale: 'The roles changed after this proposal was made. Plan again.',
     fallback: 'Super Agent was not available, so roles that share the most work were merged instead.',
     error_split_needs_model: 'More roles means splitting responsibilities, which needs Super Agent. Configure a model in Admin settings first.',
@@ -41,7 +41,7 @@ export const PLAN_TEXT = {
     replaces: '将替换当前全部 {n} 个岗位', editedWarn: '其中 {n} 个是你改过的；你的修改已作为规划依据，但这些岗位本身会被替换。',
     mergedFrom: '合并自：{list}', splitFrom: '拆分自：{list}', keptFrom: '来自：{list}',
     tools: '工具', sops: '流程', none: '暂无',
-    adopt: '采用这个方案', discard: '放弃', afterAdopt: '采用后请「确认组织」更新团队。',
+    adopt: '采用这个方案并更新正式团队', discard: '放弃', afterAdopt: '正式团队会在这一步按方案更新。',
     stale: '规划之后岗位有变化，请重新规划。',
     fallback: '超级智能体暂不可用，已改为把职责重叠最多的岗位合并。',
     error_split_needs_model: '增加人数需要超级智能体拆分职责，请先在「管理设置」里配置模型。',

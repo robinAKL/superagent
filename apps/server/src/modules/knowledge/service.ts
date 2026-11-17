@@ -606,55 +606,58 @@ export class KnowledgeService {
    */
   async confirmOrganization(ctx: UserContext) {
     requireManager(ctx);
+    if (!this.deps.organization) throw new KnowledgeError('organization_unavailable', '数字员工服务暂不可用。', 503);
+    return this.deps.repo.transact(ctx, s => this.applyConfirmedOrganization(s, ctx));
+  }
+  /** Writes the current role draft into the employee registry. Caller already holds the knowledge transaction. */
+  private applyConfirmedOrganization(s: KnowledgeState, ctx: UserContext) {
     const sink = this.deps.organization;
     if (!sink) throw new KnowledgeError('organization_unavailable', '数字员工服务暂不可用。', 503);
-    return this.deps.repo.transact(ctx, s => {
-      const draft = this.organizationDraft(s, ctx), block = this.organizationBlock(s, ctx, draft.employees.length);
-      if (block === 'analysis_running') throw new KnowledgeError(block, '分析仍在进行，完成后再确认组织。', 409);
-      if (block === 'analysis_stale') throw new KnowledgeError(block, '资料在分析期间发生变化，请重新分析后再确认。', 409);
-      if (block === 'no_employees') throw new KnowledgeError(block, '组织草案里还没有岗位。', 409);
-      const org = s.organization ?? { confirmedAt: '', confirmedBy: '', revision: 0, employees: {}, tools: {} };
-      let createdEmployees = 0, createdTools = 0;
-      for (const e of draft.employees) {
-        const result = sink.ensureEmployee({ recId: e.id, name: e.name, duty: e.duty, prompt: e.prompt, owner: ctx.userId, manual: e.origin === 'manual' });
-        if (result.created && !org.employees[e.id]) createdEmployees++;
-        org.employees[e.id] = { employeeId: result.employeeId, name: e.name, duty: e.duty, prompt: e.prompt };
-        (org.created ??= {})[result.employeeId] = e.name;
-      }
-      // Roles that left the draft (merged, deleted, replaced by a team plan) leave the confirmed team too. That also
-      // covers employees an earlier confirmation created that no record points at any more (e.g. from before roles
-      // were retired). Someone with work in progress cannot be removed; they are reported, not silently kept.
-      let retiredEmployees = 0;
-      const busyEmployees: string[] = [];
-      for (const [recId, done] of Object.entries(org.employees)) {
-        if (draft.employees.some(e => e.id === recId)) continue;
-        if (sink.retireEmployee?.(done.employeeId) ?? true) { delete org.employees[recId]; retiredEmployees++; }
-        else busyEmployees.push(done.name);
-      }
-      // Only this tenant's own employees are candidates: those its confirmations recorded, and the ids its own
-      // role drafts map to (covers confirmations from before the record existed). The registry itself is shared.
-      const current = new Set(Object.values(org.employees).map(e => e.employeeId));
-      const mine = new Map<string, string>(Object.entries(org.created ?? {}));
-      for (const r of s.recommendations) if (r.kind === 'employee') { const id = orgEmployeeId(r.id); if (!mine.has(id)) mine.set(id, r.name); }
-      for (const [id, name] of mine) {
-        if (current.has(id) || !sink.present('employee', id)) { if (!current.has(id)) delete org.created?.[id]; continue; }
-        if (sink.retireEmployee?.(id) ?? false) { retiredEmployees++; delete org.created?.[id]; }
-        else busyEmployees.push(name);
-      }
-      for (const t of draft.tools) {
-        const known = org.tools[t.id];
-        if (known?.match === 'existing') continue;
-        const match = known ? null : sink.matchTool(t.name, t.description);
-        if (match) { org.tools[t.id] = { toolId: match.toolId, name: t.name, match: 'existing' }; continue; }
-        const consumers = draft.employees.filter(e => e.tools.includes(t.key)).map(e => org.employees[e.id]!.employeeId);
-        const placeholder = sink.ensureToolPlaceholder({ recId: t.id, name: t.name, purpose: t.description, consumers, maintainer: ctx.userId });
-        if (placeholder.created && !known) createdTools++;
-        org.tools[t.id] = { toolId: placeholder.toolId, name: t.name, match: 'placeholder', purpose: t.description.slice(0, 1000), consumers };
-      }
-      Object.assign(org, { confirmedAt: stamp(), confirmedBy: ctx.userId, revision: org.revision + 1 });
-      s.organization = org;
-      return { revision: org.revision, employees: Object.values(org.employees), tools: Object.values(org.tools), createdEmployees, createdTools, retiredEmployees, busyEmployees };
-    });
+    const draft = this.organizationDraft(s, ctx), block = this.organizationBlock(s, ctx, draft.employees.length);
+    if (block === 'analysis_running') throw new KnowledgeError(block, '分析仍在进行，完成后再确认组织。', 409);
+    if (block === 'analysis_stale') throw new KnowledgeError(block, '资料在分析期间发生变化，请重新分析后再确认。', 409);
+    if (block === 'no_employees') throw new KnowledgeError(block, '组织草案里还没有岗位。', 409);
+    const org = s.organization ?? { confirmedAt: '', confirmedBy: '', revision: 0, employees: {}, tools: {} };
+    let createdEmployees = 0, createdTools = 0;
+    for (const e of draft.employees) {
+      const result = sink.ensureEmployee({ recId: e.id, name: e.name, duty: e.duty, prompt: e.prompt, owner: ctx.userId, manual: e.origin === 'manual' });
+      if (result.created && !org.employees[e.id]) createdEmployees++;
+      org.employees[e.id] = { employeeId: result.employeeId, name: e.name, duty: e.duty, prompt: e.prompt };
+      (org.created ??= {})[result.employeeId] = e.name;
+    }
+    // Roles that left the draft (merged, deleted, replaced by a team plan) leave the confirmed team too. That also
+    // covers employees an earlier confirmation created that no record points at any more (e.g. from before roles
+    // were retired). Someone with work in progress cannot be removed; they are reported, not silently kept.
+    let retiredEmployees = 0;
+    const busyEmployees: string[] = [];
+    for (const [recId, done] of Object.entries(org.employees)) {
+      if (draft.employees.some(e => e.id === recId)) continue;
+      if (sink.retireEmployee?.(done.employeeId) ?? true) { delete org.employees[recId]; retiredEmployees++; }
+      else busyEmployees.push(done.name);
+    }
+    // Only this tenant's own employees are candidates: those its confirmations recorded, and the ids its own
+    // role drafts map to (covers confirmations from before the record existed). The registry itself is shared.
+    const current = new Set(Object.values(org.employees).map(e => e.employeeId));
+    const mine = new Map<string, string>(Object.entries(org.created ?? {}));
+    for (const r of s.recommendations) if (r.kind === 'employee') { const id = orgEmployeeId(r.id); if (!mine.has(id)) mine.set(id, r.name); }
+    for (const [id, name] of mine) {
+      if (current.has(id) || !sink.present('employee', id)) { if (!current.has(id)) delete org.created?.[id]; continue; }
+      if (sink.retireEmployee?.(id) ?? false) { retiredEmployees++; delete org.created?.[id]; }
+      else busyEmployees.push(name);
+    }
+    for (const t of draft.tools) {
+      const known = org.tools[t.id];
+      if (known?.match === 'existing') continue;
+      const match = known ? null : sink.matchTool(t.name, t.description);
+      if (match) { org.tools[t.id] = { toolId: match.toolId, name: t.name, match: 'existing' }; continue; }
+      const consumers = draft.employees.filter(e => e.tools.includes(t.key)).map(e => org.employees[e.id]!.employeeId);
+      const placeholder = sink.ensureToolPlaceholder({ recId: t.id, name: t.name, purpose: t.description, consumers, maintainer: ctx.userId });
+      if (placeholder.created && !known) createdTools++;
+      org.tools[t.id] = { toolId: placeholder.toolId, name: t.name, match: 'placeholder', purpose: t.description.slice(0, 1000), consumers };
+    }
+    Object.assign(org, { confirmedAt: stamp(), confirmedBy: ctx.userId, revision: org.revision + 1 });
+    s.organization = org;
+    return { revision: org.revision, employees: Object.values(org.employees), tools: Object.values(org.tools), createdEmployees, createdTools, retiredEmployees, busyEmployees };
   }
   private planSources(s: KnowledgeState, ctx: UserContext) {
     const draft = this.organizationDraft(s, ctx);
@@ -724,6 +727,7 @@ export class KnowledgeService {
       if (!plan || plan.id !== planId || plan.createdBy !== ctx.userId) throw new KnowledgeError('plan_not_found', '这个方案已不存在，请重新规划。', 404);
       const { basis } = this.planSources(s, ctx);
       if (JSON.stringify(basis) !== JSON.stringify(plan.basis)) throw new KnowledgeError('plan_stale', '岗位草案在规划后有变化，请重新规划。', 409);
+      const hadTeam = !!s.organization;
       const sources = new Map(s.recommendations.filter(r => basis.includes(r.id)).map(r => [r.id, r]));
       const created = plan.roles.map((role, index) => {
         const from = role.from.map(rid => sources.get(rid)!).filter(Boolean);
@@ -744,7 +748,8 @@ export class KnowledgeService {
         old.mergedInto = created.find(c => plan.roles[created.indexOf(c)]!.from.includes(old.id))?.id;
       }
       delete s.teamPlan;
-      return { adopted: plan.id, roles: created.map(r => ({ id: r.id, name: r.name })) };
+      const confirmed = hadTeam ? this.applyConfirmedOrganization(s, ctx) : null;
+      return { adopted: plan.id, roles: created.map(r => ({ id: r.id, name: r.name })), ...confirmed };
     });
   }
   async adoptRecommendation(ctx: UserContext, recId: string) {
