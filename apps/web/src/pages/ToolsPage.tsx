@@ -386,7 +386,7 @@ export function ToolsPage() {
         <div className="tool-store-head">
           <label className="tool-store-filter">
             <span>{t('store.search')}</span>
-            <input value={query} onChange={e => setQuery(e.target.value)} placeholder={t('store.searchPlaceholder')} />
+            <input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder={t('store.searchPlaceholder')} />
           </label>
           <label className="tool-store-filter">
             <span>{t('store.category')}</span>
@@ -402,7 +402,8 @@ export function ToolsPage() {
         <div className="tool-store-grid">
           {catalog.filter(item => {
             const q = query.trim().toLowerCase();
-            const matchQ = !q || item.toolId.toLowerCase().includes(q) || item.name[lang].toLowerCase().includes(q);
+            const label = (item.name?.[lang] ?? item.toolId).toLowerCase();
+            const matchQ = !q || item.toolId.toLowerCase().includes(q) || label.includes(q);
             return matchQ && (category === 'all' || item.effect === category);
           }).map((item) => {
             const picking = installingToolId === item.toolId;
