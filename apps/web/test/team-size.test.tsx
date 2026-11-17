@@ -20,7 +20,7 @@ describe('team size planner', () => {
     const html = render('zh', <TeamSizePlanner current={3} busy={false} planning={false} onPlan={() => undefined} />);
     expect(html).toContain('当前 3 个岗位');
     expect(html).toMatch(/type="number"[^>]*value="3"/);
-    expect(html).toMatch(/<button class="btn primary" disabled="">按人数重新规划<\/button>/);
+    expect(html).toMatch(/<button class="btn primary" type="button" disabled="">按人数重新规划<\/button>/);
     expect(html).toContain('已经是这个人数。');
   });
 
