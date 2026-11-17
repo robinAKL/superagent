@@ -131,12 +131,13 @@ test('ontology renders objects, a relation and their evidence on the real page (
   const canvas = ontology.getByRole('img', { name: /个实体 ·/ });
   await expect(canvas.locator('.onto-node')).toHaveCount(4); // 2 objects + employee + source document
   await expect(canvas.getByLabel('应付专员, 数字员工')).toBeVisible();
-  await expect(canvas.locator('.onto-link-line')).toHaveAttribute('marker-end', /onto-arrow/);
+  await expect(canvas.locator('.onto-link-line').first()).toHaveAttribute('marker-end', /onto-arrow/);
   const inspector = ontology.locator('.onto-panel');
   await inspector.getByRole('button', { name: /供应商发票/ }).click();
   await expect(inspector).toContainText('采购制度.md#L3');
   await expect(inspector).toContainText('供应商发票须附采购单号');
-  await inspector.getByRole('button', { name: /须匹配.*采购单/ }).click();
+  await expect(inspector.locator('.onto-rel-table')).toBeVisible();
+  await inspector.getByRole('button', { name: '须匹配', exact: true }).click();
   await expect(inspector).toContainText('采购制度.md#L12');
   await expect(inspector).toContainText('付款前发票须与采购单金额一致');
 
