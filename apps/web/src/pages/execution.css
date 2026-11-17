@@ -110,6 +110,7 @@
 .room-head-btn[aria-expanded="true"] { border-color: var(--color-accent); color: var(--color-accent); }
 .room .command-workflows { padding: var(--space-xs) var(--space-md); }
 .room .exec-approvals { border-left: 3px solid var(--color-warning); }
+/* Conversation fills leftover width; the task board stays a 336px column (DoD 320–360). */
 .room .exec-grid { grid-template-columns: minmax(0, 1fr) 336px; gap: var(--space-lg); }
 .room .exec-grid:has(.exec-drawer) { grid-template-columns: minmax(0, 1fr) 280px minmax(280px, 340px); }
 .room .exec-pane { padding: 0; overflow: hidden; }

@@ -212,7 +212,7 @@ export function SuperAgentPage() {
     return () => { cancelled = true; };
   }, []);
   const candidates: LoadCount = knowledge.status !== 'ready' ? { status: knowledge.status } : { status: 'ready', count };
-  const { sub: sopSub } = sopTabView(saved, candidates, workflowId || candidate ? 'flows' : 'auto');
+  const { sub: sopSub, waiting: sopWaiting } = sopTabView(saved, candidates, workflowId || candidate ? 'flows' : 'auto');
   return (
     <>
       <header className="page-head">
@@ -231,7 +231,9 @@ export function SuperAgentPage() {
           {typeof window === 'undefined' ? null : <McpKnowledge />}
         </details>
       </> :
-        tab === 'sop' ? (sopSub === 'candidates' && !workflowId && !candidate
+        tab === 'sop' ? (sopWaiting
+          ? <p className="helper" role="status">{t('loadingSops')}</p>
+          : sopSub === 'candidates' && !workflowId && !candidate
           ? <AnalysisResults knowledge={knowledge} retryKnowledge={retryKnowledge} initialKind="" fromOrganization={fromOrganization} />
           : <SopWorkspace key={`${workflowId}|${candidate}`} initialSop={workflowId} candidate={candidate} knowledge={knowledge} retryKnowledge={retryKnowledge} />) :
         tab === 'ontology' ? <OntologyView knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
