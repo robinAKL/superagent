@@ -42,6 +42,7 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
 
   await test.step('company context is saved and reloaded from the Super Agent entry point', async () => {
     await page.goto('/#brain');
+    await expect(page.getByLabel('企业名称')).toBeEnabled();
     await page.getByLabel('企业名称').fill('测试财务部');
     await page.getByLabel('希望交给数字团队的工作').fill('核对供应商发票并完成付款登记');
     await page.getByLabel('必须遵守的边界').fill('审批人确认后才能登记付款');
@@ -122,7 +123,8 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
     await expect(run.locator('[data-run-status]')).toHaveText('已阻塞');
     await expect(run.locator('[data-step="t"]')).toContainText('缺少必填字段：amount');
     await expect(run.locator('[data-step="t"]')).toContainText('负责人');
-    await expect(run).toContainText('企业上下文 v1');
+    const context = await json<{ context: { version: number } }>(page.request.get('/api/v1/sop/company-context'));
+    await expect(run).toContainText(`企业上下文 v${context.context.version}`);
     const originalRunId = await run.getAttribute('data-run');
     await page.reload();
     await run.getByLabel('amount').fill('480');
