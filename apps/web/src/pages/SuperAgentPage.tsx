@@ -8,8 +8,10 @@ import { graphFromWorkflow, legacyWorkflow, knowledgeImpact, packFromRecommendat
 import { McpKnowledge } from './McpKnowledge';
 import { AnalysisDraftIndex } from './AnalysisDraftIndex';
 import { CompanyContextPanel } from './CompanyContextPanel';
+import { OrganizationPublish } from './OrganizationPublish';
 import { ExecutionsPanel } from './ExecutionsPanel';
 import './SuperAgentPage.css';
+import './EmployeesPage.css';
 
 /** Contract agreed with the SOP runtime (T-41): /api/v1/sop. */
 interface GateReport {
@@ -87,6 +89,7 @@ const READ_TIMEOUT_MS = 15_000;
 const TEXT = {
   en: {
     title: 'Super Agent', subtitle: 'Company context and operating workflows',
+    tabConfig: 'Company setup & digital org', tabFlow: 'Company workflows',
     allDrafts: 'All analysis drafts', context: 'Company context', candidates: 'Workflow candidates', useCandidate: 'Open in workflow editor',
     noStepMap: 'Run analysis again to generate source-backed steps for this workflow.',
     legacyStepMap: 'Sequence from an earlier analysis. Analyze again to add evidence and assignments to each step.',
@@ -96,7 +99,7 @@ const TEXT = {
     stepDetails: 'Step details', currentStage: 'Current stage {stage}', openTool: 'Open tool card', openEmployee: 'Open employee',
     stepName: 'Step name', publishedFlow: 'View the published workflow', closeNode: 'Remove node',
     workflowTitle: 'Workflow name', completion: 'Expected deliverable', runWorkflow: 'Open in command room',
-    results: 'Analysis results', sop: 'Workflows', ontology: 'Ontology', mcp: 'MCP knowledge',
+    results: 'Analysis results', sop: 'Workflows', ontology: 'Ontology', mcp: 'MCP knowledge', mcpAdvanced: 'Advanced: MCP knowledge',
     loadingDrafts: 'Loading analysis drafts…', draftError: 'Could not load analysis drafts.',
     retry: 'Try again', loadingSops: 'Loading workflows…', sopError: 'Could not load workflows.',
     privateDraft: 'Private MCP draft',
@@ -113,6 +116,7 @@ const TEXT = {
   },
   zh: {
     title: '超级智能体', subtitle: '企业上下文与运行流程',
+    tabConfig: '企业配置与数字组织', tabFlow: '企业流程',
     allDrafts: '所有分析草案', context: '企业上下文', candidates: '候选流程', useCandidate: '在流程编辑器中打开',
     noStepMap: '重新分析来源，即可为这个流程生成带依据的步骤。',
     legacyStepMap: '这是上次分析中记录的步骤顺序。重新分析可补齐逐节点依据和岗位工具。',
@@ -122,7 +126,7 @@ const TEXT = {
     stepDetails: '节点详情', currentStage: '当前阶段 {stage}', openTool: '打开工具卡', openEmployee: '查看员工',
     stepName: '步骤名称', publishedFlow: '查看已发布流程', closeNode: '从草稿删除此节点',
     workflowTitle: '流程名称', completion: '预期交付', runWorkflow: '在指挥室运行',
-    results: '分析结果', sop: '流程', ontology: '本体关系', mcp: 'MCP 知识',
+    results: '分析结果', sop: '流程', ontology: '本体关系', mcp: 'MCP 知识', mcpAdvanced: '高级：MCP 知识',
     loadingDrafts: '正在读取分析草案…', draftError: '无法读取分析草案。',
     retry: '重试', loadingSops: '正在读取流程…', sopError: '无法读取流程列表。',
     privateDraft: '仅自己可见的 MCP 草案',
@@ -142,7 +146,8 @@ const DRAFT_KIND: Record<string, keyof typeof TEXT.en> = {
   sop: 'sopDraft', object: 'objectDraft', relation: 'relationDraft', employee: 'employeeDraft', tool: 'toolDraft',
 };
 type AgentTab = 'context' | 'results' | 'sop' | 'ontology' | 'mcp';
-const TABS: readonly AgentTab[] = ['context', 'results', 'sop', 'ontology', 'mcp'];
+const PRIMARY_TABS: readonly AgentTab[] = ['context', 'sop'];
+const TABS: readonly AgentTab[] = ['context', 'sop', 'results', 'ontology', 'mcp'];
 
 function agentLocation() {
   const params = new URLSearchParams(typeof window === 'undefined' ? undefined : window.location.hash.split('?')[1]);
@@ -221,11 +226,18 @@ export function SuperAgentPage() {
         <p>{t('subtitle')}</p>
       </div>
       <div className="tabs" role="tablist" aria-label={t('title')}>
-        {TABS.map(entry => <button key={entry} role="tab" type="button" aria-selected={tab === entry} className="tab" onClick={() => {
+        {PRIMARY_TABS.map(entry => <button key={entry} role="tab" type="button" aria-selected={tab === entry || (entry === 'context' && (tab === 'mcp' || tab === 'ontology')) || (entry === 'sop' && tab === 'results')} className="tab" onClick={() => {
           if (tab !== entry) window.location.hash = entry === 'context' ? 'brain' : `brain?tab=${entry}${fromOrganization ? '&org=1' : ''}`;
-        }}>{t(entry === 'results' ? 'candidates' : entry)}{entry === 'results' && count ? ` (${count})` : ''}</button>)}
+        }}>{t(entry === 'context' ? 'tabConfig' : 'tabFlow')}{entry === 'sop' && count ? ` (${count})` : ''}</button>)}
       </div>
-      {tab === 'context' ? <CompanyContextPanel fromOrganization={fromOrganization} /> :
+      {tab === 'context' ? <>
+        <CompanyContextPanel fromOrganization={fromOrganization} />
+        <OrganizationPublish />
+        <details className="panel stack agent-mcp-advanced">
+          <summary>{t('mcpAdvanced')}</summary>
+          {typeof window === 'undefined' ? null : <McpKnowledge />}
+        </details>
+      </> :
         tab === 'sop' ? <SopWorkspace key={`${workflowId}|${candidate}`} initialSop={workflowId} candidate={candidate} knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
         tab === 'ontology' ? <OntologyView knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
         tab === 'results' ? <AnalysisResults key={draftType} knowledge={knowledge} retryKnowledge={retryKnowledge} initialKind={draftType} fromOrganization={fromOrganization} /> : <McpKnowledge />}
