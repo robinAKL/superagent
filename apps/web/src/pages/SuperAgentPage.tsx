@@ -58,6 +58,7 @@ interface Recommendation {
   description: string;
   evidence: Evidence[];
   relation?: { from: string; to: string; label: string };
+  assignment?: { tools: string[]; sops: string[] };
   workflow?: RecommendedWorkflow;
 }
 

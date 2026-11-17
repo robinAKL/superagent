@@ -22,6 +22,7 @@ interface Recommendation {
   proposedChange?: { name: string; description: string; evidence?: Evidence[] }; evidence: Evidence[];
   relation?: { from: string; to: string; label: string };
   recordedAt?: string; effectiveFrom?: string; effectiveTo?: string;
+  assignment?: { tools: string[]; sops: string[] };
   origin?: 'manual' | 'inferred';
 }
 interface Overview {
@@ -188,7 +189,7 @@ const TEXT = {
     viewAgentContext: 'View Super Agent context',
     sopIntro: 'A workflow is one kind of knowledge. The flowchart defines triggers and execution order; the ontology graph defines objects and relationships. Nodes reuse roles, tools, human roles and sources.',
     sopFlows: 'Published & draft graphs', sopCandidates: 'Extract SOP from knowledge', sopSwitch: 'Workflow view',
-    graphIntro: 'The graph shows concrete business objects and the relationships the sources support. Select a node to see its sources.',
+    graphIntro: 'The graph shows concrete entities and evidenced relationships. Select a node for identity, time and sources; the relationship table is keyboard-operable.',
     closeSources: 'Back to materials',
     analysisHistory: 'Earlier runs',
     analysisSourceOptions: 'MCP source options ({count} selected)',
@@ -438,7 +439,7 @@ const TEXT = {
     viewAgentContext: '查看超级智能体上下文',
     sopIntro: '工作流是知识的一种。流程图定义触发与执行顺序；本体关系图定义对象与关系。节点复用岗位、工具、人类角色和来源标识。',
     sopFlows: '已发布图与草稿图', sopCandidates: '从知识提取 SOP', sopSwitch: '工作流视图',
-    graphIntro: '图表达具体实体与有证据的关系。选中节点查看属性与来源。',
+    graphIntro: '图表达具体实体与有证据的关系。选择节点查看标识、时间与来源；关系表可键盘操作。',
     closeSources: '返回资料',
     analysisHistory: '历史分析',
     analysisSourceOptions: 'MCP 来源设置（已选 {count} 个）',
@@ -1358,7 +1359,7 @@ export function KnowledgePage() {
 
       {view === 'graph' ? <section className="panel knowledge-section knowledge-graph-tab" aria-labelledby="knowledge-graph-heading">
         <div className="knowledge-section-head"><div><h2 id="knowledge-graph-heading">{t('workspaceGraph')}</h2><p className="helper">{t('graphIntro')}</p></div></div>
-        <OntologyGraphView shared={timedDrafts.filter(draft => !('privateMcp' in draft) && !draft.stale && draft.evidence.length > 0)}
+        <OntologyGraphView time={time} shared={timedDrafts.filter(draft => !('privateMcp' in draft) && !draft.stale && draft.evidence.length > 0)}
           personal={timedDrafts.filter(draft => 'privateMcp' in draft && !draft.stale && draft.evidence.length > 0)} />
       </section> : null}
 
