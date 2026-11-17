@@ -18,6 +18,7 @@ import { liveMcpSelection, type LiveMcpKnowledge } from './live-mcp.js';
 import { MAX_MCP_ANALYSIS_SOURCES, mcpEvidenceValid, mcpSelectionsCurrent } from './mcp-analysis.js';
 import type { AnalysisGateway } from '../analysis/gateway-model.js';
 import type { OrganizationSink } from '../employees/organization.js';
+import { mergeByOverlap, TEAM_SIZE_MAX, TeamPlanError, validateTeamPlan, type PlanRole, type PlanSourceRole, type TeamPlan } from './team-plan.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
   plugins?: Record<string, KnowledgeSourcePlugin>;
@@ -588,9 +589,10 @@ export class KnowledgeService {
     const changed = !!org && draft.employees.some(e => {
       const done = org.employees[e.id];
       return !done || done.name !== e.name || done.duty !== e.duty || done.prompt !== e.prompt;
-    }) || draft.tools.some(t => !org?.tools[t.id]);
+    }) || draft.tools.some(t => !org?.tools[t.id]) || (!!org && Object.keys(org.employees).some(recId => !draft.employees.some(e => e.id === recId)));
     return {
       ...draft,
+      teamPlan: this.teamPlanView(s, ctx),
       confirmation: org ? { confirmedAt: org.confirmedAt, confirmedBy: org.confirmedBy, revision: org.revision, employees: Object.keys(org.employees).length, tools: Object.keys(org.tools).length } : null,
       changedSinceConfirmation: changed, missing,
       blocked: this.organizationBlock(s, ctx, draft.employees.length),
@@ -617,6 +619,12 @@ export class KnowledgeService {
         if (result.created && !org.employees[e.id]) createdEmployees++;
         org.employees[e.id] = { employeeId: result.employeeId, name: e.name, duty: e.duty, prompt: e.prompt };
       }
+      // Roles that left the draft (merged, deleted, replaced by a team plan) leave the confirmed team too.
+      let retiredEmployees = 0;
+      for (const [recId, done] of Object.entries(org.employees)) {
+        if (draft.employees.some(e => e.id === recId)) continue;
+        if (sink.retireEmployee?.(done.employeeId) ?? true) { delete org.employees[recId]; retiredEmployees++; }
+      }
       for (const t of draft.tools) {
         const known = org.tools[t.id];
         if (known?.match === 'existing') continue;
@@ -629,7 +637,98 @@ export class KnowledgeService {
       }
       Object.assign(org, { confirmedAt: stamp(), confirmedBy: ctx.userId, revision: org.revision + 1 });
       s.organization = org;
-      return { revision: org.revision, employees: Object.values(org.employees), tools: Object.values(org.tools), createdEmployees, createdTools };
+      return { revision: org.revision, employees: Object.values(org.employees), tools: Object.values(org.tools), createdEmployees, createdTools, retiredEmployees };
+    });
+  }
+  private planSources(s: KnowledgeState, ctx: UserContext) {
+    const draft = this.organizationDraft(s, ctx);
+    const roles: PlanSourceRole[] = draft.employees.map(e => ({ id: e.id, name: e.name, duty: e.duty, tools: e.tools, sops: e.sops, edited: e.humanLocked }));
+    return { draft, roles, basis: roles.map(r => r.id).sort() };
+  }
+  private teamPlanView(s: KnowledgeState, ctx: UserContext) {
+    const plan = s.teamPlan;
+    if (!plan || plan.createdBy !== ctx.userId) return null;
+    const { roles, basis } = this.planSources(s, ctx);
+    const stale = JSON.stringify(basis) !== JSON.stringify(plan.basis);
+    return { ...plan, stale, replaces: roles.length, editedReplaced: roles.filter(r => r.edited).length };
+  }
+  /**
+   * "按人数重新规划": proposes exactly `count` roles from the current role drafts. The super agent (analysis model)
+   * merges or splits; without a model, shrinking falls back to merging the roles that share the most work.
+   * The proposal is stored for preview only — nothing changes until the owner adopts it.
+   */
+  async planTeam(ctx: UserContext, input: Record<string, unknown>) {
+    requireManager(ctx);
+    const count = input.count;
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > TEAM_SIZE_MAX) throw new KnowledgeError('invalid_team_size', `团队规模必须是 1 到 ${TEAM_SIZE_MAX} 之间的整数。`);
+    const state = await this.deps.repo.read(ctx);
+    const { draft, roles, basis } = this.planSources(state, ctx);
+    if (!roles.length) throw new KnowledgeError('no_employees', '组织草案里还没有岗位。', 409);
+    if (count === roles.length) throw new KnowledgeError('team_size_unchanged', '团队已经是这个人数。', 409);
+    const toolKeys = draft.tools.map(t => t.key), sopKeys = draft.sops.map(p => p.key);
+    let planned: PlanRole[] | null = null, method: TeamPlan['method'] = 'model', modelError: string | null = null;
+    const model = this.deps.model;
+    if (model?.planTeam) {
+      try {
+        await this.requireModelReady(ctx);
+        const output = await model.planTeam({
+          tenantId: ctx.tenantId, taskId: id(), target: count, maxOutputTokens: 6000,
+          roles: roles.map(({ edited: _, ...r }) => r),
+          tools: draft.tools.map(t => ({ key: t.key, name: t.name, description: t.description })),
+          sops: draft.sops.map(p => ({ key: p.key, name: p.name, description: p.description })),
+        });
+        planned = validateTeamPlan(output, { target: count, roles, toolKeys, sopKeys });
+      } catch (error) {
+        modelError = error instanceof TeamPlanError ? error.code : error instanceof KnowledgeError ? error.code : 'plan_model_failed';
+      }
+    } else modelError = 'analysis_unavailable';
+    if (!planned) {
+      if (count > roles.length) throw new KnowledgeError(modelError === 'analysis_unavailable' || modelError?.startsWith('llm_') || modelError === 'model_not_selected' ? 'split_needs_model' : 'plan_failed',
+        modelError === 'analysis_unavailable' ? '增加人数需要超级智能体拆分职责，请先在设置中配置模型。' : '超级智能体没有给出可用的方案，请重试。', 503);
+      planned = mergeByOverlap(roles, count, { join: '、', more: (first, n) => `${first}等 ${n} 个岗位` });
+      method = 'merge';
+    }
+    const plan: TeamPlan = { id: id(), target: count, method, createdAt: stamp(), createdBy: ctx.userId, basis, roles: planned };
+    await this.deps.repo.transact(ctx, s => {
+      if (JSON.stringify(this.planSources(s, ctx).basis) !== JSON.stringify(basis)) throw new KnowledgeError('plan_stale', '岗位草案刚刚有变化，请重新规划。', 409);
+      s.teamPlan = plan;
+    });
+    return { plan: { ...plan, stale: false, replaces: roles.length, editedReplaced: roles.filter(r => r.edited).length }, fallbackReason: method === 'merge' ? modelError : null };
+  }
+  async discardTeamPlan(ctx: UserContext) {
+    requireManager(ctx);
+    return this.deps.repo.transact(ctx, s => { if (s.teamPlan?.createdBy === ctx.userId) delete s.teamPlan; return { discarded: true }; });
+  }
+  /** Adopting replaces every current role draft with the planned roles; they inherit the sources' evidence and scope. */
+  async adoptTeamPlan(ctx: UserContext, input: Record<string, unknown>) {
+    requireManager(ctx);
+    const planId = bounded(input.planId, 100, '方案');
+    return this.deps.repo.transact(ctx, s => {
+      const plan = s.teamPlan;
+      if (!plan || plan.id !== planId || plan.createdBy !== ctx.userId) throw new KnowledgeError('plan_not_found', '这个方案已不存在，请重新规划。', 404);
+      const { basis } = this.planSources(s, ctx);
+      if (JSON.stringify(basis) !== JSON.stringify(plan.basis)) throw new KnowledgeError('plan_stale', '岗位草案在规划后有变化，请重新规划。', 409);
+      const sources = new Map(s.recommendations.filter(r => basis.includes(r.id)).map(r => [r.id, r]));
+      const created = plan.roles.map((role, index) => {
+        const from = role.from.map(rid => sources.get(rid)!).filter(Boolean);
+        const evidence = [...new Map(from.flatMap(r => r.evidence).map(e => [JSON.stringify([e.sourceId, e.version, e.start, e.end]), e])).values()].slice(0, 12);
+        // A role built from a private MCP draft stays private to the same viewer.
+        const privateSource = from.find(r => r.mcpScope);
+        const rec: Recommendation = {
+          id: id(), key: `team-${plan.id.slice(0, 8)}-${index + 1}`, kind: 'employee', origin: evidence.length ? 'inferred' : 'manual',
+          name: role.name, description: role.duty, evidence, humanLocked: true, deleted: false,
+          assignment: { tools: role.tools, sops: role.sops },
+          ...(privateSource ? { mcpScope: privateSource.mcpScope, mcpRunId: privateSource.mcpRunId } : {}),
+        };
+        s.recommendations.push(rec);
+        return rec;
+      });
+      for (const old of sources.values()) {
+        old.deleted = true;
+        old.mergedInto = created.find(c => plan.roles[created.indexOf(c)]!.from.includes(old.id))?.id;
+      }
+      delete s.teamPlan;
+      return { adopted: plan.id, roles: created.map(r => ({ id: r.id, name: r.name })) };
     });
   }
   async adoptRecommendation(ctx: UserContext, recId: string) {

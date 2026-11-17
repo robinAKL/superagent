@@ -61,6 +61,8 @@ export interface KnowledgeState {
   /** Existing grants from the previous release, migrated on the user's next write. */
   veraMcp: Record<string, { grant?: { clientId: string; deadline: number; secret: SecretVersion } }>;
   organization?: OrganizationRecord;
+  /** A pending "team size" proposal (preview only until adopted). */
+  teamPlan?: import('./team-plan.js').TeamPlan;
 }
 export const emptyState = (): KnowledgeState => ({ spaceName: '企业知识', installedPlugins: ['local-file'], revision: 0, source: { connections: [], items: [], chunks: [], citations: [], flagged: [] }, connectionMeta: {}, confirmations: {}, analyses: [], recommendations: [], uploads: [], disabledPlugins: [], parseJobs: [], queryTemplates: [], profiles: {}, liveMcp: {}, veraMcp: {} });
 export const stamp = () => new Date().toISOString();

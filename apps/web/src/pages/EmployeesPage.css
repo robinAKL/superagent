@@ -83,3 +83,33 @@
   .org-bar .org-row .btn { flex: 1; text-align: center; }
 }
 .org-page a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+
+/* Team size: type how many roles you want; the super agent re-plans and shows a preview. */
+.team-size-panel { display: grid; gap: var(--space-md); padding: var(--space-md) var(--space-lg); }
+.team-size { display: flex; gap: var(--space-md); align-items: flex-end; justify-content: space-between; flex-wrap: wrap; }
+.team-size-text { display: grid; gap: 2px; flex: 1 1 320px; min-width: 0; }
+.team-size-text h2 { margin: 0; font-size: 16px; }
+.team-size-controls { display: flex; gap: var(--space-sm); align-items: flex-end; flex-wrap: wrap; }
+.team-size-field { display: grid; gap: var(--space-2xs); font-size: 13px; color: var(--color-muted); }
+.team-size-stepper { display: inline-flex; align-items: stretch; border: 1px solid var(--color-rule); border-radius: var(--radius-sm); overflow: hidden; background: var(--color-paper); height: var(--control); }
+.team-size-stepper button { width: 40px; border: 0; background: var(--color-well); color: var(--color-ink); font: inherit; font-size: 18px; cursor: pointer; }
+.team-size-stepper button:disabled { opacity: .4; cursor: not-allowed; }
+.team-size-stepper input { width: 64px; border: 0; background: transparent; color: var(--color-ink); text-align: center; font: inherit; font-size: 17px; font-weight: 600; -moz-appearance: textfield; }
+.team-size-stepper input::-webkit-outer-spin-button, .team-size-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.team-plan { display: grid; gap: var(--space-sm); border-top: 1px solid var(--color-soft-rule); padding-top: var(--space-md); }
+.team-plan-head { display: flex; gap: var(--space-sm); align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+.team-plan-head h3 { margin: 0; font-size: 16px; }
+.team-plan-roles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-sm); }
+.team-plan-roles li { display: grid; gap: var(--space-xs); align-content: start; border: 1px solid var(--color-soft-rule); border-left: 3px solid var(--color-accent); border-radius: var(--radius-sm); background: var(--color-paper); padding: var(--space-sm) var(--space-md); min-width: 0; }
+.team-plan-roles p { margin: 0; font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+.team-plan-role-head { display: grid; gap: 2px; }
+.team-plan-role-head strong { font-size: 15px; overflow-wrap: anywhere; }
+.team-plan-role-head small { color: var(--color-muted); font-size: 12px; overflow-wrap: anywhere; }
+.team-plan-foot { display: flex; gap: var(--space-sm); align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.team-plan-foot p { flex: 1 1 320px; margin: 0; }
+@media (max-width: 600px) {
+  .team-size-panel { padding: var(--space-sm) var(--space-md); }
+  .team-size-controls, .team-size-controls .btn { width: 100%; }
+  .team-size-field { flex: 1; }
+  .team-size-stepper input { flex: 1; width: auto; }
+}

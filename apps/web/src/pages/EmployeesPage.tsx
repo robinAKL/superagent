@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { api } from '../api';
 import { useLang, useT, type Dict } from '../i18n';
 import './EmployeesPage.css';
+import { PLAN_TEXT, planErrorKey, TeamPlanPreview, TeamSizePlanner, type TeamPlanView } from './TeamSizePlanner';
+import { translate } from '../i18n';
 
 /**
  * Digital employees = the organization draft (PRD §3.3 step 3 and §3.4). Step 2 of the main line:
@@ -23,6 +25,7 @@ interface Organization {
   changedSinceConfirmation: boolean; missing: number;
   blocked: 'analysis_running' | 'analysis_stale' | 'no_employees' | null;
   canConfirm: boolean;
+  teamPlan?: TeamPlanView | null;
 }
 
 export const TEXT = {
@@ -252,6 +255,9 @@ export function EmployeesPage() {
   const [error, setError] = useState<string | null>(null);
   const [newRole, setNewRole] = useState(''), [newDuty, setNewDuty] = useState('');
   const [removingTool, setRemovingTool] = useState<string | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [planFallback, setPlanFallback] = useState(false);
+  const planT = (key: keyof typeof PLAN_TEXT.en) => translate(PLAN_TEXT, lang, key);
 
   const describe = useCallback((caught: unknown) => {
     const code = caught instanceof RequestError ? caught.code : 'generic';
@@ -284,6 +290,19 @@ export function EmployeesPage() {
     event.preventDefault();
     if (await run(() => post('/manual-roles', { name: newRole.trim(), description: newDuty.trim() }), t('added'))) { setNewRole(''); setNewDuty(''); }
   }
+  async function planTeam(count: number) {
+    setBusy(true); setPlanning(true); setError(null); setNotice(null);
+    try {
+      const result = await post('/organization/plan', { count }) as { fallbackReason: string | null };
+      setPlanFallback(!!result.fallbackReason);
+      await load();
+    } catch (caught) {
+      const key = planErrorKey(caught instanceof RequestError ? caught.code : 'generic');
+      setError(key ? planT(key) : describe(caught));
+    } finally { setBusy(false); setPlanning(false); }
+  }
+  const adoptPlan = (planId: string) => void run(() => post('/organization/plan/adopt', { planId }), planT('afterAdopt')).then(ok => { if (ok) setPlanFallback(false); });
+  const discardPlan = () => void run(() => post('/organization/plan/discard'), '').then(() => setPlanFallback(false));
   async function confirm() {
     setBusy(true); setError(null); setNotice(null);
     try {
@@ -333,6 +352,11 @@ export function EmployeesPage() {
         <a className="btn" href="#knowledge">{t('goKnowledge')}</a>
       </div> : null}
       {!org.canConfirm ? <p className="helper">{t('noAccess')}</p> : null}
+      {org.canConfirm ? <div className="panel team-size-panel">
+        <TeamSizePlanner key={org.employees.length} current={org.employees.length} busy={busy} planning={planning} onPlan={count => void planTeam(count)} />
+        {org.teamPlan ? <TeamPlanPreview plan={org.teamPlan} roles={org.employees} tools={org.tools} sops={org.sops} busy={busy} fallback={planFallback}
+          onAdopt={() => adoptPlan(org.teamPlan!.id)} onDiscard={discardPlan} /> : null}
+      </div> : null}
 
       <div className="org-layout">
         <section className="org-roles" aria-labelledby="org-roles-title">

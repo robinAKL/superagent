@@ -12,17 +12,17 @@
 .onto-fit { font-size: 13px; }
 .onto-note { margin: 0; font-size: 12px; color: var(--color-warning); }
 
-.onto-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--space-md); align-items: stretch; min-width: 0; }
+.onto-body { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: var(--space-md); align-items: stretch; min-width: 0; }
 .onto-canvas { position: relative; min-width: 0; border: 1px solid var(--color-soft-rule); border-radius: var(--radius); overflow: hidden;
   background: radial-gradient(circle at 1px 1px, var(--color-soft-rule) 1px, transparent 0) 0 0 / 22px 22px, var(--color-paper); }
-.onto-canvas svg { display: block; width: 100%; cursor: grab; touch-action: pan-y; user-select: none; }
+.onto-canvas svg { display: block; width: 100%; height: clamp(560px, 74vh, 920px); cursor: grab; touch-action: pan-y; user-select: none; }
 .onto-canvas svg:active { cursor: grabbing; }
 .onto-hint { position: absolute; left: var(--space-sm); bottom: var(--space-xs); margin: 0; font-size: 11px; color: var(--color-subtle); pointer-events: none; }
 
 .onto-node { cursor: pointer; transition: opacity .15s; }
 .onto-node rect { fill: var(--color-paper-3); stroke: var(--color-rule); stroke-width: 1.2; transition: fill .15s, stroke .15s; }
 .onto-node circle { fill: var(--color-accent); }
-.onto-node text { fill: var(--color-ink); font-size: 13px; font-weight: 600; pointer-events: none; }
+.onto-node text { fill: var(--color-ink); font-size: 15px; font-weight: 600; pointer-events: none; }
 .onto-node:hover rect { stroke: var(--color-subtle); }
 .onto-node.is-selected rect { fill: color-mix(in srgb, var(--color-accent) 20%, var(--color-paper-3)); stroke: var(--color-accent); stroke-width: 2; }
 .onto-link-line { fill: none; stroke: var(--color-subtle); stroke-opacity: .55; stroke-width: 1.4; transition: stroke .15s, stroke-opacity .15s; }
@@ -31,14 +31,14 @@
 .onto-arrowhead.is-active { fill: var(--color-accent); fill-opacity: 1; }
 .onto-link-label { cursor: pointer; }
 .onto-link-label rect { fill: var(--color-paper-2); stroke: var(--color-soft-rule); }
-.onto-link-label text { fill: var(--color-muted); font-size: 11px; }
+.onto-link-label text { fill: var(--color-muted); font-size: 12.5px; }
 .onto-link.is-active .onto-link-line { stroke: var(--color-accent); stroke-opacity: 1; stroke-width: 2; }
 .onto-link.is-active .onto-link-label text { fill: var(--color-ink); }
 .onto-link.is-active .onto-link-label rect { stroke: var(--color-accent); }
 svg.has-selection .onto-node:not(.is-near) { opacity: .28; }
 svg.has-selection .onto-link:not(.is-active) { opacity: .18; }
 
-.onto-panel { display: flex; flex-direction: column; gap: var(--space-sm); min-width: 0; max-height: 560px; overflow: auto;
+.onto-panel { display: flex; flex-direction: column; gap: var(--space-sm); min-width: 0; max-height: clamp(560px, 74vh, 920px); overflow: auto;
   border: 1px solid var(--color-soft-rule); border-radius: var(--radius); background: var(--color-paper-2); padding: var(--space-md); }
 .onto-panel h3 { margin: 0; font-size: 17px; line-height: 1.4; overflow-wrap: anywhere; }
 .onto-panel h4 { margin: 0 0 var(--space-2xs); font-size: 13px; color: var(--color-muted); font-weight: 600; }
