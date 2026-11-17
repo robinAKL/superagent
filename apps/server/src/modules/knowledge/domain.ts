@@ -145,17 +145,17 @@ function calendarDay(value: string): boolean {
 export function datesInText(text: string): string[] {
   return [...text.matchAll(/\d{4}-\d{2}-\d{2}/g)].map(match => match[0]).filter(calendarDay);
 }
-/** Effective dates only when they appear in cited quotes — model output is checked, never invented. */
+/** Effective dates only when the quote states them as start/end — a meeting date in the quote is not enough. */
 export function validityOf(p: { effectiveFrom?: unknown; effectiveTo?: unknown; evidence: Evidence[] }): { effectiveFrom?: string; effectiveTo?: string } {
   const quotes = p.evidence.map(e => e.quote).join('\n');
   const allowed = new Set(datesInText(quotes));
-  const stated = (value: unknown) => typeof value === 'string' && calendarDay(value) && allowed.has(value) ? value : undefined;
-  const fromQuote = [...quotes.matchAll(/(?:自|从|from|生效|valid from)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:起|生效|开始)/gi)]
-    .map(match => match[1] ?? match[2]).find(day => day && allowed.has(day));
-  const toQuote = [...quotes.matchAll(/(?:至|到|until|止于|失效|截止)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:止|失效|截止)/gi)]
-    .map(match => match[1] ?? match[2]).find(day => day && allowed.has(day));
-  const effectiveFrom = stated(p.effectiveFrom) ?? fromQuote;
-  const effectiveTo = stated(p.effectiveTo) ?? toQuote;
+  const fromCited = new Set([...quotes.matchAll(/(?:自|从|from|生效|valid from)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:起|生效|开始)/gi)]
+    .map(match => match[1] ?? match[2]).filter((day): day is string => !!day && allowed.has(day)));
+  const toCited = new Set([...quotes.matchAll(/(?:至|到|until|止于|失效|截止)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:止|失效|截止)/gi)]
+    .map(match => match[1] ?? match[2]).filter((day): day is string => !!day && allowed.has(day)));
+  const pick = (value: unknown, cited: Set<string>) => typeof value === 'string' && cited.has(value) ? value : [...cited][0];
+  const effectiveFrom = pick(p.effectiveFrom, fromCited);
+  const effectiveTo = pick(p.effectiveTo, toCited);
   const out: { effectiveFrom?: string; effectiveTo?: string } = {};
   if (effectiveFrom) out.effectiveFrom = effectiveFrom;
   if (effectiveTo && (!effectiveFrom || effectiveTo >= effectiveFrom)) out.effectiveTo = effectiveTo;

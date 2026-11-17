@@ -220,13 +220,19 @@ export function KnowledgeTimeline({ items, runs, drafts, organizationConfirmedAt
   const events: TimelineEvent[] = [];
   for (const item of items) if (item.confirmed && item.confirmedAt) events.push({ at: item.confirmedAt, kind: 'material', title: t('evMaterial'), body: t('evMaterialBody', { title: item.title, version: item.version }) });
   const completed = runs.filter(run => run.createdAt);
-  const latestCompleted = completed.filter(run => run.status === 'completed').map(run => run.createdAt!).sort().at(-1);
   for (const run of completed) {
     events.push({ at: run.createdAt!, kind: 'run', title: t('evRun'), body: t('evRunBody', { status: t(`run_${run.status}` as keyof typeof TEXT.en) || run.status }) });
-    if (run.createdAt === latestCompleted && drafts.length) {
-      const effect = [...new Set(drafts.map(statedEffect).filter((v): v is string => !!v))].join(' · ');
-      events.push({ at: run.createdAt!, kind: 'drafts', title: t('evDrafts'), body: t('evDraftsBody', { n: drafts.length }), effect: effect || undefined });
-    }
+  }
+  for (const draft of drafts) {
+    const at = recordedOf(draft, runs);
+    if (!at) continue;
+    events.push({
+      at,
+      kind: 'drafts',
+      title: t('evDrafts'),
+      body: t('evDraftsBody', { n: 1 }),
+      effect: statedEffect(draft) || undefined,
+    });
   }
   if (organizationConfirmedAt) events.push({ at: organizationConfirmedAt, kind: 'org', title: t('evOrg'), body: t('evOrgBody') });
   events.sort((a, b) => b.at.localeCompare(a.at));

@@ -84,6 +84,10 @@ describe('knowledge lenses', () => {
     expect(dated).toContain('2026-08-01 – 2026-10-31');
     const past = render('zh', <KnowledgeTimeline time={{ at: '2026-11-09', known: '2026-11-09' }} runs={runs} drafts={[]} items={[]} />);
     expect(past).toContain('在所选日期之后记录');
+    const recorded = render('zh', <KnowledgeTimeline time={{ at: '2026-11-17', known: '2026-11-17' }} runs={runs}
+      drafts={[{ ...rule, recordedAt: '2026-11-03T12:00:00.000Z' }]} items={[]} />);
+    expect(recorded).toContain('2026-11-03 12:00');
+    expect(recorded.indexOf('2026-11-03 12:00')).toBeGreaterThan(recorded.indexOf('2026-11-10 09:00'));
   });
 });
 

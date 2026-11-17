@@ -13,6 +13,10 @@ describe('dual time on analysis drafts', () => {
     expect(validityOf({ evidence: [evidence()], effectiveFrom: '2099-01-01' })).toEqual({ effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31' });
     expect(validityOf({ evidence: [evidence('没有日期的规则')] })).toEqual({});
     expect(validityOf({ evidence: [evidence('无效日 2026-99-99')], effectiveFrom: '2026-99-99' })).toEqual({});
+    expect(validityOf({
+      evidence: [evidence('Meeting held on 2026-08-01. Approval requires two signatures.')],
+      effectiveFrom: '2026-08-01',
+    })).toEqual({});
   });
 
   it('stamps recordedAt on merge and keeps it on a later update', () => {
