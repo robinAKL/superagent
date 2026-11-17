@@ -53,7 +53,7 @@ async function openSources(page: Page) {
   if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
   await expect(page.getByTestId('plugin-local-file')).toBeVisible();
 }
-async function openWorkspace(page: Page, name: '资料' | '分析' | '检索') {
+async function openWorkspace(page: Page, name: '资料库' | '分类与候选') {
   const nav = page.getByRole('navigation', { name: '知识工作区' });
   const button = nav.getByRole('button', { name, exact: true });
   if (await button.getAttribute('aria-current') !== 'page') await button.click();
@@ -66,14 +66,14 @@ async function confirmItems(page: Page) {
 async function localFile(page: Page, confirmed = true, text = ROLE_FILE) {
   const name = '实际上传职责.md';
   if (confirmed) {
-    await openWorkspace(page, '资料');
+    await openWorkspace(page, '资料库');
     await page.getByLabel('选择文件', { exact: true }).setInputFiles({ name, mimeType: 'text/markdown', buffer: Buffer.from(text) });
   } else {
     const connection = await post<{ id: string }>(page, '/connections', { name: '本地职责资料', pluginId: 'local-file', scope: {} });
     await post(page, `/connections/${connection.id}/confirm`);
     await post(page, '/uploads', { connectionId: connection.id, name, text });
     await refresh(page);
-    await openWorkspace(page, '资料');
+    await openWorkspace(page, '资料库');
   }
   await expect(page.locator('#knowledge-items-list .mr-meta').filter({ hasText: name })).toBeVisible();
 }
@@ -94,12 +94,12 @@ async function analyse(page: Page) {
   await post(page, '/analyses');
   await response(page.request.post('/__test/knowledge/advance', { data: {} }));
   await refresh(page);
-  await openWorkspace(page, '分析');
+  await openWorkspace(page, '分类与候选');
   expect((await getOverview(page)).analyses.at(-1)?.status).toBe('completed');
 }
 const card = (page: Page, name: string) => page.locator('.knowledge-recommendation').filter({ has: page.locator(`input[value=${JSON.stringify(name)}]`) });
 async function openDraft(page: Page, name: string) {
-  await openWorkspace(page, '分析');
+  await openWorkspace(page, '分类与候选');
   await page.getByRole('list', { name: '草案列表' }).getByRole('button').filter({ has: page.getByText(name, { exact: true }) }).click();
   return card(page, name);
 }
@@ -143,7 +143,7 @@ test.beforeEach(async ({ page }) => {
 test('MCP analysis keeps supported drafts and shows them in Super Agent', async ({ page }) => {
   const { id } = await response<{ id: string }>(page.request.post('/__test/knowledge/seed-live-mcp', { data: {} }));
   await page.reload();
-  await openWorkspace(page, '分析');
+  await openWorkspace(page, '分类与候选');
   const source = page.getByRole('checkbox', { name: '退货手册 MCP' });
   const start = page.getByRole('button', { name: '开始分析', exact: true });
   await expect(source).toBeChecked();
@@ -163,7 +163,7 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   const draft = card(page, '退货专员');
   await expect(draft.getByText('仅自己可见的 MCP 分析草案')).toBeVisible();
   await draft.locator('summary').click();
-  await expect(draft.getByText('退货手册 MCP / handbook://procedures/returns')).toBeVisible();
+  await expect(draft.getByLabel('来源依据').getByText('退货手册 MCP / handbook://procedures/returns')).toBeVisible();
   await expect(draft.locator('blockquote')).toHaveText('角色：退货专员；责任：核对收货记录后登记退款。');
 
   await page.route('**/api/v1/sop', route => route.fulfill({ status: 503, json: {} }));
@@ -207,18 +207,18 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
 test('[qa-enablement#1] New company begins without invented knowledge', async ({ page }) => {
   await test.step('real empty tenant has no sources, candidates or analyses', async () => {
     const overview = await getOverview(page); expect(overview.items).toEqual([]); expect(overview.recommendations).toEqual([]); expect(overview.analyses).toEqual([]);
-    await openWorkspace(page, '资料'); await expect(page.getByText('还没有资料。', { exact: true })).toBeVisible();
+    await openWorkspace(page, '资料库'); await expect(page.getByText('还没有资料。', { exact: true })).toBeVisible();
   });
 });
 test('[qa-enablement#2] Recommendations gated before knowledge confirmation', async ({ page }) => {
-  await openWorkspace(page, '分析'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
+  await openWorkspace(page, '分类与候选'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
   await assertDenied(page, '/analyses', {}); expect((await getOverview(page)).recommendations).toEqual([]);
 });
 test('[qa-enablement#3] Manual role is distinguished from document inference', async ({ page }) => {
   await page.getByLabel('人工角色名称', { exact: true }).fill('人工运营协调员'); await page.getByLabel('人工角色说明', { exact: true }).fill('人工记录的既有职责。'); await page.getByRole('button', { name: '添加人工角色', exact: true }).click();
   await expect(await openDraft(page, '人工运营协调员')).toContainText('人工补充 · 不是文档推断');
   const manual = (await getOverview(page)).recommendations[0]!; expect(manual.origin).toBe('manual'); expect(manual.evidence).toEqual([]); expect(manual.humanLocked).toBe(true);
-  await openWorkspace(page, '分析'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
+  await openWorkspace(page, '分类与候选'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
 });
 test('[qa-enablement#4] Actual local text file is read', async ({ page }) => {
   await localFile(page); await page.getByText('查看当前版本原文与定位', { exact: true }).click();
@@ -226,7 +226,7 @@ test('[qa-enablement#4] Actual local text file is read', async ({ page }) => {
   const item = (await getOverview(page)).items[0]!; const preview = await response<{ chunks: { text: string; locator: string }[] }>(page.request.get(`${ROOT}/items/${item.id}/preview?version=${item.version}`)); expect(preview.chunks.map(chunk => chunk.text).join('\n')).toBe(ROLE_FILE); expect(preview.chunks[0]!.locator).toContain('#L1');
 });
 test('A mixed file selection publishes readable files and reports failures individually', async ({ page }) => {
-  await openWorkspace(page, '资料');
+  await openWorkspace(page, '资料库');
   await expect(page.getByTestId('plugin-mcp')).toBeHidden();
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: '添加资料', exact: true }).click();
@@ -245,7 +245,7 @@ test('A mixed file selection publishes readable files and reports failures indiv
   expect(overview.items.every(item => item.confirmed)).toBe(true);
 });
 test('[qa-enablement#5] Imported but unconfirmed knowledge cannot generate recommendations', async ({ page }) => {
-  await localFile(page, false); expect((await getOverview(page)).items.every(item => !item.confirmed)).toBe(true); await openWorkspace(page, '分析'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled(); await assertDenied(page, '/analyses', {});
+  await localFile(page, false); expect((await getOverview(page)).items.every(item => !item.confirmed)).toBe(true); await openWorkspace(page, '分类与候选'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled(); await assertDenied(page, '/analyses', {});
 });
 test('A single action confirms the displayed versions and starts analysis', async ({ page }) => {
   await remoteSource(page, 'email', true, false);
@@ -253,7 +253,7 @@ test('A single action confirms the displayed versions and starts analysis', asyn
   const materials = (await getOverview(page)).items;
   expect(materials).toHaveLength(2);
   expect(materials.every(item => !item.confirmed)).toBe(true);
-  await openWorkspace(page, '资料');
+  await openWorkspace(page, '资料库');
   await expect(page.getByRole('button', { name: '确认此版本', exact: true })).toHaveCount(0);
   const confirmation = page.waitForRequest(req => req.url().endsWith('/items/confirm') && req.method() === 'POST');
   const run = page.waitForResponse(res => res.url().endsWith('/analyses') && res.request().method() === 'POST');
@@ -283,7 +283,7 @@ test('[qa-enablement#50] Reanalysis preserves explicit role deletion instead of 
 });
 
 test('[qa-database-knowledge#1] Documents and databases share enterprise knowledge entry', async ({ page }) => {
-  await openWorkspace(page, '资料'); await expect(page.getByRole('heading', { name: '资料', exact: true })).toBeVisible(); await openSources(page); await expect(page.getByRole('heading', { name: '只读数据库来源', exact: true })).toBeVisible(); await expect(page.getByTestId('plugin-database')).toContainText('只读数据库');
+  await openWorkspace(page, '资料库'); await expect(page.getByRole('heading', { name: '企业资料', exact: true })).toBeVisible(); await openSources(page); await expect(page.getByRole('heading', { name: '只读数据库来源', exact: true })).toBeVisible(); await expect(page.getByTestId('plugin-database')).toContainText('只读数据库');
 });
 test('[qa-database-knowledge#2] Data source requires explicit read-only policy acknowledgement', async ({ page }) => {
   await refresh(page); await page.getByLabel('数据库连接名称', { exact: true }).fill('待确认数据库'); await expect(page.getByRole('button', { name: '验证并连接数据库', exact: true })).toBeDisabled(); await assertDenied(page, '/connections', { name: 'forged', pluginId: 'database', scope: { resourceId: DB_RESOURCE_ID } }); await page.getByLabel('我已核对数据库范围，并确认使用独立只读账号接入', { exact: true }).check(); const created = page.waitForResponse(result => result.url().endsWith('/knowledge/connections') && result.request().method() === 'POST'); await page.getByRole('button', { name: '验证并连接数据库', exact: true }).click(); expect((await created).status()).toBe(201); expect((await getOverview(page)).connections[0]).toMatchObject({ name: '待确认数据库', status: 'confirmed' });
@@ -291,9 +291,9 @@ test('[qa-database-knowledge#2] Data source requires explicit read-only policy a
 test('[qa-database-knowledge#3] Connection string cannot be pasted into credential reference', async ({ page }) => {
   await assertDenied(page, '/connections', { name: 'unsafe', pluginId: 'database', readOnlyAcknowledged: true, credentialRef: 'postgres://raw:secret@outside/database', scope: { resourceId: DB_RESOURCE_ID } }); await assertDenied(page, '/connections', { name: 'unsafe', pluginId: 'database', readOnlyAcknowledged: true, scope: { resourceId: DB_RESOURCE_ID, connectionString: 'postgres://raw:secret@outside/database' } }); expect((await getOverview(page)).connections).toEqual([]); await expect(page.locator('.database-source')).toContainText('请勿');
 });
-test('[qa-database-knowledge#4] Database source can start without any uploaded file', async ({ page }) => { await dbSource(page); expect((await getOverview(page)).items.length).toBeGreaterThan(0); expect((await getOverview(page)).items.some(item => item.title.endsWith('.md'))).toBe(false); await openWorkspace(page, '资料'); await expect(page.locator('#knowledge-items-list')).toContainText('approved_lots'); });
-test('[qa-database-knowledge#5] Unconfirmed database cannot feed recommendations', async ({ page }) => { const connection = await dbSource(page, false); await assertDenied(page, `/connections/${connection.id}/sync`, {}); await assertDenied(page, '/analyses', {}); await openWorkspace(page, '分析'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled(); });
-test('[qa-database-knowledge#6] Confirming source forms logical enterprise knowledge space', async ({ page }) => { await dbSource(page, true, false); await expect(page.getByRole('form', { name: '知识空间命名' })).toBeVisible(); await openWorkspace(page, '资料'); await expect(page.getByRole('button', { name: '确认此版本', exact: true })).toBeVisible(); await confirmItems(page); await refresh(page); expect((await getOverview(page)).items.every(item => item.confirmed)).toBe(true); });
+test('[qa-database-knowledge#4] Database source can start without any uploaded file', async ({ page }) => { await dbSource(page); expect((await getOverview(page)).items.length).toBeGreaterThan(0); expect((await getOverview(page)).items.some(item => item.title.endsWith('.md'))).toBe(false); await openWorkspace(page, '资料库'); await expect(page.locator('#knowledge-items-list')).toContainText('approved_lots'); });
+test('[qa-database-knowledge#5] Unconfirmed database cannot feed recommendations', async ({ page }) => { const connection = await dbSource(page, false); await assertDenied(page, `/connections/${connection.id}/sync`, {}); await assertDenied(page, '/analyses', {}); await openWorkspace(page, '分类与候选'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled(); });
+test('[qa-database-knowledge#6] Confirming source forms logical enterprise knowledge space', async ({ page }) => { await dbSource(page, true, false); await expect(page.getByRole('form', { name: '知识空间命名' })).toBeVisible(); await openWorkspace(page, '资料库'); await expect(page.getByRole('button', { name: '确认此版本', exact: true })).toBeVisible(); await confirmItems(page); await refresh(page); expect((await getOverview(page)).items.every(item => item.confirmed)).toBe(true); });
 test('[qa-database-knowledge#7] Knowledge space can be named without copying database', async ({ page }) => {
   await dbSource(page); const before = await response(page.request.get('/__test/knowledge/metadata')); await page.getByLabel('知识空间名称', { exact: true }).fill('批次管理知识空间'); await page.getByRole('button', { name: '保存知识空间名称', exact: true }).click(); await expect(page.getByLabel('知识空间名称', { exact: true })).toHaveValue('批次管理知识空间'); expect((await getOverview(page)).spaceName).toBe('批次管理知识空间'); expect(await response(page.request.get('/__test/knowledge/metadata'))).toEqual(before);
 });
@@ -323,7 +323,7 @@ test('[qa-database-knowledge#34] Forged personal scope cannot expand source perm
   await assertDenied(page, '/connections', { name: 'expanded', pluginId: 'database', readOnlyAcknowledged: true, projectIds: ['P-2'], scope: { resourceId: DB_RESOURCE_ID, projectIds: ['P-2'] } }); await assertDenied(page, '/connections', { name: 'expanded', pluginId: 'database', readOnlyAcknowledged: true, scope: { resourceId: DB_RESOURCE_ID, tables: { payroll: { columns: ['salary'] } }, maxRows: 99999 } }); expect((await getOverview(page)).connections).toEqual([]); await refresh(page); await expect(page.locator('.database-source')).not.toContainText('payroll');
 });
 test('[qa-database-knowledge#35] Schema change withdraws source confirmation and invalidates old analysis', async ({ page }) => {
-  const connection = await dbSource(page); await analyse(page); await control(page, { kind: 'database', schemaChanged: true }); await post(page, `/connections/${connection.id}/sync`); const overview = await getOverview(page); expect(overview.items.every(item => !item.confirmed)).toBe(true); expect(overview.analyses.some(run => run.status === 'stale')).toBe(true); await refresh(page); await openWorkspace(page, '分析'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
+  const connection = await dbSource(page); await analyse(page); await control(page, { kind: 'database', schemaChanged: true }); await post(page, `/connections/${connection.id}/sync`); const overview = await getOverview(page); expect(overview.items.every(item => !item.confirmed)).toBe(true); expect(overview.analyses.some(run => run.status === 'stale')).toBe(true); await refresh(page); await openWorkspace(page, '分类与候选'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
 });
 test('[qa-database-knowledge#36] Metadata reanalysis preserves human role edits', async ({ page }) => { const connection = await dbSource(page); await analyse(page); const retained = await lockRole(page, '数据分析员'); await control(page, { kind: 'database', schemaChanged: true }); await post(page, `/connections/${connection.id}/sync`); await confirmItems(page); await analyse(page); await expect(await openDraft(page, retained)).toContainText('人工锁定'); await expect(await openDraft(page, retained)).toContainText('分析提出了修改'); });
 
@@ -334,7 +334,7 @@ test('Local uploads stay searchable and their two internal connections are hidde
   await confirmItems(page);
   await localFile(page);
   expect((await getOverview(page)).connections).toHaveLength(2);
-  await openWorkspace(page, '资料'); await expect(page.locator('#knowledge-items-list .mr-meta').filter({ hasText: 'legacy.txt' })).toBeVisible(); await openSources(page);
+  await openWorkspace(page, '资料库'); await expect(page.locator('#knowledge-items-list .mr-meta').filter({ hasText: 'legacy.txt' })).toBeVisible(); await openSources(page);
   await expect(page.locator('#knowledge-sources').getByText('from local', { exact: true })).toHaveCount(0);
   await expect(page.locator('#knowledge-sources').getByText('本地上传', { exact: true })).toHaveCount(0);
   const result = await response<{ hits: unknown[] }>(page.request.get(`${ROOT}/search?q=Retained`));
@@ -351,7 +351,7 @@ test('MCP URL configuration reports an invalid address inline', async ({ page })
 test('[qa-source-plugins#1] Knowledge-source catalog includes MCP', async ({ page }) => { for (const id of ['local-file', 'mcp', 'database', 'email', 'sharepoint']) await expect(page.getByTestId(`plugin-${id}`)).toBeVisible(); expect((await getOverview(page)).plugins).toHaveLength(5); });
 test('[qa-source-plugins#2] Built-in sources offer configuration without installation', async ({ page }) => { const overview = await getOverview(page); expect(overview.plugins.every(plugin => plugin.builtIn && plugin.installed)).toBe(true); await expect(page.getByTestId('plugin-local-file')).toContainText('自动接入'); await expect(page.locator('#knowledge-sources').getByRole('button', { name: /安装/ })).toHaveCount(0); });
 test('[qa-source-plugins#3] Opening SharePoint configuration creates no connection or materials', async ({ page }) => { await configureCard(page, 'sharepoint'); await expect(page.getByRole('combobox', { name: /已批准的来源资源/ })).toBeVisible(); const overview = await getOverview(page); expect(overview.connections).toEqual([]); expect(overview.items).toEqual([]); });
-test('[qa-source-plugins#6] Import does not imply source confirmation', async ({ page }) => { await localFile(page, false); await openWorkspace(page, '资料'); await expect(page.getByRole('button', { name: '确认此版本', exact: true })).toBeVisible(); expect((await getOverview(page)).items[0]!.confirmed).toBe(false); });
+test('[qa-source-plugins#6] Import does not imply source confirmation', async ({ page }) => { await localFile(page, false); await openWorkspace(page, '资料库'); await expect(page.getByRole('button', { name: '确认此版本', exact: true })).toBeVisible(); expect((await getOverview(page)).items[0]!.confirmed).toBe(false); });
 test('[qa-source-plugins#7] Opening email configuration does not connect a mailbox', async ({ page }) => { await configureCard(page, 'email'); await expect(page.getByRole('combobox', { name: /已批准的来源资源/ })).toBeVisible(); const overview = await getOverview(page); expect(overview.connections).toEqual([]); expect(overview.items).toEqual([]); });
 test('[qa-source-plugins#9] Connection requires explicit read-only scope', async ({ page }) => {
   await refresh(page); await configureCard(page, 'email'); await page.getByLabel('连接名称', { exact: true }).fill('邮件范围'); await expect(page.getByRole('button', { name: '验证并连接', exact: true })).toBeDisabled(); await assertDenied(page, '/connections', { name: 'forged mail', pluginId: 'email', scope: { resourceId: MAIL_RESOURCE_ID } }); await page.getByLabel('我已核对来源范围，并确认仅以只读方式接入', { exact: true }).check(); const created = page.waitForResponse(result => result.url().endsWith('/knowledge/connections') && result.request().method() === 'POST'); await page.getByRole('button', { name: '验证并连接', exact: true }).click(); expect((await created).status()).toBe(201); expect((await getOverview(page)).connections[0]).toMatchObject({ name: '邮件范围', status: 'confirmed' });
@@ -363,7 +363,7 @@ test('[qa-source-plugins#14] Forged preview selection cannot bypass ACL', async 
   const connection = await remoteSource(page, 'email', false); await assertDenied(page, `/connections/${connection.id}/import`, { ids: ['email-denied', 'forged-selection-hash'] }); await control(page, { kind: 'mail', acl: 'revoked' }); await assertDenied(page, `/connections/${connection.id}/import`, { ids: connection.preview.items.map(item => item.id) }); const audit = await response<{ counters: { email: number } }>(page.request.get('/__test/knowledge/audit')); expect(audit.counters.email).toBe(0); expect((await getOverview(page)).items).toEqual([]); await expect(page.locator('main')).not.toContainText('禁止泄露的私人薪资标题');
 });
 test('[qa-source-plugins#16] Imported mail independently awaits confirmation with references and versions', async ({ page }) => {
-  const connection = await remoteSource(page, 'email', false); const row = page.locator('.knowledge-source-list > li').filter({ has: page.getByText(connection.name, { exact: true }) }); await row.getByRole('button', { name: '预览来源范围与资料', exact: true }).click(); const preview = page.getByRole('region', { name: `${connection.name} 来源元数据预览` }); await expect(preview.getByRole('checkbox')).toHaveCount(1); await preview.getByRole('checkbox').check(); const imported = page.waitForResponse(result => result.url().endsWith(`/connections/${connection.id}/import`)); await preview.getByRole('button', { name: '导入所选资料（1）', exact: true }).click(); expect((await imported).ok()).toBe(true); await openWorkspace(page, '资料'); await expect(page.getByRole('button', { name: '确认此版本', exact: true })).toBeVisible(); const item = (await getOverview(page)).items[0]!; expect(item.confirmed).toBe(false); expect(item.version).toBe('v1'); expect(item.locator).toContain('synthetic-mail://'); await openWorkspace(page, '分析'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
+  const connection = await remoteSource(page, 'email', false); const row = page.locator('.knowledge-source-list > li').filter({ has: page.getByText(connection.name, { exact: true }) }); await row.getByRole('button', { name: '预览来源范围与资料', exact: true }).click(); const preview = page.getByRole('region', { name: `${connection.name} 来源元数据预览` }); await expect(preview.getByRole('checkbox')).toHaveCount(1); await preview.getByRole('checkbox').check(); const imported = page.waitForResponse(result => result.url().endsWith(`/connections/${connection.id}/import`)); await preview.getByRole('button', { name: '导入所选资料（1）', exact: true }).click(); expect((await imported).ok()).toBe(true); await openWorkspace(page, '资料库'); await expect(page.getByRole('button', { name: '确认此版本', exact: true })).toBeVisible(); const item = (await getOverview(page)).items[0]!; expect(item.confirmed).toBe(false); expect(item.version).toBe('v1'); expect(item.locator).toContain('synthetic-mail://'); await openWorkspace(page, '分类与候选'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
 });
 test('[qa-source-plugins#17] Confirmed mixed knowledge creates evidence-based candidates', async ({ page }) => {
   await remoteSource(page, 'email'); await remoteSource(page, 'sharepoint'); await analyse(page); const roles = (await getOverview(page)).recommendations.filter(rec => rec.kind === 'employee'); expect(roles).toHaveLength(4); expect(new Set(roles.flatMap(role => role.evidence.map(evidence => evidence.sourceId))).size).toBe(2); for (const role of roles) { expect(role.evidence.length).toBeGreaterThan(0); await expect(await openDraft(page, role.name)).toBeVisible(); }
@@ -371,10 +371,10 @@ test('[qa-source-plugins#17] Confirmed mixed knowledge creates evidence-based ca
 test('[qa-source-plugins#20] Delta does not overwrite human role edit', async ({ page }) => { const connection = await remoteSource(page, 'email'); await analyse(page); const retained = await lockRole(page, '采购专员'); await control(page, { kind: 'mail', text: '角色：采购专员；责任：核对新增供应商与采购版本。' }); await post(page, `/connections/${connection.id}/sync`); await refresh(page); await expect(await openDraft(page, retained)).toBeVisible(); expect((await getOverview(page)).recommendations.find(rec => rec.name === retained)!.description).toBe('这是人工核对后保留的说明。'); });
 test('[qa-source-plugins#21] Reanalysis preserves human edits', async ({ page }) => { const connection = await remoteSource(page, 'email'); await analyse(page); const retained = await lockRole(page, '采购专员'); await control(page, { kind: 'mail', text: '角色：采购专员；责任：核对新增供应商与采购版本。' }); await post(page, `/connections/${connection.id}/sync`); await confirmItems(page); await analyse(page); await expect(await openDraft(page, retained)).toContainText('分析提出了修改'); expect((await getOverview(page)).recommendations.find(rec => rec.name === retained)!.proposedChange?.description).toContain('新增供应商'); });
 test('[qa-source-plugins#23] Recovery requires source confirmation again', async ({ page }) => {
-  const connection = await remoteSource(page, 'email'); await control(page, { kind: 'mail', acl: 'unknown' }); await post(page, `/connections/${connection.id}/sync`); expect((await getOverview(page)).items).toEqual([]); await control(page, { kind: 'mail', acl: 'allowed', bumpVersion: true }); await post(page, `/connections/${connection.id}/sync`); await refresh(page); expect((await getOverview(page)).items.every(item => !item.confirmed)).toBe(true); await openWorkspace(page, '资料'); await expect(page.getByRole('button', { name: '确认此版本', exact: true })).toBeVisible(); await openWorkspace(page, '分析'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
+  const connection = await remoteSource(page, 'email'); await control(page, { kind: 'mail', acl: 'unknown' }); await post(page, `/connections/${connection.id}/sync`); expect((await getOverview(page)).items).toEqual([]); await control(page, { kind: 'mail', acl: 'allowed', bumpVersion: true }); await post(page, `/connections/${connection.id}/sync`); await refresh(page); expect((await getOverview(page)).items.every(item => !item.confirmed)).toBe(true); await openWorkspace(page, '资料库'); await expect(page.getByRole('button', { name: '确认此版本', exact: true })).toBeVisible(); await openWorkspace(page, '分类与候选'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
 });
 test('[qa-source-plugins#25] Forged source confirmation cannot override revoked ACL', async ({ page }) => {
-  const connection = await remoteSource(page, 'email'); const item = (await getOverview(page)).items[0]!; await control(page, { kind: 'mail', acl: 'revoked' }); await assertDenied(page, `/items/${item.id}/confirm`, { version: item.version }); await post(page, `/connections/${connection.id}/sync`); await assertDenied(page, `/items/${item.id}/confirm`, { version: item.version }); await refresh(page); expect((await getOverview(page)).items).toEqual([]); await openWorkspace(page, '分析'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
+  const connection = await remoteSource(page, 'email'); const item = (await getOverview(page)).items[0]!; await control(page, { kind: 'mail', acl: 'revoked' }); await assertDenied(page, `/items/${item.id}/confirm`, { version: item.version }); await post(page, `/connections/${connection.id}/sync`); await assertDenied(page, `/items/${item.id}/confirm`, { version: item.version }); await refresh(page); expect((await getOverview(page)).items).toEqual([]); await openWorkspace(page, '分类与候选'); await expect(page.getByRole('button', { name: '开始分析', exact: true })).toBeDisabled();
 });
 test('[qa-source-plugins#28] Paused knowledge plugin blocks its source references', async ({ page }) => {
   await remoteSource(page, 'email'); await analyse(page); await openSources(page); await page.getByRole('button', { name: '暂停企业邮件', exact: true }).click(); await expect(page.getByTestId('plugin-email')).toContainText('已暂停'); expect((await getOverview(page)).items).toEqual([]); expect((await getOverview(page)).recommendations).toEqual([]); const search = await response<{ hits: unknown[] }>(page.request.get(`${ROOT}/search?q=${encodeURIComponent('采购')}`)); expect(search.hits).toEqual([]); await expect(card(page, '采购专员')).toHaveCount(0);

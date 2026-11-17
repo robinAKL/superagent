@@ -113,3 +113,33 @@
   .team-size-field { flex: 1; }
   .team-size-stepper input { flex: 1; width: auto; }
 }
+
+
+/* Card wall (prototype v12). */
+.org-back { display: inline-block; margin-top: var(--space-xs); font-size: 13px; color: var(--color-accent); text-decoration: none; }
+.emp-wall-section { display: grid; gap: var(--space-md); }
+.emp-wall-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.emp-wall-actions { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+.emp-wall-actions .btn { display: inline-flex; align-items: center; text-decoration: none; }
+.emp-wall { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: var(--space-md); }
+.emp-card { display: grid; grid-template-rows: auto auto 1fr auto auto; gap: var(--space-xs); padding: var(--space-md) var(--space-lg); border: 1px solid var(--color-soft-rule);
+  border-radius: var(--radius); background: var(--color-paper-2); min-width: 0; }
+.emp-card:hover { border-color: var(--color-rule); }
+.emp-card-head { display: flex; align-items: center; justify-content: space-between; }
+.emp-avatar { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; font-weight: 600; font-size: 17px;
+  color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, var(--color-paper-3, var(--color-paper))); border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent); }
+.emp-status { font-size: 12px; padding: 2px 10px; border-radius: 999px; background: var(--color-well); color: var(--color-muted); }
+.emp-status.is-online, .emp-status.is-busy { background: color-mix(in srgb, var(--color-success) 16%, transparent); color: var(--color-success); }
+.emp-status.is-paused, .emp-status.is-waiting_auth { background: color-mix(in srgb, var(--color-warning) 16%, transparent); color: var(--color-warning); }
+.emp-status.is-fault { background: color-mix(in srgb, var(--color-danger, #e5484d) 16%, transparent); color: var(--color-danger, #e5484d); }
+.emp-card h3 { margin: var(--space-2xs) 0 0; font-size: 17px; overflow-wrap: anywhere; }
+.emp-duty { margin: 0; font-size: 13.5px; color: var(--color-muted); line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.emp-facts { margin: 0; display: grid; gap: 6px; padding-top: var(--space-xs); border-top: 1px solid var(--color-soft-rule); }
+.emp-facts > div { display: flex; justify-content: space-between; gap: var(--space-sm); font-size: 13px; }
+.emp-facts dt { color: var(--color-subtle); flex: none; }
+.emp-facts dd { margin: 0; text-align: right; overflow-wrap: anywhere; min-width: 0; }
+.emp-card-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); padding-top: var(--space-xs); }
+.emp-card-foot small { color: var(--color-subtle); font-size: 12px; }
+.emp-card-links { display: inline-flex; align-items: center; gap: var(--space-sm); }
+.emp-card-links a:not(.btn) { font-size: 13px; color: var(--color-accent); text-decoration: none; }
+.emp-card-links .btn { display: inline-flex; align-items: center; min-height: 34px; text-decoration: none; }

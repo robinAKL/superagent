@@ -4,6 +4,7 @@ import { useLang, useT, type Dict } from '../i18n';
 import './EmployeesPage.css';
 import { PLAN_TEXT, planErrorKey, TeamPlanPreview, TeamSizePlanner, type TeamPlanView } from './TeamSizePlanner';
 import { translate } from '../i18n';
+import { EmployeeWall, type WallEmployee } from './EmployeeWall';
 
 /**
  * Digital employees = the organization draft (PRD §3.3 step 3 and §3.4). Step 2 of the main line:
@@ -32,6 +33,8 @@ export const TEXT = {
   en: {
     title: 'Digital employees',
     subtitle: 'Review the organization draft from your company knowledge: who does what, with which tools, in which workflows.',
+    wallSubtitle: 'Make duties, owners and tools clear, then hand work to the right employee.',
+    backToWall: 'All employees',
     stepKnowledge: '1 Knowledge', stepTeam: '2 Organization', stepFlow: '3 Workflows', stepRun: '4 Command room',
     loading: 'Loading the organization draft…',
     loadFailed: 'Could not load the organization draft.',
@@ -85,6 +88,8 @@ export const TEXT = {
   zh: {
     title: '数字员工',
     subtitle: '审阅从企业知识生成的组织草案：谁负责什么、用哪些工具、参与哪些流程。',
+    wallSubtitle: '明确职责、负责人和可用工具，再把工作交给合适的员工。',
+    backToWall: '全部员工',
     stepKnowledge: '1 企业知识', stepTeam: '2 确认组织', stepFlow: '3 发布流程', stepRun: '4 指挥室执行',
     loading: '正在加载组织草案…',
     loadFailed: '组织草案加载失败。',
@@ -244,9 +249,22 @@ export function RoleCard({ role, org, busy, t, onSave, onMerge, onRemove }: {
   </article>;
 }
 
+/** #employees = card wall once the team exists; #employees?view=draft = the organization draft review. */
+function employeesRoute() {
+  const params = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.hash.split('?')[1]);
+  return { draft: params.get('view') === 'draft', role: params.get('role') ?? '', add: params.has('add') };
+}
+
 export function EmployeesPage() {
   const t = useT(TEXT) as T;
   const [lang] = useLang();
+  const [route, setRoute] = useState(employeesRoute);
+  useEffect(() => {
+    const update = () => setRoute(employeesRoute());
+    window.addEventListener('hashchange', update);
+    return () => window.removeEventListener('hashchange', update);
+  }, []);
+  const [team, setTeam] = useState<WallEmployee[]>([]);
   const [org, setOrg] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -267,7 +285,13 @@ export function EmployeesPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setOrg(await call<Organization>('/organization')); setLoadError(null); }
+    try {
+      const [organization, registry] = await Promise.all([
+        call<Organization>('/organization'),
+        api<WallEmployee[]>('/api/v1/employees/').then(r => r.status === 200 && Array.isArray(r.body) ? r.body : []).catch(() => []),
+      ]);
+      setOrg(organization); setTeam(registry); setLoadError(null);
+    }
     catch (caught) { setLoadError(caught instanceof RequestError && caught.code === 'forbidden' ? t('noAccess') : t('loadFailed')); }
     finally { setLoading(false); }
   }, [t]);
@@ -317,12 +341,34 @@ export function EmployeesPage() {
   const newTools = org?.tools.filter(x => x.match === 'placeholder' && !x.toolId).length ?? 0;
   const newEmployees = org?.employees.filter(e => !e.employeeId).length ?? 0;
   const confirmedState = org?.confirmation && !org.changedSinceConfirmation && !org.missing;
+  // The wall follows a confirmed organization; before that the page guides through the draft (or says how to start).
+  const wall = !route.draft && team.length > 0 && !!org?.confirmation;
+  useEffect(() => {
+    if (!route.draft || !route.role || !org) return;
+    document.getElementById(`role-${route.role}`)?.scrollIntoView({ block: 'start' });
+  }, [route.draft, route.role, org]);
+
+  if (wall) return <div className="org-page">
+    <header className="page-head org-head">
+      <div>
+        <h1>{t('title')}</h1>
+        <p>{t('wallSubtitle')}</p>
+      </div>
+    </header>
+    {loadError ? <div className="org-alert" role="alert">{loadError}</div> : null}
+    <EmployeeWall employees={team} hasDraft={!!org && org.blocked !== 'no_employees'} />
+    {confirmedState ? <footer className="org-bar">
+      <p>{t('summaryDone', { e: org!.confirmation!.employees, t: org!.confirmation!.tools })}</p>
+      <a className="btn primary" href="#brain?org=1">{t('nextFlow')}</a>
+    </footer> : null}
+  </div>;
 
   return <div className="org-page">
     <header className="page-head org-head">
       <div>
         <h1>{t('title')}</h1>
         <p>{t('subtitle')}</p>
+        {team.length ? <a className="org-back" href="#employees">← {t('backToWall')}</a> : null}
       </div>
       {org ? <span className={`org-badge ${confirmedState ? 'is-green' : org.confirmation ? 'is-gold' : ''}`}>
         {org.confirmation ? (org.changedSinceConfirmation ? t('unsaved') : t('confirmedAt', { date: new Date(org.confirmation.confirmedAt).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' }), n: org.confirmation.revision })) : t('draft')}
@@ -363,7 +409,7 @@ export function EmployeesPage() {
           <h2 id="org-roles-title">{t('rolesTitle', { n: org.employees.length })}</h2>
           {org.employees.map(role => <RoleCard key={`${role.id}:${role.name}:${role.duty}:${role.prompt}:${role.tools.join()}:${role.sops.join()}`}
             role={role} org={org} busy={busy} t={t} onSave={saveRole} onMerge={mergeRole} onRemove={removeRole} />)}
-          {org.canConfirm ? <details className="org-add">
+          {org.canConfirm ? <details className="org-add" open={route.add || undefined}>
             <summary>{t('addRole')}</summary>
             <form className="org-edit" onSubmit={addRole}>
               <label className="field"><span>{t('roleName')}</span><input required maxLength={160} value={newRole} onChange={e => setNewRole(e.target.value)} /></label>

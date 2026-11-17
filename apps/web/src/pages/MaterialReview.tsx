@@ -8,7 +8,7 @@ export interface MaterialProfile {
   title: string; category: Category; summary: string; origin: 'rules' | 'model' | 'human'; refining: boolean;
   related: { id: string; kind: 'duplicate' | 'similar' | 'update'; title: string; confirmed: boolean } | null;
 }
-export interface Material { id: string; title: string; version: string; status: string; confirmed: boolean; locator: string; pluginId: string; profile?: MaterialProfile | null }
+export interface Material { id: string; title: string; version: string; status: string; confirmed: boolean; confirmedAt?: string; locator: string; pluginId: string; profile?: MaterialProfile | null }
 
 const UNAVAILABLE = ['deleted', 'revoked', 'parse_failed'];
 const PAGE_SIZE = 12;
