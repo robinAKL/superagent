@@ -189,6 +189,8 @@ const TEXT = {
     viewAgentContext: 'View Super Agent context',
     sopIntro: 'A workflow is one kind of knowledge. The flowchart defines triggers and execution order; the ontology graph defines objects and relationships. Nodes reuse roles, tools, human roles and sources.',
     sopFlows: 'Published & draft graphs', sopCandidates: 'Extract SOP from knowledge', sopSwitch: 'Workflow view',
+    sopEmptyTitle: 'No workflows yet', sopEmptyBody: 'Workflows come from your materials. Add and confirm materials in the Library, run an analysis, and the workflows it finds are drawn here as flowcharts with their sources.',
+    sopEmptyLibrary: 'Open the Library', sopEmptyAnalyze: 'Open Classification & candidates', sopLoading: 'Loading workflows…',
     graphIntro: 'The graph shows concrete entities and evidenced relationships. Select a node for identity, time and sources; the relationship table is keyboard-operable.',
     closeSources: 'Back to materials',
     analysisHistory: 'Earlier runs',
@@ -439,6 +441,8 @@ const TEXT = {
     viewAgentContext: '查看超级智能体上下文',
     sopIntro: '工作流是知识的一种。流程图定义触发与执行顺序；本体关系图定义对象与关系。节点复用岗位、工具、人类角色和来源标识。',
     sopFlows: '已发布图与草稿图', sopCandidates: '从知识提取 SOP', sopSwitch: '工作流视图',
+    sopEmptyTitle: '还没有工作流', sopEmptyBody: '工作流来自企业资料。先在资料库添加并确认资料，再运行分析，找到的流程会以带来源的流程图显示在这里。',
+    sopEmptyLibrary: '打开资料库', sopEmptyAnalyze: '打开分类与候选', sopLoading: '正在读取工作流…',
     graphIntro: '图表达具体实体与有证据的关系。选择节点查看标识、时间与来源；关系表可键盘操作。',
     closeSources: '返回资料',
     analysisHistory: '历史分析',
@@ -618,7 +622,9 @@ function viewFromHash(): KnowledgeView {
 function sopFromHash() {
   const params = hashParams();
   const candidate = params.get('candidate') ?? '', sop = params.get('sop') ?? '';
-  return { sop, candidate, sub: params.get('sub') === 'candidates' && !candidate && !sop ? 'candidates' as const : 'flows' as const };
+  const sub = params.get('sub');
+  // No explicit choice: the tab picks whichever view has something to show (see KnowledgeFlows).
+  return { sop, candidate, sub: candidate || sop ? 'flows' as const : sub === 'candidates' || sub === 'flows' ? sub : 'auto' as const };
 }
 
 /** 工作流 / SOP tab: the published/draft graphs (existing editor and publish gate) and the candidates extracted from knowledge. */
@@ -630,14 +636,30 @@ function KnowledgeFlows({ t }: { t: Translate }) {
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, []);
+  // How many saved workflows (published or draft) exist; an empty list means the editor has nothing to show yet.
+  const [saved, setSaved] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api<{ sops?: unknown[] }>('/api/v1/sop').then(r => { if (!cancelled) setSaved(r.status === 200 && Array.isArray(r.body?.sops) ? r.body.sops.length : 0); })
+      .catch(() => { if (!cancelled) setSaved(0); });
+    return () => { cancelled = true; };
+  }, []);
+  const candidates = knowledge.status === 'ready'
+    ? [...knowledge.drafts.recommendations, ...knowledge.drafts.mcpRecommendations].filter(draft => draft.kind === 'sop').length : null;
+  const sub = route.sub !== 'auto' ? route.sub : saved === null ? 'auto' : saved > 0 || !candidates ? 'flows' : 'candidates';
+  const empty = saved === 0 && candidates === 0;
   return <div className="knowledge-flows">
     <p className="helper knowledge-tab-intro">{t('sopIntro')}</p>
     <div className="knowledge-flow-switch" role="group" aria-label={t('sopSwitch')}>
-      {(['flows', 'candidates'] as const).map(sub => <button key={sub} type="button" className="lens-chip" aria-pressed={route.sub === sub}
-        onClick={() => { window.location.hash = sub === 'flows' ? 'knowledge?view=sop' : 'knowledge?view=sop&sub=candidates'; }}>
-        {t(sub === 'flows' ? 'sopFlows' : 'sopCandidates')}</button>)}
+      {(['flows', 'candidates'] as const).map(entry => <button key={entry} type="button" className="lens-chip" aria-pressed={sub === entry}
+        onClick={() => { window.location.hash = `knowledge?view=sop&sub=${entry}`; }}>
+        {t(entry === 'flows' ? 'sopFlows' : 'sopCandidates')}{entry === 'candidates' && candidates ? ` (${candidates})` : ''}</button>)}
     </div>
-    {route.sub === 'candidates'
+    {empty ? <section className="panel knowledge-flow-empty" role="status">
+      <h2>{t('sopEmptyTitle')}</h2>
+      <p className="helper">{t('sopEmptyBody')}</p>
+      <div className="knowledge-actions"><a className="btn primary" href="#knowledge">{t('sopEmptyLibrary')}</a><a className="btn" href="#knowledge?view=analysis">{t('sopEmptyAnalyze')}</a></div>
+    </section> : sub === 'auto' ? <p className="helper" role="status">{t('sopLoading')}</p> : sub === 'candidates'
       ? <AnalysisResults knowledge={knowledge} retryKnowledge={retryKnowledge} initialKind="" fromOrganization={false} route="knowledge" />
       : <SopWorkspace key={`${route.sop}|${route.candidate}`} knowledge={knowledge} retryKnowledge={retryKnowledge} initialSop={route.sop} candidate={route.candidate} route="knowledge" />}
   </div>;

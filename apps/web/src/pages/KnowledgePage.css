@@ -266,3 +266,6 @@
 .knowledge-flows { display: grid; gap: var(--space-md); }
 .knowledge-flow-switch { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
 .knowledge-sop-tab { padding: 0; }
+
+.knowledge-flow-empty { display: grid; gap: var(--space-sm); justify-items: start; }
+.knowledge-flow-empty h2 { margin: 0; font-size: 18px; }
