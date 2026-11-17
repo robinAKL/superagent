@@ -119,6 +119,11 @@ export function toolsAwaitingPublish(tools: { stage?: string }[]): number {
 
 const CHROME = {
   en: {
+    pageAria: 'My work', title: 'My work', subtitle: 'Check data, decide, and finish work yourself. Every step has evidence and a next owner.',
+    status: 'Work status', grouped: 'Open items (grouped)', project: 'Project', projectFilter: 'Filter by project', allProjects: 'All projects',
+    exceptions: 'Exceptions only', visibility: 'You only see items assigned to you. The server filters the list by role.',
+    failed: 'Could not load the inbox. Try again shortly.', loading: 'Loading…',
+    group_action: 'Needs my action', group_waiting: 'Waiting on someone else', group_internal: 'Internal, unfinished',
     summary: 'Approvals {approvals} · Tools awaiting publish {tools} · All {all}',
     summaryAria: 'Inbox summary',
     emptyTitle: 'Nothing needs your decision right now',
@@ -126,6 +131,11 @@ const CHROME = {
     openRoom: 'Open command room', openTools: 'Open employee tools',
   },
   zh: {
+    pageAria: '待我处理', title: '待我处理', subtitle: '核对数据、作决定、亲自完成工作；每一步都有证据和下一位责任人。',
+    status: '工作状态', grouped: '在办事项（分组）', project: '项目', projectFilter: '项目筛选', allProjects: '全部项目',
+    exceptions: '只看例外', visibility: '当前身份只能看到分给自己的事项。名单由服务端按角色过滤。',
+    failed: '没能读取待办，请稍后重试。', loading: '正在读取…',
+    group_action: '需要我行动', group_waiting: '等待外部', group_internal: '内部未完',
     summary: '审批 {approvals} · 工具待发布 {tools} · 全部 {all}',
     summaryAria: '待办汇总',
     emptyTitle: '现在没有需要你处理的事项',
@@ -212,38 +222,39 @@ export function WorkInboxPage() {
     await load();
   }
 
+  const groupLabel = (id: Group) => t(id === 'action' ? 'group_action' : id === 'waiting' ? 'group_waiting' : 'group_internal');
   return (
-    <section className="exec-inbox" aria-label="待我处理">
+    <section className="exec-inbox" aria-label={t('pageAria')}>
       <div className="page-head">
-        <h1 id="page-title">待我处理</h1>
-        <p>核对数据、作决定、亲自完成工作；每一步都有证据和下一位责任人。</p>
+        <h1 id="page-title">{t('title')}</h1>
+        <p>{t('subtitle')}</p>
       </div>
       <div className="exec-toolbar">
         <label>
-          工作状态
+          {t('status')}
           <select value={group} onChange={(event) => setGroup(event.target.value as Group | 'all')}>
-            <option value="all">在办事项（分组）</option>
-            {GROUPS.map((g) => <option key={g.id} value={g.id}>{g.label}</option>)}
+            <option value="all">{t('grouped')}</option>
+            {GROUPS.map((g) => <option key={g.id} value={g.id}>{groupLabel(g.id)}</option>)}
           </select>
         </label>
         <label>
-          项目
-          <select aria-label="项目筛选" value={project} onChange={(event) => setProject(event.target.value)}>
-            <option value="">全部项目</option>
+          {t('project')}
+          <select aria-label={t('projectFilter')} value={project} onChange={(event) => setProject(event.target.value)}>
+            <option value="">{t('allProjects')}</option>
             {projects.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </label>
         <label className="exec-check">
           <input type="checkbox" checked={exceptionsOnly} onChange={(event) => setExceptionsOnly(event.target.checked)} />
-          只看例外
+          {t('exceptions')}
         </label>
-        <p>当前身份只能看到分给自己的事项。名单由服务端按角色过滤。</p>
+        <p>{t('visibility')}</p>
       </div>
       <div className="exec-grid">
         <div className="panel exec-pane">
           <div className="exec-scroll">
-            {failed ? <p className="helper" role="alert">没能读取待办，请稍后重试。</p> : null}
-            {items === null && !failed ? <p className="helper">正在读取…</p> : null}
+            {failed ? <p className="helper" role="alert">{t('failed')}</p> : null}
+            {items === null && !failed ? <p className="helper">{t('loading')}</p> : null}
             {items !== null ? <div className="work-summary" aria-label={t('summaryAria')}>
               <p>{t('summary', { approvals: approvalCount(items), tools: toolsAwaitingPublish(toolStages), all: items.length })}</p>
             </div> : null}
@@ -256,8 +267,8 @@ export function WorkInboxPage() {
               const rows = visible.filter((item) => groupOf(item) === section.id);
               if (rows.length === 0) return null;
               return (
-                <section key={section.id} aria-label={section.label}>
-                  <h2 className="exec-group">{section.label}</h2>
+                <section key={section.id} aria-label={groupLabel(section.id)}>
+                  <h2 className="exec-group">{groupLabel(section.id)}</h2>
                   {rows.map((item) => (
                     <button key={item.id} type="button" className="exec-task" data-item={item.id} onClick={() => { setOpenId(item.id); setMsg(''); }} aria-current={item.id === openId ? 'true' : undefined}>
                       <strong>{String(item.payload.title ?? KIND_LABEL[item.kind] ?? item.kind)}</strong>
