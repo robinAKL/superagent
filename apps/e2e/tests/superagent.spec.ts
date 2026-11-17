@@ -106,7 +106,7 @@ test('editing after publish opens a new draft; the published version and its run
 
 test('ontology with configured knowledge but no readable objects stays empty', async ({ page }) => {
   await page.goto('/#brain?tab=ontology');
-  await expect(page.locator('main')).toContainText('还没有业务对象');
+  await expect(page.locator('main')).toContainText('还没有实体');
   await expect(page.getByRole('img', { name: /本体关系图/ })).toHaveCount(0);
 });
 
@@ -120,7 +120,7 @@ test('ontology renders objects, a relation and their evidence on the real page (
           { id: 'r1', key: 'invoice', kind: 'object', name: '供应商发票', description: '供应商开具的付款凭证', evidence: evidence('供应商发票须附采购单号', 3), humanLocked: false, deleted: false },
           { id: 'r2', key: 'po', kind: 'object', name: '采购单', description: '内部审批后的采购凭证', evidence: evidence('采购单经部门负责人审批', 7), humanLocked: false, deleted: false },
           { id: 'r3', key: 'invoice-po', kind: 'relation', name: '发票匹配采购单', description: '', relation: { from: 'invoice', to: 'po', label: '须匹配' }, evidence: evidence('付款前发票须与采购单金额一致', 12), humanLocked: false, deleted: false },
-          { id: 'r4', key: 'ap-clerk', kind: 'employee', name: '应付专员', description: '不是本体对象', evidence: evidence('应付专员负责付款', 20), humanLocked: false, deleted: false },
+          { id: 'r4', key: 'ap-clerk', kind: 'employee', name: '应付专员', description: '核对付款', evidence: evidence('应付专员负责付款', 20), humanLocked: false, deleted: false, assignment: { tools: [], sops: [] } },
         ],
         mcpRecommendations: [],
       },
@@ -128,14 +128,16 @@ test('ontology renders objects, a relation and their evidence on the real page (
   );
   await page.goto('/#brain?tab=ontology');
   const ontology = page.getByRole('region', { name: '本体关系图', exact: true });
-  const canvas = ontology.getByRole('img', { name: /2 个业务对象 · 1 条关系/ });
-  await expect(canvas.locator('.onto-node')).toHaveCount(2); // the employee recommendation is not an ontology object
-  await expect(canvas.locator('.onto-link-line')).toHaveAttribute('marker-end', /onto-arrow/);
+  const canvas = ontology.getByRole('img', { name: /个实体 ·/ });
+  await expect(canvas.locator('.onto-node')).toHaveCount(4); // 2 objects + employee + source document
+  await expect(canvas.getByLabel('应付专员, 数字员工')).toBeVisible();
+  await expect(canvas.locator('.onto-link-line').first()).toHaveAttribute('marker-end', /onto-arrow/);
   const inspector = ontology.locator('.onto-panel');
   await inspector.getByRole('button', { name: /供应商发票/ }).click();
   await expect(inspector).toContainText('采购制度.md#L3');
   await expect(inspector).toContainText('供应商发票须附采购单号');
-  await inspector.getByRole('button', { name: /须匹配.*采购单/ }).click();
+  await expect(inspector.locator('.onto-rel-table')).toBeVisible();
+  await inspector.getByRole('button', { name: '须匹配', exact: true }).click();
   await expect(inspector).toContainText('采购制度.md#L12');
   await expect(inspector).toContainText('付款前发票须与采购单金额一致');
 
