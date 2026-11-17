@@ -155,7 +155,8 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole('button', { name: 'EN', exact: true }).click();
     await expect(page.getByLabel('Published workflow')).toHaveValue(SOP);
-    await expect(run.locator('[data-run-status]')).toHaveText('Completed');
+    const mobileRun = page.getByRole('region', { name: 'Run history' }).locator('li[data-run]').filter({ hasText: 'INV-480' });
+    await expect(mobileRun.locator('[data-run-status]')).toHaveText('Completed');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.getByRole('button', { name: '中文', exact: true }).click();
     await page.setViewportSize({ width: 1440, height: 900 });
