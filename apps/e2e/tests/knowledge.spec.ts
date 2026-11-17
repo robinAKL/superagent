@@ -190,8 +190,8 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await privateDrafts.getByText('查看来源依据', { exact: true }).last().click();
   await expect(privateDrafts.getByText('退货手册 MCP / handbook://procedures/returns', { exact: true }).last()).toBeVisible();
   await page.getByRole('tab', { name: '企业流程', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('无法读取流程列表');
-  await expect(page.getByRole('region', { name: '流程包' }).getByText('退货审核流程')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
+  await expect(page.getByRole('group', { name: '流程图', exact: true })).toBeVisible();
   await page.getByRole('link', { name: '查看我的 MCP 流程草案', exact: true }).click();
   await expect(privateDrafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
   await page.goto('/#brain?tab=ontology');

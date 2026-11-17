@@ -17,6 +17,7 @@ export interface LensDraft {
   id: string; kind: string; name: string; description: string; humanLocked?: boolean;
   evidence: LensEvidence[]; relation?: { from: string; to: string; label: string };
   recordedAt?: string; effectiveFrom?: string; effectiveTo?: string;
+  ruleLike?: boolean;
 }
 export interface LensRun { id: string; status: string; createdAt?: string }
 export interface LensItem { id: string; title: string; version: string; confirmed: boolean; confirmedAt?: string }
@@ -38,7 +39,7 @@ const GOAL = /目标|指标|评价|标准|考核|KPI|SLA|goal|target|metric|crit
 const EXCEPTION = /例外|异常|特殊情况|经验|教训|除非|exception|unless|lesson|edge case/i;
 
 /** Multi-label: one draft can be a fact, a rule and a condition at the same time (prototype v12 「多标签分类」). */
-export function dimensionsOf(draft: Pick<LensDraft, 'kind' | 'name' | 'description' | 'relation'>): Dimension[] {
+export function dimensionsOf(draft: Pick<LensDraft, 'kind' | 'name' | 'description' | 'relation' | 'ruleLike'>): Dimension[] {
   const text = `${draft.name} ${draft.description} ${draft.relation?.label ?? ''}`;
   const out = new Set<Dimension>();
   if (draft.kind === 'employee') out.add('role');
@@ -46,6 +47,7 @@ export function dimensionsOf(draft: Pick<LensDraft, 'kind' | 'name' | 'descripti
   if (draft.kind === 'tool') out.add('fact');
   if (draft.kind === 'object') { out.add('term'); out.add('fact'); }
   if (draft.kind === 'relation') out.add('fact');
+  if (draft.ruleLike) out.add('rule');
   // Rules and conditions are statements (relations, workflows); a role, tool or object name is not one.
   const statement = !['employee', 'tool', 'object'].includes(draft.kind);
   if (statement && RULE.test(text)) out.add('rule');

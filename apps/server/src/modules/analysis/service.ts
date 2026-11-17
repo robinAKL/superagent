@@ -63,7 +63,7 @@ export function validateProposals(value: unknown): Omit<Recommendation, 'id' | '
     const workflow = p.kind === 'sop' ? recommendedWorkflow(p.workflow, evidence.length) : undefined;
     const day = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
     const validity = { ...(day(p.effectiveFrom) ? { effectiveFrom: day(p.effectiveFrom) } : {}), ...(day(p.effectiveTo) ? { effectiveTo: day(p.effectiveTo) } : {}) };
-    return { workflow, key: p.key as string, name: p.name as string, description: p.description as string, kind: p.kind as Recommendation['kind'], evidence, ...assignment, ...validity, ...(p.kind==='relation'?{relation:{from:relation!.from as string,to:relation!.to as string,label:relation!.label as string}}:{}) };
+    return { workflow, key: p.key as string, name: p.name as string, description: p.description as string, kind: p.kind as Recommendation['kind'], evidence, ...assignment, ...validity, ...(p.ruleLike === true ? { ruleLike: true } : {}), ...(p.kind==='relation'?{relation:{from:relation!.from as string,to:relation!.to as string,label:relation!.label as string}}:{}) };
   });
 }
 
