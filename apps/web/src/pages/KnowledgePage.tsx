@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useLang, useT, type Dict } from '../i18n';
 import './KnowledgePage.css';
@@ -69,6 +69,7 @@ const TEXT = {
     reqFailedHttp: 'Request failed (HTTP {status})',
     evidenceLocator: 'Version {version} · Chars {start}–{end}',
     evidenceSource: 'Source {sourceId}',
+    evidenceExcerpt: 'Source excerpt',
     noEvidence: 'No locatable evidence; cannot generate or adopt recommendations from this.',
     scopeMailbox: 'Mailbox',
     scopeFolder: 'Mail folder',
@@ -98,20 +99,18 @@ const TEXT = {
     recLockSuccess: 'Draft saved and locked by human.',
     recDraftKind: '{kind} draft',
     recHumanLocked: 'Human locked',
-    recPendingReview: 'Suggestion · pending review',
-    recOriginManual: 'Manual entry · not inferred from documents',
-    recOriginInferred: 'Document-inferred · verify source evidence',
+    recPendingReview: 'Pending review',
+    recOriginManual: 'Entered manually',
     recStaleAlert: 'Evidence version changed and old citations were withdrawn. Manual content is kept; review new suggestions before adopting.',
     recName: 'Name',
     recDesc: 'Description',
-    recSaveLockBtn: 'Save & human lock',
+    recSaveLockBtn: 'Save and lock',
     recDeleteSuccess: 'Draft deleted; future analyses will not restore it automatically.',
     recDeleteBtn: 'Delete draft',
     recProposalTitle: 'Analysis proposed a change without overwriting manual content',
     recAdoptSuccess: 'Change adopted and locked by human.',
     recAdoptBtn: 'Verify & adopt this change',
-    recManualNoEvidence: 'Entered manually; no document-inferred evidence.',
-    recViewEvidence: 'View evidence · {count} item(s)',
+    recEvidenceTitle: 'Source evidence',
     connCreatedNotice: 'Connection draft created. Verify the scope and confirm it.',
     spaceSavedNotice: 'Knowledge space name saved (metadata only).',
     manualRoleSavedNotice: 'Manual role added; this does not automatically enable material analysis.',
@@ -287,6 +286,7 @@ const TEXT = {
     reqFailedHttp: '请求失败（HTTP {status}）',
     evidenceLocator: '版本 {version} · 字符 {start}–{end}',
     evidenceSource: '来源 {sourceId}',
+    evidenceExcerpt: '来源原文',
     noEvidence: '没有可定位依据，不能据此生成或采纳建议。',
     scopeMailbox: '邮箱',
     scopeFolder: '邮件文件夹',
@@ -316,9 +316,8 @@ const TEXT = {
     recLockSuccess: '草案已保存并由人工锁定。',
     recDraftKind: '{kind}草案',
     recHumanLocked: '人工锁定',
-    recPendingReview: '建议 · 待核对',
-    recOriginManual: '人工补充 · 不是文档推断',
-    recOriginInferred: '文档推断 · 需核对来源依据',
+    recPendingReview: '待核对',
+    recOriginManual: '人工录入',
     recStaleAlert: '依据版本已变化，旧引用已撤回。人工内容保留，请核对新建议后决定是否采纳。',
     recName: '名称',
     recDesc: '说明',
@@ -328,8 +327,7 @@ const TEXT = {
     recProposalTitle: '分析提出了修改，尚未覆盖人工内容',
     recAdoptSuccess: '修改已由人工采纳并锁定。',
     recAdoptBtn: '核对后采纳这次修改',
-    recManualNoEvidence: '此角色由人工录入，没有文档推断依据。',
-    recViewEvidence: '查看依据 · {count} 处',
+    recEvidenceTitle: '来源依据',
     connCreatedNotice: '连接草案已创建，请核对范围后确认。',
     spaceSavedNotice: '知识空间名称已保存，仅更新名称元数据。',
     manualRoleSavedNotice: '人工角色已补充，不会据此自动启用资料分析。',
@@ -490,14 +488,35 @@ const STATUS_KEYS: Record<string, TextKey> = {
 
 const CARD_ORDER = ['local-file', 'email', 'sharepoint', 'database'] as const;
 
-function EvidenceList({ evidence, t }: { evidence: Evidence[]; t: Translate }) {
-  return evidence.length ? <ol className="knowledge-evidence">
-    {evidence.map((entry, index) => <li key={`${entry.sourceId}:${entry.version}:${entry.start}:${index}`}>
-      <blockquote>{entry.quote}</blockquote>
-      <p>{entry.locator} <span>· {t('evidenceLocator', { version: entry.version, start: entry.start, end: entry.end })}</span></p>
-      <small>{t('evidenceSource', { sourceId: entry.sourceId })}</small>
-    </li>)}
-  </ol> : <p className="knowledge-empty">{t('noEvidence')}</p>;
+function EvidenceList({ evidence, t, collapsible = false }: { evidence: Evidence[]; t: Translate; collapsible?: boolean }) {
+  const group = useId();
+  if (!evidence.length) return <p className="knowledge-empty">{t('noEvidence')}</p>;
+
+  return <ol className={collapsible ? 'knowledge-evidence knowledge-evidence-collapsible' : 'knowledge-evidence'}>
+    {evidence.map((entry, index) => {
+      const position = t('evidenceLocator', { version: entry.version, start: entry.start, end: entry.end });
+      const source = t('evidenceSource', { sourceId: entry.sourceId });
+      return <li key={`${entry.sourceId}:${entry.version}:${entry.start}:${index}`}>
+        {collapsible ? <details name={group}>
+          <summary>
+            <span className="knowledge-evidence-location">{entry.locator || source}</span>
+            <span className="knowledge-evidence-preview" aria-hidden="true">{entry.quote}</span>
+          </summary>
+          <div className="knowledge-evidence-body">
+            <div className="knowledge-evidence-scroll" role="region" aria-label={t('evidenceExcerpt')} tabIndex={0}>
+              <blockquote>{entry.quote}</blockquote>
+            </div>
+            <small>{position}</small>
+            <small>{source}</small>
+          </div>
+        </details> : <>
+          <blockquote>{entry.quote}</blockquote>
+          <p>{entry.locator} <span>· {position}</span></p>
+          <small>{source}</small>
+        </>}
+      </li>;
+    })}
+  </ol>;
 }
 
 function ScopeSummary({ scope, projectIds, t }: { scope: SourceScope; projectIds?: string[]; t: Translate }) {
@@ -598,28 +617,38 @@ function RecommendationCard({ recommendation: r, disabled, onAction, label, t }:
     await onAction(`lock:${r.id}`, `/recommendations/${encodeURIComponent(r.id)}/lock`, { name: name.trim(), description: description.trim() }, t('recLockSuccess'));
   }
   return <article className="knowledge-recommendation">
-    <div className="knowledge-row">
-      <span className="knowledge-kind">{t('recDraftKind', { kind: label(r.kind) })}</span>
-      <span className={`knowledge-badge ${r.humanLocked ? 'is-gold' : ''}`}>{r.humanLocked ? t('recHumanLocked') : t('recPendingReview')}</span>
-    </div>
-    <p className="helper">{r.origin === 'manual' ? t('recOriginManual') : t('recOriginInferred')}</p>
-    {r.stale ? <p className="knowledge-alert">{t('recStaleAlert')}</p> : null}
-    {r.relation ? <p className="helper">{r.relation.from} → {r.relation.to} · {r.relation.label}</p> : null}
-    <form onSubmit={save} className="knowledge-form">
-      <label className="field"><span>{t('recName')}</span><input required maxLength={160} value={name} onChange={event => setName(event.target.value)} /></label>
-      <label className="field"><span>{t('recDesc')}</span><textarea required maxLength={4000} rows={3} value={description} onChange={event => setDescription(event.target.value)} /></label>
-      <div className="knowledge-actions">
-        <button className="btn" disabled={disabled || !name.trim() || !description.trim() || (r.origin !== 'manual' && !r.evidence.length)}>{t('recSaveLockBtn')}</button>
+    <header className="knowledge-recommendation-head">
+      <div>
+        <h3>{t('recDraftKind', { kind: label(r.kind) })}</h3>
+        {r.origin === 'manual' ? <p className="helper">{t('recOriginManual')}</p> : null}
+      </div>
+      <span className={`knowledge-badge ${r.humanLocked ? 'is-green' : ''}`}>{r.humanLocked ? t('recHumanLocked') : t('recPendingReview')}</span>
+    </header>
+    <form onSubmit={save}>
+      {r.stale ? <p className="knowledge-alert">{t('recStaleAlert')}</p> : null}
+      <div className="knowledge-recommendation-body">
+        <div className="knowledge-form knowledge-recommendation-editor">
+          {r.relation ? <p className="helper">{r.relation.from} → {r.relation.to} · {r.relation.label}</p> : null}
+          <label className="field"><span>{t('recName')}</span><input required maxLength={160} value={name} onChange={event => setName(event.target.value)} /></label>
+          <label className="field"><span>{t('recDesc')}</span><textarea required maxLength={4000} rows={4} value={description} onChange={event => setDescription(event.target.value)} /></label>
+        </div>
+        {r.origin !== 'manual' ? <section className="knowledge-recommendation-evidence" aria-label={t('recEvidenceTitle')}>
+          <h4>{t('recEvidenceTitle')} <span>{r.evidence.length}</span></h4>
+          <EvidenceList evidence={r.evidence} t={t} collapsible />
+        </section> : null}
+      </div>
+      {r.proposedChange ? <section className="knowledge-proposal">
+        <h4>{t('recProposalTitle')}</h4>
+        <p><strong>{r.proposedChange.name}</strong></p>
+        <p>{r.proposedChange.description}</p>
+        {r.proposedChange.evidence ? <EvidenceList evidence={r.proposedChange.evidence} t={t} collapsible /> : null}
+        <button className="btn" type="button" disabled={disabled} onClick={() => void onAction(`adopt:${r.id}`, `/recommendations/${encodeURIComponent(r.id)}/adopt`, {}, t('recAdoptSuccess'))}>{t('recAdoptBtn')}</button>
+      </section> : null}
+      <div className="knowledge-recommendation-actions">
         <button className="btn knowledge-danger" type="button" disabled={disabled} onClick={() => void onAction(`delete:${r.id}`, `/recommendations/${encodeURIComponent(r.id)}/delete`, {}, t('recDeleteSuccess'))}>{t('recDeleteBtn')}</button>
+        <button className="btn primary" type="submit" disabled={disabled || !name.trim() || !description.trim() || (r.origin !== 'manual' && !r.evidence.length)}>{t('recSaveLockBtn')}</button>
       </div>
     </form>
-    {r.proposedChange ? <div className="knowledge-proposal">
-      <strong>{t('recProposalTitle')}</strong>
-      <p>{r.proposedChange.name}</p><p>{r.proposedChange.description}</p>
-      {r.proposedChange.evidence ? <EvidenceList evidence={r.proposedChange.evidence} t={t} /> : null}
-      <button className="btn" type="button" disabled={disabled} onClick={() => void onAction(`adopt:${r.id}`, `/recommendations/${encodeURIComponent(r.id)}/adopt`, {}, t('recAdoptSuccess'))}>{t('recAdoptBtn')}</button>
-    </div> : null}
-    {r.origin === 'manual' ? <p className="helper">{t('recManualNoEvidence')}</p> : <details><summary>{t('recViewEvidence', { count: r.evidence.length })}</summary><EvidenceList evidence={r.evidence} t={t} /></details>}
   </article>;
 }
 
