@@ -120,7 +120,7 @@ export function OrganizationPublish({ embedded, confirmRef, onGate }: {
     {notice ? <p role="status">{notice}</p> : null}
     {org?.canConfirm === false ? <p className="helper">{t('noAccess')}</p> : null}
     {org && org.blocked ? <p className="helper">{t('blocked')} <a href="#employees">{t('goEmployees')}</a></p> : null}
-    {ready ? <>
+    {ready && org ? <>
       <TeamSizePlanner key={org.employees.length} current={org.employees.length} busy={busy} planning={planning} onPlan={count => void planTeam(count)} />
       {org.teamPlan ? <TeamPlanPreview plan={org.teamPlan} roles={org.employees} tools={org.tools} sops={org.sops} busy={busy} fallback={fallback}
         onAdopt={() => void call('/organization/plan/adopt', { method: 'POST', body: JSON.stringify({ planId: org.teamPlan!.id }) }).then(load)}
