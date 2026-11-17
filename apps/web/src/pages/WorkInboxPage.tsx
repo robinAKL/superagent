@@ -121,7 +121,11 @@ export function toolsAwaitingPublish(tools: { stage?: string }[]): number {
 const CHROME = {
   en: {
     pageAria: 'My work', title: 'My work', subtitle: 'Check data, decide, and finish work yourself. Every step has evidence and a next owner.',
-    status: 'Work status', grouped: 'Open items (grouped)', project: 'Project', projectFilter: 'Filter by project', allProjects: 'All projects',
+    status: 'Work status', grouped: 'All', project: 'Project', projectFilter: 'Filter by project', allProjects: 'All projects',
+    kindFilter: 'Filter by type', allKinds: 'All types',
+    assigneeFilter: 'Filter by assignee', allAssignees: 'All assignees',
+    searchLabel: 'Search work items', searchPlaceholder: 'Search title, ID, or owner…',
+    clearFilters: 'Clear filters', filtersToggle: 'Filters',
     exceptions: 'Exceptions only', visibility: 'You only see items assigned to you. The server filters the list by role.',
     failed: 'Could not load the inbox. Try again shortly.', loading: 'Loading…',
     group_action: 'Needs my action', group_waiting: 'Waiting on someone else', group_internal: 'Internal, unfinished',
@@ -133,7 +137,11 @@ const CHROME = {
   },
   zh: {
     pageAria: '待我处理', title: '待我处理', subtitle: '核对数据、作决定、亲自完成工作；每一步都有证据和下一位责任人。',
-    status: '工作状态', grouped: '在办事项（分组）', project: '项目', projectFilter: '项目筛选', allProjects: '全部项目',
+    status: '工作状态', grouped: '全部', project: '项目', projectFilter: '项目筛选', allProjects: '全部项目',
+    kindFilter: '按类型筛选', allKinds: '全部类型',
+    assigneeFilter: '按负责人筛选', allAssignees: '全部负责人',
+    searchLabel: '搜索工作项', searchPlaceholder: '搜索标题、编号或负责人…',
+    clearFilters: '清除筛选', filtersToggle: '筛选条件',
     exceptions: '只看例外', visibility: '当前身份只能看到分给自己的事项。名单由服务端按角色过滤。',
     failed: '没能读取待办，请稍后重试。', loading: '正在读取…',
     group_action: '需要我行动', group_waiting: '等待外部', group_internal: '内部未完',
@@ -170,9 +178,13 @@ export function WorkInboxPage() {
   const [toolStages, setToolStages] = useState<{ stage?: string }[]>([]);
   const [failed, setFailed] = useState(false);
   const [group, setGroup] = useState<Group | 'all'>('all');
+  const [kindFilter, setKindFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState('');
   const [project, setProject] = useState('');
   const [projects, setProjects] = useState<string[]>([]);
   const [exceptionsOnly, setExceptionsOnly] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
 
@@ -204,7 +216,28 @@ export function WorkInboxPage() {
   }, [project, exceptionsOnly]);
   useEffect(() => void load(), [load]);
 
-  const visible = (items ?? []).filter((item) => group === 'all' || groupOf(item) === group);
+  const assignees = [...new Set((items ?? []).map((item) => item.assigneeUserId).filter((v): v is string => !!v))].sort();
+  const kinds = [...new Set((items ?? []).map((item) => item.kind).filter(Boolean))];
+  const needle = search.trim().toLowerCase();
+  const visible = (items ?? []).filter((item) => {
+    if (group !== 'all' && groupOf(item) !== group) return false;
+    if (kindFilter && item.kind !== kindFilter) return false;
+    if (assigneeFilter && item.assigneeUserId !== assigneeFilter) return false;
+    if (needle) {
+      const hay = `${item.id} ${String(item.payload.title ?? '')} ${item.kind} ${w(KIND_LABEL[item.kind] ?? item.kind)} ${item.assigneeUserId ?? ''} ${item.waitingOn ?? ''} ${item.projectId ?? ''}`.toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
+  });
+  const activeFilterCount = (group !== 'all' ? 1 : 0) + (kindFilter ? 1 : 0) + (assigneeFilter ? 1 : 0) + (project ? 1 : 0) + (exceptionsOnly ? 1 : 0) + (needle ? 1 : 0);
+  function clearFilters() {
+    setGroup('all');
+    setKindFilter('');
+    setAssigneeFilter('');
+    setProject('');
+    setExceptionsOnly(false);
+    setSearch('');
+  }
   const open = (items ?? []).find((item) => item.id === openId) ?? null;
 
   async function post(path: string, body: unknown, done?: (data: Record<string, unknown>) => string) {
@@ -227,30 +260,51 @@ export function WorkInboxPage() {
   const groupLabel = (id: Group) => t(id === 'action' ? 'group_action' : id === 'waiting' ? 'group_waiting' : 'group_internal');
   return (
     <section className="exec-inbox" aria-label={t('pageAria')}>
-      <header className="page-head">
-        <h1 id="page-title">{t('title')}</h1>
-        <p>{t('subtitle')}</p>
+      <header className="page-head inbox-head">
+        <div>
+          <h1 id="page-title">{t('title')}</h1>
+          <p>{t('subtitle')}</p>
+        </div>
+        <button type="button" className="inbox-filter-toggle" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((v) => !v)}>
+          {t('filtersToggle')}{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+        </button>
       </header>
-      <div className="exec-toolbar">
-        <label>
-          {t('status')}
-          <select value={group} onChange={(event) => setGroup(event.target.value as Group | 'all')}>
-            <option value="all">{t('grouped')}</option>
-            {GROUPS.map((g) => <option key={g.id} value={g.id}>{groupLabel(g.id)}</option>)}
+      <div className={`exec-toolbar inbox-toolbar ${filtersOpen ? 'is-open' : ''}`}>
+        <div className="inbox-segmented" role="group" aria-label={t('status')}>
+          <button type="button" aria-pressed={group === 'all'} onClick={() => setGroup('all')}>{t('grouped')}</button>
+          {GROUPS.map((g) => (
+            <button key={g.id} type="button" aria-pressed={group === g.id} onClick={() => setGroup(g.id)}>{groupLabel(g.id)}</button>
+          ))}
+        </div>
+        <div className="inbox-filter-controls">
+          <select aria-label={t('kindFilter')} value={kindFilter} onChange={(event) => setKindFilter(event.target.value)}>
+            <option value="">{t('allKinds')}</option>
+            {kinds.map((k) => <option key={k} value={k}>{w(KIND_LABEL[k] ?? k)}</option>)}
           </select>
-        </label>
-        <label>
-          {t('project')}
+          <select aria-label={t('assigneeFilter')} value={assigneeFilter} onChange={(event) => setAssigneeFilter(event.target.value)}>
+            <option value="">{t('allAssignees')}</option>
+            {assignees.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
           <select aria-label={t('projectFilter')} value={project} onChange={(event) => setProject(event.target.value)}>
             <option value="">{t('allProjects')}</option>
             {projects.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
-        </label>
-        <label className="exec-check">
-          <input type="checkbox" checked={exceptionsOnly} onChange={(event) => setExceptionsOnly(event.target.checked)} />
-          {t('exceptions')}
-        </label>
-        <p>{t('visibility')}</p>
+          <label className="exec-check">
+            <input type="checkbox" checked={exceptionsOnly} onChange={(event) => setExceptionsOnly(event.target.checked)} />
+            {t('exceptions')}
+          </label>
+          <input
+            type="search"
+            className="inbox-search"
+            aria-label={t('searchLabel')}
+            placeholder={t('searchPlaceholder')}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          {activeFilterCount > 0 ? (
+            <button type="button" className="inbox-clear-btn" onClick={clearFilters}>{t('clearFilters')}</button>
+          ) : null}
+        </div>
       </div>
       <div className="exec-grid">
         <div className="panel exec-pane">

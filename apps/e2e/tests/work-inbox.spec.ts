@@ -311,3 +311,46 @@ test.describe('in English', () => {
     }
   });
 });
+
+test('compact filter toolbar filters and clears, and layout stays wider on list than drawer without horizontal overflow', async ({ page }) => {
+  const staff = uid('filter');
+  const first = await item(page, { kind: 'data_check', assigneeUserId: staff, projectId: 'P-F1', payload: { title: '核对季度对账单', amount: 100 } });
+  await item(page, { kind: 'action_approval', assigneeUserId: staff, projectId: 'P-F2', payload: { title: '批准供应商付款', amount: 200 } });
+  await item(page, { kind: 'manual_execution', assigneeUserId: staff, projectId: 'P-F1', waitingOn: '法务复核', payload: { title: '等待法务回传' } });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await as(page, `${staff}|employee|P-F1,P-F2`);
+  await expect(page.locator('[data-item]')).toHaveCount(3);
+
+  // Filter by status segment, kind, and search, then clear all filters in one click
+  await page.getByRole('group', { name: '工作状态' }).getByRole('button', { name: '需要我行动', exact: true }).click();
+  await expect(page.locator('[data-item]')).toHaveCount(2);
+  await page.getByLabel('按类型筛选').selectOption('data_check');
+  await expect(page.locator('[data-item]')).toHaveCount(1);
+  await page.getByLabel('搜索工作项').fill('对账单');
+  await expect(page.locator('[data-item]')).toHaveCount(1);
+
+  await page.getByRole('button', { name: '清除筛选', exact: true }).click();
+  await expect(page.locator('[data-item]')).toHaveCount(3);
+
+  // At 1440px with drawer open, main list pane is wider than side drawer and has no horizontal overflow
+  await openItem(page, first);
+  const paneBox = await page.locator('.exec-inbox .exec-pane').boundingBox();
+  const drawerBox = await drawer(page).boundingBox();
+  expect(paneBox).not.toBeNull();
+  expect(drawerBox).not.toBeNull();
+  expect(paneBox!.width).toBeGreaterThan(drawerBox!.width);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  // At 1024px and 375px: no horizontal overflow, and mobile filter toggle collapses/expands filters
+  await page.setViewportSize({ width: 1024, height: 900 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  const toggle = page.getByRole('button', { name: /筛选条件/ });
+  await expect(toggle).toBeVisible();
+  await expect(page.getByLabel('搜索工作项')).toBeHidden();
+  await toggle.click();
+  await expect(page.getByLabel('搜索工作项')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
