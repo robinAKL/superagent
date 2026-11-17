@@ -41,8 +41,10 @@ export function keepEndToEndSops(drafts: unknown): unknown {
   const keep = records
     .filter(d => {
       if (d.kind !== 'sop' || stepCount(d) < 3) return false;
-      const first = (d.workflow as { steps: { kind?: string }[] }).steps[0];
-      return first?.kind === 'trigger';
+      const steps = (d.workflow as { steps: { kind?: string; citations?: unknown[] }[] }).steps;
+      if (steps[0]?.kind !== 'trigger') return false;
+      const cited = new Set(steps.flatMap(step => Array.isArray(step.citations) ? step.citations : []));
+      return cited.size >= 2;
     })
     .sort((a, b) => stepCount(b) - stepCount(a))
     .slice(0, MAX_SOP_DRAFTS);

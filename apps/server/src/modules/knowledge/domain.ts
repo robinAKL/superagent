@@ -210,8 +210,10 @@ export function mergeRecommendations(
     throw new KnowledgeError('unsupported_relation', '关系必须引用当前有依据且未删除的业务对象草案。', 422);
   }
   const liveSops = new Set(accepted.filter(p => p.kind === 'sop').map(p => p.key));
-  for (const r of scoped) {
-    if (r.kind === 'sop' && r.origin === 'inferred' && !r.humanLocked && !r.deleted && !liveSops.has(r.key)) r.deleted = true;
+  const dropped = scoped.filter(r => r.kind === 'sop' && r.origin === 'inferred' && !r.humanLocked && !r.deleted && !liveSops.has(r.key));
+  for (const r of dropped) {
+    const i = state.recommendations.indexOf(r);
+    if (i >= 0) state.recommendations.splice(i, 1);
   }
   return { accepted, skippedRelations };
 }
