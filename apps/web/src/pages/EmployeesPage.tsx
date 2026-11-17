@@ -341,7 +341,8 @@ export function EmployeesPage() {
   const newTools = org?.tools.filter(x => x.match === 'placeholder' && !x.toolId).length ?? 0;
   const newEmployees = org?.employees.filter(e => !e.employeeId).length ?? 0;
   const confirmedState = org?.confirmation && !org.changedSinceConfirmation && !org.missing;
-  const wall = !route.draft && team.length > 0;
+  // The wall follows a confirmed organization; before that the page guides through the draft (or says how to start).
+  const wall = !route.draft && team.length > 0 && !!org?.confirmation;
   useEffect(() => {
     if (!route.draft || !route.role || !org) return;
     document.getElementById(`role-${route.role}`)?.scrollIntoView({ block: 'start' });

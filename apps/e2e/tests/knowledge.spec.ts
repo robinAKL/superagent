@@ -163,7 +163,7 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   const draft = card(page, '退货专员');
   await expect(draft.getByText('仅自己可见的 MCP 分析草案')).toBeVisible();
   await draft.locator('summary').click();
-  await expect(draft.getByText('退货手册 MCP / handbook://procedures/returns')).toBeVisible();
+  await expect(draft.getByLabel('来源依据').getByText('退货手册 MCP / handbook://procedures/returns')).toBeVisible();
   await expect(draft.locator('blockquote')).toHaveText('角色：退货专员；责任：核对收货记录后登记退款。');
 
   await page.route('**/api/v1/sop', route => route.fulfill({ status: 503, json: {} }));
