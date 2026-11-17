@@ -228,7 +228,7 @@ export function SuperAgentPage() {
       <div className="tabs" role="tablist" aria-label={t('title')}>
         {PRIMARY_TABS.map(entry => <button key={entry} role="tab" type="button" aria-selected={tab === entry || (entry === 'context' && (tab === 'mcp' || tab === 'ontology')) || (entry === 'sop' && tab === 'results')} className="tab" onClick={() => {
           if (tab !== entry) window.location.hash = entry === 'context' ? 'brain' : `brain?tab=${entry}${fromOrganization ? '&org=1' : ''}`;
-        }}>{t(entry === 'context' ? 'tabConfig' : 'tabFlow')}{entry === 'sop' && count ? ` (${count})` : ''}</button>)}
+        }}>{t(entry === 'context' ? 'tabConfig' : 'tabFlow')}{entry === 'sop' && count ? <span aria-hidden="true"> ({count})</span> : null}</button>)}
       </div>
       {tab === 'context' ? <>
         <CompanyContextPanel fromOrganization={fromOrganization} />
