@@ -32,7 +32,7 @@ it('resolves fenced drafts for uploaded files and MCP to the exact supplied cita
    return {text:'```json\n'+JSON.stringify([draft])+'\n```',toolCalls:[],usage:{inputTokens:1,outputTokens:1},stopReason:'stop'};
   },
  });
- expect(await model.recommend({tenantId:'t',runId:'r',evidence:[file,live],maxOutputTokens:4096})).toEqual([{...draft,evidence:[file,live]}]);
+ expect(await model.recommend({tenantId:'t',runId:'r',evidence:[file,live],maxOutputTokens:4096})).toEqual([{...draft,kind:'object',ruleLike:true,evidence:[file,live]}]);
 });
 
 it('retains real workflow nodes only with connected dependencies and supplied step citations', async () => {
@@ -44,10 +44,11 @@ it('retains real workflow nodes only with connected dependencies and supplied st
   const steps = [
     { key: 'receive', kind: 'trigger', label: '收到订单', after: [], citations: [1] },
     { key: 'review', kind: 'employee', label: '核对客户信用额度', after: ['receive'], citations: [2], employeeKey: 'credit-reviewer' },
+    { key: 'record', kind: 'tool', label: '登记结论', after: ['review'], citations: [3] },
   ];
   const proposal = {
     key: 'order-review', kind: 'sop', name: '订单审核', description: '收到订单后核对客户信用额度。',
-    evidence: [2, 1], workflow: { steps },
+    evidence: [2, 1, 3], workflow: { steps },
   };
   const model = new GatewayAnalysisModel({
     check: async () => ({ ok: true, model: 'test' }),
@@ -58,13 +59,14 @@ it('retains real workflow nodes only with connected dependencies and supplied st
   expect(draft?.workflow?.steps).toMatchObject([
     { key: 'receive', citations: [2], after: [] },
     { key: 'review', citations: [1], after: ['receive'], employeeKey: 'credit-reviewer' },
+    { key: 'record', citations: [3], after: ['review'] },
   ]);
   expect(draft?.evidence[0]?.locator).toBe('Guide#L2');
   steps[1]!.after = ['unknown'];
   [draft] = validateProposals(await model.recommend(input));
   expect(draft?.workflow).toBeUndefined();
   steps[1]!.after = ['receive'];
-  steps[1]!.citations = [3]; // present in the input, absent from the proposal's verified citations
+  steps[1]!.citations = [4]; // present in the input, absent from the proposal's verified citations
   [draft] = validateProposals(await model.recommend(input));
   expect(draft?.workflow).toBeUndefined();
 });
