@@ -421,9 +421,8 @@ test('shrinking a team of 8 to 2 and confirming leaves exactly 2 employees on th
   // Not adopted yet: confirming now would keep 8 roles, and the bar says so.
   await expect(page.locator('.org-plan-pending')).toContainText('2 个岗位的人数方案还没采用');
   await expect(page.locator('.org-plan-pending')).toContainText('当前 8 个岗位');
-  await page.getByRole('button', { name: '采用这个方案', exact: true }).click();
+  await page.getByRole('button', { name: '采用这个方案并更新正式团队', exact: true }).click();
   await expect(page.locator('.org-plan-pending')).toHaveCount(0);
-  await page.getByRole('button', { name: /确认组织|应用修改/ }).click();
   await expect(page.getByRole('status').filter({ hasText: '移除 8 名' })).toBeVisible();
   await page.goto('/#employees');
   await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(2);
@@ -436,6 +435,36 @@ test('shrinking a team of 8 to 2 and confirming leaves exactly 2 employees on th
   await expect(page.locator('#room-team [data-team-member^="emp-org-"]')).toHaveCount(2);
   for (const e of team) await expect(page.locator(`#room-team [data-team-member="${e.id}"]`)).toBeVisible();
   // Leave no draft or team behind for later files (the shell spec checks the empty state).
+  await response(page.request.post('/__test/knowledge/reset', { data: {} }));
+});
+
+test('shrinking a confirmed team of 12 to 1 on adopt leaves one employee on the wall, registry and command room', async ({ page }) => {
+  const TWELVE = ['采购专员', '财务专员', '仓储专员', '业务主管', '客服专员', '质检专员', '物流专员', '合同专员', '订单专员', '信用专员', '出纳专员', '复核专员']
+    .map((name, i) => `角色：${name}；责任：负责第${i + 1}类业务的核对与登记。`).concat('工具：只读单据查询；职责：按编号查证业务记录。').join(String.fromCharCode(10));
+  await localFile(page, true, TWELVE); await analyse(page);
+  await page.goto('/#employees?view=draft');
+  await page.getByRole('button', { name: '确认组织', exact: true }).click();
+  await page.goto('/#employees');
+  await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(12);
+
+  await page.goto('/#employees?view=draft');
+  await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /岗位（12）/ })).toBeVisible();
+  await page.locator('.team-size-stepper input').fill('1');
+  await page.getByRole('button', { name: '按人数重新规划', exact: true }).click();
+  await expect(page.getByText('新方案：1 个岗位')).toBeVisible();
+  await expect(page.getByRole('heading', { name: /岗位（12）/ })).toBeVisible();
+  await page.getByRole('button', { name: '采用这个方案并更新正式团队', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: '移除 12 名' })).toBeVisible();
+  await page.goto('/#employees');
+  await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(1);
+  const registry = await (await page.request.get('/api/v1/employees/')).json() as { id: string }[];
+  const team = registry.filter(e => e.id.startsWith('emp-org-'));
+  expect(team).toHaveLength(1);
+  await page.goto('/#room');
+  await page.getByRole('button', { name: '团队', exact: true }).click();
+  await expect(page.locator('#room-team [data-team-member^="emp-org-"]')).toHaveCount(1);
+  await expect(page.locator(`#room-team [data-team-member="${team[0]!.id}"]`)).toBeVisible();
   await response(page.request.post('/__test/knowledge/reset', { data: {} }));
 });
 

@@ -33,7 +33,7 @@ describe('team size planner', () => {
     expect(html).toContain('知识库问答');
     expect(html).toContain('将替换当前全部 3 个岗位');
     expect(html).toContain('其中 1 个是你改过的');
-    expect(html).toContain('采用这个方案');
+    expect(html).toContain('采用这个方案并更新正式团队');
   });
 
   it('marks a split role and blocks adopting a stale plan; English has no Chinese interface text', () => {
@@ -43,7 +43,7 @@ describe('team size planner', () => {
     const en = render('en', <TeamPlanPreview plan={split} roles={roles.map(r => ({ ...r, name: 'Role' }))} tools={[]} sops={[]} busy={false} fallback onAdopt={() => undefined} onDiscard={() => undefined} />);
     expect(en).toContain('Split from: Role');
     expect(en).toContain('Merged by shared work (no model used)');
-    expect(en).toMatch(/<button class="btn primary" type="button" disabled="">Use this plan<\/button>/);
+    expect(en).toMatch(/<button class="btn primary" type="button" disabled="">Use this plan and update the live team<\/button>/);
     expect(en).not.toMatch(/[一-鿿]/);
   });
 

@@ -135,11 +135,8 @@ describe('team plan flow (按人数重新规划)', () => {
     await expect(f.service.adoptTeamPlan(owner, { planId: plan.id })).rejects.toMatchObject({ code: 'plan_stale' });
 
     const fresh = await f.service.planTeam(owner, { count: 1 });
-    await f.service.adoptTeamPlan(owner, { planId: fresh.plan.id });
-    const before = await f.service.organization(owner);
-    expect(before.changedSinceConfirmation).toBe(true);
-    const confirmed = await f.service.confirmOrganization(owner);
-    expect(confirmed).toMatchObject({ createdEmployees: 1, retiredEmployees: 3 });
+    expect(await f.service.adoptTeamPlan(owner, { planId: fresh.plan.id })).toMatchObject({ createdEmployees: 1, retiredEmployees: 3 });
+    expect((await f.service.organization(owner)).changedSinceConfirmation).toBe(false);
     expect(f.employees.list()).toHaveLength(1);
   });
 
@@ -158,8 +155,7 @@ describe('team plan flow (按人数重新规划)', () => {
     f.employees.ensure({ id: 'emp-manual', name: '手工员工', duty: 'x', prompt: 'p', owner: 'alice', source: 'manual' });
 
     const { plan } = await f.service.planTeam(owner, { count: 2 });
-    await f.service.adoptTeamPlan(owner, { planId: plan.id });
-    const confirmed = await f.service.confirmOrganization(owner);
+    const confirmed = await f.service.adoptTeamPlan(owner, { planId: plan.id });
     expect(confirmed).toMatchObject({ createdEmployees: 2, retiredEmployees: 2, busyEmployees: [busyRole!.name] });
     const ids = f.employees.list().map(e => e.id);
     expect(ids).toEqual(expect.arrayContaining(['emp-org-other-tenant', 'emp-manual', busyRole!.employeeId!]));
@@ -179,8 +175,7 @@ describe('team plan flow (按人数重新规划)', () => {
     await b.service.confirmOrganization(tenantB);
     expect(employees.list()).toHaveLength(6);
     const { plan } = await a.service.planTeam(owner, { count: 1 });
-    await a.service.adoptTeamPlan(owner, { planId: plan.id });
-    expect(await a.service.confirmOrganization(owner)).toMatchObject({ createdEmployees: 1, retiredEmployees: 3, busyEmployees: [] });
+    expect(await a.service.adoptTeamPlan(owner, { planId: plan.id })).toMatchObject({ createdEmployees: 1, retiredEmployees: 3, busyEmployees: [] });
     const bIds = (await b.service.organization(tenantB)).employees.map(e => e.employeeId);
     expect(bIds).toHaveLength(3);
     expect(employees.list().map(e => e.id)).toEqual(expect.arrayContaining(bIds as string[]));
