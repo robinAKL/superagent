@@ -4,7 +4,9 @@ import { useLang, useT, type Dict } from '../i18n';
 import './EmployeesPage.css';
 import { PLAN_TEXT, planErrorKey, TeamPlanPreview, TeamSizePlanner, type TeamPlanView } from './TeamSizePlanner';
 import { translate } from '../i18n';
-import { EmployeeWall, type WallEmployee } from './EmployeeWall';
+import { EmployeeWall } from './EmployeeWall';
+import { EmployeeManage, type RegistryEmployee } from './EmployeeManage';
+import { EmployeeFeedback } from './EmployeeFeedback';
 
 /**
  * Digital employees = the organization draft (PRD §3.3 step 3 and §3.4). Step 2 of the main line:
@@ -252,7 +254,7 @@ export function RoleCard({ role, org, busy, t, onSave, onMerge, onRemove }: {
 /** #employees = card wall once the team exists; #employees?view=draft = the organization draft review. */
 function employeesRoute() {
   const params = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.hash.split('?')[1]);
-  return { draft: params.get('view') === 'draft', role: params.get('role') ?? '', add: params.has('add') };
+  return { draft: params.get('view') === 'draft', role: params.get('role') ?? '', add: params.has('add'), manage: params.get('manage') ?? '' };
 }
 
 export function EmployeesPage() {
@@ -264,7 +266,7 @@ export function EmployeesPage() {
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, []);
-  const [team, setTeam] = useState<WallEmployee[]>([]);
+  const [team, setTeam] = useState<RegistryEmployee[]>([]);
   const [org, setOrg] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -288,7 +290,7 @@ export function EmployeesPage() {
     try {
       const [organization, registry] = await Promise.all([
         call<Organization>('/organization'),
-        api<WallEmployee[]>('/api/v1/employees/').then(r => r.status === 200 && Array.isArray(r.body) ? r.body : []).catch(() => []),
+        api<RegistryEmployee[]>('/api/v1/employees/').then(r => r.status === 200 && Array.isArray(r.body) ? r.body : []).catch(() => []),
       ]);
       setOrg(organization); setTeam(registry); setLoadError(null);
     }
@@ -356,7 +358,12 @@ export function EmployeesPage() {
       </div>
     </header>
     {loadError ? <div className="org-alert" role="alert">{loadError}</div> : null}
-    <EmployeeWall employees={team} hasDraft={!!org && org.blocked !== 'no_employees'} />
+    <EmployeeWall employees={team} hasDraft={!!org && org.blocked !== 'no_employees'}
+      onManage={employee => { window.location.hash = `employees?manage=${encodeURIComponent(employee.id)}`; }} />
+    <EmployeeFeedback employees={team} />
+    {team.find(employee => employee.id === route.manage) ?
+      <EmployeeManage employee={team.find(employee => employee.id === route.manage)!} lang={lang}
+        onClose={() => { window.location.hash = 'employees'; }} onChanged={() => void load()} /> : null}
     {confirmedState ? <footer className="org-bar">
       <p>{t('summaryDone', { e: org!.confirmation!.employees, t: org!.confirmation!.tools })}</p>
       <a className="btn primary" href="#brain?org=1">{t('nextFlow')}</a>
