@@ -10,6 +10,7 @@ import { ToolService } from '../src/modules/tools/lifecycle.js';
 import { createOrganizationSink } from '../src/modules/employees/organization.js';
 
 const owner: UserContext = { tenantId: 'tenant-a', userId: 'alice', roles: ['owner'], projectScopes: ['project-a'] };
+const ownerA = owner;
 const GUIDE = '订单审核指南\n\n1. 收到订单后核对客户信用额度。\n2. 金额超过 5 万需主管审批。\n3. 用知识库问答查找价格政策。\n4. 审核结论登记到订单系统。\n5. 每月复盘坏账。';
 
 const roles: PlanSourceRole[] = [
@@ -49,8 +50,9 @@ function evidence(s: KnowledgeState, needle: string): Evidence {
   const i = s.source.items.find(i => i.current)!, c = s.source.chunks.find(c => c.itemId === i.id && c.text.includes(needle))!;
   return { sourceId: i.id, version: i.version, start: c.start, end: c.end, locator: c.locator, quote: c.text };
 }
-async function fixture(model?: AnalysisModel, busy: Set<string> = new Set()) {
-  const repo = new MemoryKnowledgeRepository(), employees = new EmployeeService(id => (busy.has(id) ? 1 : 0)), tools = new ToolService();
+async function fixture(model?: AnalysisModel, busy: Set<string> = new Set(), shared?: { employees: EmployeeService; tools: ToolService; ctx?: UserContext }) {
+  const owner = shared?.ctx ?? ownerA;
+  const repo = new MemoryKnowledgeRepository(), employees = shared?.employees ?? new EmployeeService(id => (busy.has(id) ? 1 : 0)), tools = shared?.tools ?? new ToolService();
   const service = new KnowledgeService({ repo, model, organization: createOrganizationSink(() => employees, () => tools) });
   const conn = await service.createConnection(owner, { name: '资料', pluginId: 'local-file' });
   await service.confirmConnection(owner, conn.id);
@@ -141,27 +143,48 @@ describe('team plan flow (按人数重新规划)', () => {
     expect(f.employees.list()).toHaveLength(1);
   });
 
-  it('confirming also removes team employees no record points at, and names the ones it cannot remove', async () => {
+  it("confirming removes this tenant's own leftover team employees only, and names the ones it cannot remove", async () => {
     const busy = new Set<string>();
     const f = await fixture(undefined, busy);
     await f.service.confirmOrganization(owner);
-    // Left over from an earlier confirmation that no longer has a record (e.g. before roles were retired).
-    f.employees.ensure({ id: 'emp-org-ghost', name: '旧岗位', duty: '旧职责', prompt: 'p', owner: 'alice', source: 'recommended' });
-    f.employees.ensure({ id: 'emp-org-busy', name: '忙碌的旧岗位', duty: '旧职责', prompt: 'p', owner: 'alice', source: 'recommended' });
-    busy.add('emp-org-busy');
-    // A hand-made employee is not part of the organization and is never touched.
+    const [legacy, busyRole] = (await f.service.organization(owner)).employees;
+    // Simulate a confirmation from before the record existed: the employees exist, nothing in org points at them.
+    await f.repo.transact(owner, s => {
+      for (const role of [legacy!, busyRole!]) { delete s.organization!.employees[role.id]; delete s.organization!.created?.[role.employeeId!]; }
+    });
+    busy.add(busyRole!.employeeId!);
+    // Another tenant's team employee and a hand-made employee share the registry and must never be touched.
+    f.employees.ensure({ id: 'emp-org-other-tenant', name: '别家员工', duty: 'x', prompt: 'p', owner: 'bob', source: 'recommended' });
     f.employees.ensure({ id: 'emp-manual', name: '手工员工', duty: 'x', prompt: 'p', owner: 'alice', source: 'manual' });
-    expect(f.employees.list()).toHaveLength(6);
 
     const { plan } = await f.service.planTeam(owner, { count: 2 });
     await f.service.adoptTeamPlan(owner, { planId: plan.id });
     const confirmed = await f.service.confirmOrganization(owner);
-    expect(confirmed).toMatchObject({ createdEmployees: 2, retiredEmployees: 4, busyEmployees: ['忙碌的旧岗位'] });
-    expect(f.employees.list().map(e => e.id).sort()).toEqual([...confirmed.employees.map(e => e.employeeId), 'emp-manual', 'emp-org-busy'].sort());
+    expect(confirmed).toMatchObject({ createdEmployees: 2, retiredEmployees: 2, busyEmployees: [busyRole!.name] });
+    const ids = f.employees.list().map(e => e.id);
+    expect(ids).toEqual(expect.arrayContaining(['emp-org-other-tenant', 'emp-manual', busyRole!.employeeId!]));
+    expect(ids).not.toContain(legacy!.employeeId);
 
     busy.clear();
     expect(await f.service.confirmOrganization(owner)).toMatchObject({ retiredEmployees: 1, busyEmployees: [] });
-    expect(f.employees.list().filter(e => e.id.startsWith('emp-org-'))).toHaveLength(2);
+    expect(f.employees.list().map(e => e.id).sort()).toEqual([...confirmed.employees.map(e => e.employeeId), 'emp-manual', 'emp-org-other-tenant'].sort());
+  });
+
+  it("two tenants share the registry; confirming a smaller team in one never removes the other's employees", async () => {
+    const employees = new EmployeeService(), tools = new ToolService();
+    const a = await fixture(undefined, new Set(), { employees, tools });
+    const tenantB: UserContext = { ...owner, tenantId: 'tenant-b', userId: 'bob' };
+    const b = await fixture(undefined, new Set(), { employees, tools, ctx: tenantB });
+    await a.service.confirmOrganization(owner);
+    await b.service.confirmOrganization(tenantB);
+    expect(employees.list()).toHaveLength(6);
+    const { plan } = await a.service.planTeam(owner, { count: 1 });
+    await a.service.adoptTeamPlan(owner, { planId: plan.id });
+    expect(await a.service.confirmOrganization(owner)).toMatchObject({ createdEmployees: 1, retiredEmployees: 3, busyEmployees: [] });
+    const bIds = (await b.service.organization(tenantB)).employees.map(e => e.employeeId);
+    expect(bIds).toHaveLength(3);
+    expect(employees.list().map(e => e.id)).toEqual(expect.arrayContaining(bIds as string[]));
+    expect(employees.list()).toHaveLength(4);
   });
 
   it('discarding removes the preview', async () => {
