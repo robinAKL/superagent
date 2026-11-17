@@ -52,6 +52,9 @@ describe('knowledge lenses', () => {
     const stated = render('zh', <RuleCard drafts={[{ ...rule, effectiveFrom: '2026-08-01' }]} runs={runs} names={objectNames([order, approval])} />);
     expect(stated).toContain('业务有效：2026-08-01');
     expect(stated).not.toContain('资料未写明');
+    const untilOnly = render('zh', <RuleCard drafts={[{ ...rule, effectiveTo: '2026-10-31' }]} runs={runs} names={objectNames([order, approval])} />);
+    expect(untilOnly).toContain('业务有效：2026-10-31');
+    expect(untilOnly).not.toContain('资料未写明');
     expect(html).toContain('待核对');
     expect(render('en', <RuleCard drafts={[order]} runs={runs} names={new Map()} />)).toContain('No rule found yet');
   });
@@ -63,6 +66,9 @@ describe('knowledge lenses', () => {
     expect(chips).toMatch(/例外与经验 <span>0<\/span>/);
     const facts = render('en', <AssertionFacts draft={rule} runs={runs} names={objectNames([order, approval])} />);
     expect(facts).toContain('Rules &amp; policies');
+    const untilFacts = render('en', <AssertionFacts draft={{ ...rule, effectiveTo: '2026-10-31', recordedAt: '2026-11-10T09:00:00.000Z' }} runs={runs} names={objectNames([order, approval])} />);
+    expect(untilFacts).toContain('Effective 2026-10-31');
+    expect(untilFacts).not.toContain('not stated');
     expect(facts).toContain('订单 → 超 5 万需 → 主管审批');
     expect(facts).toContain('Extracted candidate, pending review');
   });
@@ -73,6 +79,9 @@ describe('knowledge lenses', () => {
     const order = ['确认组织', '知识分析', '确认资料'].map(text => html.indexOf(text));
     expect(order.every(index => index > 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
+    const dated = render('zh', <KnowledgeTimeline time={{ at: '2026-11-17', known: '2026-11-17' }} runs={runs}
+      drafts={[{ ...rule, effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31' }]} items={[]} />);
+    expect(dated).toContain('2026-08-01 – 2026-10-31');
     const past = render('zh', <KnowledgeTimeline time={{ at: '2026-11-09', known: '2026-11-09' }} runs={runs} drafts={[]} items={[]} />);
     expect(past).toContain('在所选日期之后记录');
   });

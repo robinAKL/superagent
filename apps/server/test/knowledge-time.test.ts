@@ -12,6 +12,7 @@ describe('dual time on analysis drafts', () => {
       .toEqual({ effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31' });
     expect(validityOf({ evidence: [evidence()], effectiveFrom: '2099-01-01' })).toEqual({ effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31' });
     expect(validityOf({ evidence: [evidence('没有日期的规则')] })).toEqual({});
+    expect(validityOf({ evidence: [evidence('无效日 2026-99-99')], effectiveFrom: '2026-99-99' })).toEqual({});
   });
 
   it('stamps recordedAt on merge and keeps it on a later update', () => {
@@ -25,5 +26,8 @@ describe('dual time on analysis drafts', () => {
     const recordedAt = first.recordedAt;
     mergeRecommendations(s, owner, [{ key: 'threshold', kind: 'object', name: '审批阈值', description: '新描述', evidence: [e] }], pass);
     expect(s.recommendations[0]!.recordedAt).toBe(recordedAt);
+    mergeRecommendations(s, owner, [{ key: 'threshold', kind: 'object', name: '审批阈值', description: '无日期', evidence: [evidence('No date stated')] }], pass);
+    expect(s.recommendations[0]!.effectiveFrom).toBeUndefined();
+    expect(s.recommendations[0]!.effectiveTo).toBeUndefined();
   });
 });

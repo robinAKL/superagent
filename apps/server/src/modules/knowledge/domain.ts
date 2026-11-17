@@ -136,14 +136,20 @@ export function evidenceValid(state: KnowledgeState, ctx: UserContext, e: Eviden
   return positionedChunks(state, item).some(c => e.start >= c.start && e.end <= c.end && c.text.slice(e.start - c.start, e.end - c.start) === e.quote && c.locator === e.locator);
 }
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+function calendarDay(value: string): boolean {
+  if (!DAY.test(value)) return false;
+  const year = Number(value.slice(0, 4)), month = Number(value.slice(5, 7)), day = Number(value.slice(8, 10));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
 export function datesInText(text: string): string[] {
-  return [...text.matchAll(/\d{4}-\d{2}-\d{2}/g)].map(match => match[0]).filter(day => DAY.test(day));
+  return [...text.matchAll(/\d{4}-\d{2}-\d{2}/g)].map(match => match[0]).filter(calendarDay);
 }
 /** Effective dates only when they appear in cited quotes — model output is checked, never invented. */
 export function validityOf(p: { effectiveFrom?: unknown; effectiveTo?: unknown; evidence: Evidence[] }): { effectiveFrom?: string; effectiveTo?: string } {
   const quotes = p.evidence.map(e => e.quote).join('\n');
   const allowed = new Set(datesInText(quotes));
-  const stated = (value: unknown) => typeof value === 'string' && DAY.test(value) && allowed.has(value) ? value : undefined;
+  const stated = (value: unknown) => typeof value === 'string' && calendarDay(value) && allowed.has(value) ? value : undefined;
   const fromQuote = [...quotes.matchAll(/(?:自|从|from|生效|valid from)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:起|生效|开始)/gi)]
     .map(match => match[1] ?? match[2]).find(day => day && allowed.has(day));
   const toQuote = [...quotes.matchAll(/(?:至|到|until|止于|失效|截止)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:止|失效|截止)/gi)]
@@ -185,7 +191,11 @@ export function mergeRecommendations(
     const { effectiveFrom: _from, effectiveTo: _to, recordedAt: _recorded, ...rest } = p;
     const recordedAt = existing?.recordedAt ?? stamp();
     const draft = { ...rest, workflow: p.workflow, origin: 'inferred' as const, recordedAt, ...validityOf(p), ...(mcp && { mcpScope: mcp.mcpScope, mcpRunId: mcp.mcpRunId }) };
-    if (existing) Object.assign(existing, draft, { recordedAt: existing.recordedAt ?? recordedAt });
+    if (existing) {
+      delete existing.effectiveFrom;
+      delete existing.effectiveTo;
+      Object.assign(existing, draft, { recordedAt: existing.recordedAt ?? recordedAt });
+    }
     else {
       const recommendation = { ...draft, id: id(), humanLocked: false, deleted: false };
       state.recommendations.push(recommendation);
