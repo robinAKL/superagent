@@ -46,11 +46,13 @@ describe('ontology graph model', () => {
     expect(nodeTypeOf({ id: 'p', key: 'p', kind: 'object', name: '审批阈值', description: '超过 5 万必须审批', evidence: [] })).toBe('rule');
   });
 
-  it('places a real company node from the knowledge space name, not an invented type', () => {
-    const { nodes } = buildOntologyGraph(drafts, 'ISWELL');
+  it('places a real company node from company configuration, even when an object already uses key=company', () => {
+    const { nodes } = buildOntologyGraph([...drafts, object('company', '模型对象')], 'ISWELL');
     const company = nodes.find(n => n.type === 'company');
+    expect(company?.key).toBe('sys:company');
     expect(company?.name).toBe('ISWELL');
-    expect(nodeTypeOf({ id: 'c', key: 'company', kind: 'company', name: 'ISWELL', description: '', evidence: [] })).toBe('company');
+    expect(nodes.find(n => n.key === 'company')?.type).not.toBe('company');
+    expect(nodeTypeOf({ id: 'c', key: 'sys:company', kind: 'company', name: 'ISWELL', description: '', evidence: [] })).toBe('company');
   });
 
   it('keeps assertion recordedAt and effective dates on the node instead of evidence retrievedAt', () => {

@@ -91,7 +91,7 @@ export function enrichOntologyDrafts(drafts: OntologyDraft[], companyName?: stri
   const extra: OntologyDraft[] = [];
   const name = companyName?.trim();
   if (name) {
-    extra.push({ id: 'company:space', key: 'company', kind: 'company', name, description: '', evidence: [] });
+    extra.push({ id: 'sys:company', key: 'sys:company', kind: 'company', name, description: '', evidence: [] });
   }
   const sources = new Map<string, OntologyDraft>();
   const keys = new Set(drafts.filter(d => NODE_KINDS.has(d.kind) || d.kind === 'object').map(d => d.key));
@@ -132,7 +132,8 @@ export function buildOntologyGraph(drafts: OntologyDraft[], companyName?: string
   const enriched = enrichOntologyDrafts(drafts, companyName);
   const nodes: GraphNode[] = [];
   const byKey = new Map<string, GraphNode>();
-  for (const draft of enriched) {
+  const ordered = [...enriched.filter(d => d.kind === 'company'), ...enriched.filter(d => d.kind !== 'company')];
+  for (const draft of ordered) {
     if (!NODE_KINDS.has(draft.kind) || byKey.has(draft.key)) continue;
     const { label, width } = fitLabel(draft.name);
     const type = nodeTypeOf(draft);
