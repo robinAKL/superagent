@@ -847,6 +847,7 @@ export function KnowledgePage() {
   }
 
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [companyName, setCompanyName] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -889,7 +890,16 @@ export function KnowledgePage() {
     setLoading(true);
     try {
       const value = await request<Overview>('/overview');
-      if (sequence === refreshSequence.current) { setOverview(value); setError(''); }
+      let name = '';
+      try {
+        const company = await api<{ context: { name?: string } | null }>('/api/v1/sop/company-context');
+        if (company.status === 200) name = company.body.context?.name?.trim() ?? '';
+      } catch { /* graph still renders objects without a company node */ }
+      if (sequence === refreshSequence.current) {
+        setOverview(value);
+        setCompanyName(name);
+        setError('');
+      }
     } catch (caught) {
       if (sequence === refreshSequence.current) setError(errorMessage(caught));
     } finally { if (sequence === refreshSequence.current) setLoading(false); }
@@ -1359,7 +1369,8 @@ export function KnowledgePage() {
 
       {view === 'graph' ? <section className="panel knowledge-section knowledge-graph-tab" aria-labelledby="knowledge-graph-heading">
         <div className="knowledge-section-head"><div><h2 id="knowledge-graph-heading">{t('workspaceGraph')}</h2><p className="helper">{t('graphIntro')}</p></div></div>
-        <OntologyGraphView time={time} shared={timedDrafts.filter(draft => !('privateMcp' in draft) && !draft.stale && draft.evidence.length > 0)}
+        <OntologyGraphView time={time} companyName={companyName || undefined}
+          shared={timedDrafts.filter(draft => !('privateMcp' in draft) && !draft.stale && draft.evidence.length > 0)}
           personal={timedDrafts.filter(draft => 'privateMcp' in draft && !draft.stale && draft.evidence.length > 0)} />
       </section> : null}
 

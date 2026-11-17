@@ -13,6 +13,7 @@ export interface OntologyDraft {
   id: string; key: string; kind: string; name: string; description: string;
   evidence: OntologyEvidence[]; relation?: { from: string; to: string; label: string };
   assignment?: { tools: string[]; sops: string[] };
+  recordedAt?: string; effectiveFrom?: string; effectiveTo?: string;
 }
 export type NodeType = 'company' | 'process' | 'rule' | 'source' | 'employee' | 'tool' | 'object';
 export interface GraphNode extends d3.SimulationNodeDatum {
@@ -57,7 +58,7 @@ const TEXT = {
   },
 };
 
-const NODE_KINDS = new Set(['object', 'employee', 'tool', 'sop', 'source']);
+const NODE_KINDS = new Set(['object', 'employee', 'tool', 'sop', 'source', 'company']);
 const DERIVED = { sourced: '__sourced', uses: '__uses', assists: '__assists' } as const;
 const RULE = /必须|须|需要|需经|应当|不得|禁止|不超过|超过|以上|以下|上限|下限|阈值|审批|批准|must|shall|required?|requires|not allowed|threshold|approv|limit|exceed/i;
 
@@ -86,8 +87,12 @@ function sourceKey(e: OntologyEvidence) {
 }
 
 /** Adds source-document nodes and employee→tool / employee→process edges from real assignment + evidence. */
-export function enrichOntologyDrafts(drafts: OntologyDraft[]): OntologyDraft[] {
+export function enrichOntologyDrafts(drafts: OntologyDraft[], companyName?: string): OntologyDraft[] {
   const extra: OntologyDraft[] = [];
+  const name = companyName?.trim();
+  if (name) {
+    extra.push({ id: 'sys:company', key: 'sys:company', kind: 'company', name, description: '', evidence: [] });
+  }
   const sources = new Map<string, OntologyDraft>();
   const keys = new Set(drafts.filter(d => NODE_KINDS.has(d.kind) || d.kind === 'object').map(d => d.key));
   for (const draft of drafts) {
@@ -123,11 +128,12 @@ export function enrichOntologyDrafts(drafts: OntologyDraft[]): OntologyDraft[] {
 }
 
 /** Pure: typed entities become nodes; relations whose two ends exist become links; parallel links get lanes. */
-export function buildOntologyGraph(drafts: OntologyDraft[]): { nodes: GraphNode[]; links: GraphLink[] } {
-  const enriched = enrichOntologyDrafts(drafts);
+export function buildOntologyGraph(drafts: OntologyDraft[], companyName?: string): { nodes: GraphNode[]; links: GraphLink[] } {
+  const enriched = enrichOntologyDrafts(drafts, companyName);
   const nodes: GraphNode[] = [];
   const byKey = new Map<string, GraphNode>();
-  for (const draft of enriched) {
+  const ordered = [...enriched.filter(d => d.kind === 'company'), ...enriched.filter(d => d.kind !== 'company')];
+  for (const draft of ordered) {
     if (!NODE_KINDS.has(draft.kind) || byKey.has(draft.key)) continue;
     const { label, width } = fitLabel(draft.name);
     const type = nodeTypeOf(draft);
@@ -170,11 +176,11 @@ function linkGeometry(l: GraphLink) {
 }
 
 type Scope = 'shared' | 'personal';
-export function OntologyGraphView({ shared, personal = [], height = 560, time }: {
-  shared: OntologyDraft[]; personal?: OntologyDraft[]; height?: number; time?: { at: string; known: string };
+export function OntologyGraphView({ shared, personal = [], height = 560, time, companyName }: {
+  shared: OntologyDraft[]; personal?: OntologyDraft[]; height?: number; time?: { at: string; known: string }; companyName?: string;
 }) {
   const t = useT(TEXT);
-  const sharedGraph = useMemo(() => buildOntologyGraph(shared), [shared]);
+  const sharedGraph = useMemo(() => buildOntologyGraph(shared, companyName), [shared, companyName]);
   const personalGraph = useMemo(() => buildOntologyGraph(personal), [personal]);
   const [scope, setScope] = useState<Scope>(() => (sharedGraph.nodes.length || !personalGraph.nodes.length ? 'shared' : 'personal'));
   const graph = scope === 'shared' ? sharedGraph : personalGraph;
@@ -312,7 +318,8 @@ export function OntologyGraphView({ shared, personal = [], height = 560, time }:
 
   const draft = selNode?.draft ?? selLink?.draft;
   const sources = draft?.evidence ?? [];
-  const recorded = sources.map(e => e.retrievedAt).filter((v): v is string => !!v).sort().at(-1)?.slice(0, 10);
+  const recorded = draft?.recordedAt?.slice(0, 10);
+  const business = draft?.effectiveFrom && draft.effectiveTo ? `${draft.effectiveFrom} – ${draft.effectiveTo}` : (draft?.effectiveFrom || draft?.effectiveTo);
   const version = sources.map(e => e.version).find(Boolean);
   return <section className="onto" aria-label={t('canvas')}>
     <header className="onto-bar">
@@ -347,7 +354,7 @@ export function OntologyGraphView({ shared, personal = [], height = 560, time }:
           <dl className="onto-meta">
             <dt>{t('stableId')}</dt><dd><code>{draft?.id ?? selected}</code></dd>
             <dt>{t('version')}</dt><dd>{version || t('notStated')}</dd>
-            <dt>{t('businessTime')}</dt><dd>{time?.at ? `${time.at} · ${t('notStated')}` : t('notStated')}</dd>
+            <dt>{t('businessTime')}</dt><dd>{business || t('notStated')}</dd>
             <dt>{t('recordedTime')}</dt><dd>{recorded || t('notStated')}</dd>
             {time ? <><dt>{t('knownTime')}</dt><dd>{time.known}</dd></> : null}
           </dl>
