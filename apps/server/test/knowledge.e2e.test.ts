@@ -31,13 +31,13 @@ d('knowledge UI over real HTTP handlers', () => {
       await page.getByRole('button', { name: '提交资料', exact: true }).click();
       await page.getByText('可搜索', { exact: true }).waitFor();
       const workspace = page.getByRole('navigation', { name: '知识工作区' });
-      await workspace.getByRole('button', { name: '检索', exact: true }).click();
+      await page.getByRole('button', { name: '有依据地查询', exact: true }).click();
       await page.getByLabel('查询企业资料').fill('付款');
       await page.getByRole('button', { name: '查询依据', exact: true }).click();
       await page.locator('.knowledge-evidence blockquote').first().waitFor();
       expect(await page.locator('.knowledge-evidence blockquote').first().textContent()).toBe('付款前核对金额。');
       expect(await page.locator('.knowledge-evidence').first().textContent()).toContain('policy.md#L1');
-      await workspace.getByRole('button', { name: '分析', exact: true }).click();
+      await workspace.getByRole('button', { name: '分类与候选', exact: true }).click();
       const submitted = page.waitForResponse(r => r.url().endsWith('/knowledge/analyses') && r.request().method() === 'POST');
       await page.getByRole('button', { name: '开始分析', exact: true }).click(); expect((await submitted).status()).toBe(202);
       await tickKnowledge(deps, 'ui-test');
@@ -57,7 +57,7 @@ d('knowledge UI over real HTTP handlers', () => {
       await page.getByRole('button',{name:'验证并连接数据库',exact:true}).click();
       const schemaResponse=page.waitForResponse(r=>r.url().includes('/connections/')&&r.url().endsWith('/sync'));
       await page.getByRole('button',{name:'读取数据库结构知识',exact:true}).click(); expect((await schemaResponse).status()).toBe(200);
-      await workspace.getByRole('button', { name: '资料', exact: true }).click();
+      await workspace.getByRole('button', { name: '资料库', exact: true }).click();
       await page.locator('#knowledge-items-list .mr-meta').filter({ hasText: '表 approved_invoices' }).waitFor();
       await page.getByRole('button',{name:'确认此版本',exact:true}).click();
       await page.getByRole('button', { name: '管理来源', exact: true }).click();

@@ -81,7 +81,7 @@ interface Drafts {
   recommendations: (Recommendation & { evidence: KnowledgeEvidence[] })[];
   mcpRecommendations: Recommendation[];
 }
-type DraftRead = { status: 'loading' | 'error' } | { status: 'ready'; drafts: Drafts };
+export type DraftRead = { status: 'loading' | 'error' } | { status: 'ready'; drafts: Drafts };
 interface DraftViewProps { knowledge: DraftRead; retryKnowledge: () => void }
 const READ_TIMEOUT_MS = 15_000;
 const TEXT = {
@@ -194,25 +194,7 @@ export function SuperAgentPage() {
     window.addEventListener('hashchange', updateTab);
     return () => window.removeEventListener('hashchange', updateTab);
   }, []);
-  const [knowledge, setKnowledge] = useState<DraftRead>({ status: 'loading' });
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController();
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(READ_TIMEOUT_MS)]);
-    void api<Drafts>('/api/v1/knowledge/recommendations', { signal }).then(response => {
-      if (controller.signal.aborted) return;
-      setKnowledge(response.status === 200 && Array.isArray(response.body?.recommendations) && Array.isArray(response.body?.mcpRecommendations)
-        ? { status: 'ready', drafts: response.body }
-        : { status: 'error' });
-    }).catch(() => {
-      if (!controller.signal.aborted) setKnowledge({ status: 'error' });
-    });
-    return () => controller.abort();
-  }, [attempt]);
-  function retryKnowledge() {
-    setKnowledge({ status: 'loading' });
-    setAttempt(value => value + 1);
-  }
+  const [knowledge, retryKnowledge] = useDraftRead();
   const count = knowledge.status === 'ready' ? [...knowledge.drafts.recommendations, ...knowledge.drafts.mcpRecommendations].filter(draft => draft.kind === 'sop').length : 0;
   return (
     <>
@@ -233,6 +215,36 @@ export function SuperAgentPage() {
   );
 }
 
+/** Reads the analysis drafts (shared + the viewer's private MCP drafts) once; the knowledge page and this page share it. */
+export function useDraftRead(): [DraftRead, () => void] {
+  const [knowledge, setKnowledge] = useState<DraftRead>({ status: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(READ_TIMEOUT_MS)]);
+    void api<Drafts>('/api/v1/knowledge/recommendations', { signal }).then(response => {
+      if (controller.signal.aborted) return;
+      setKnowledge(response.status === 200 && Array.isArray(response.body?.recommendations) && Array.isArray(response.body?.mcpRecommendations)
+        ? { status: 'ready', drafts: response.body }
+        : { status: 'error' });
+    }).catch(() => {
+      if (!controller.signal.aborted) setKnowledge({ status: 'error' });
+    });
+    return () => controller.abort();
+  }, [attempt]);
+  function retryKnowledge() {
+    setKnowledge({ status: 'loading' });
+    setAttempt(value => value + 1);
+  }
+  return [knowledge, retryKnowledge];
+}
+
+/** Where workflow links point: the knowledge page's 工作流/SOP tab, or this page's tabs. */
+export type FlowRoute = 'brain' | 'knowledge';
+function flowHref(route: FlowRoute, params: string) {
+  return route === 'knowledge' ? `#knowledge?view=sop&${params}` : `#brain?tab=sop&${params}`;
+}
+
 function DraftLoadStatus({ knowledge, retryKnowledge }: DraftViewProps) {
   const t = useT(TEXT);
   if (knowledge.status === 'ready') return null;
@@ -243,7 +255,7 @@ function DraftLoadStatus({ knowledge, retryKnowledge }: DraftViewProps) {
   </div>;
 }
 
-function AnalysisResults({ knowledge, retryKnowledge, initialKind, fromOrganization }: DraftViewProps & { initialKind: string; fromOrganization: boolean }) {
+export function AnalysisResults({ knowledge, retryKnowledge, initialKind, fromOrganization, route = 'brain' }: DraftViewProps & { initialKind: string; fromOrganization: boolean; route?: FlowRoute }) {
   const t = useT(TEXT);
   const drafts = knowledge.status === 'ready' ? [
     ...knowledge.drafts.mcpRecommendations.map(draft => ({ ...draft, privateMcp: true })),
@@ -253,9 +265,9 @@ function AnalysisResults({ knowledge, retryKnowledge, initialKind, fromOrganizat
     <div className="agent-results-head">
       <h2 className="h2" id="agent-results-heading">{t(initialKind ? 'results' : 'candidates')}</h2>
       <div className="workflow-actions">
-        {!initialKind && knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.length
+        {route === 'brain' && !initialKind && knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.length
           ? <a href={`#brain?tab=results&type=all${fromOrganization ? '&org=1' : ''}`}>{t('allDrafts')}</a> : null}
-        <a href="#knowledge?view=analysis">{t('reviewDrafts')}</a>
+        {route === 'brain' ? <a href="#knowledge?view=analysis">{t('reviewDrafts')}</a> : null}
       </div>
     </div>
     <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />
@@ -273,7 +285,7 @@ function AnalysisResults({ knowledge, retryKnowledge, initialKind, fromOrganizat
             <Evidences ev={draft.evidence} label={t('evidence')} />
           </details> : null}
           {draft.kind === 'sop' && !('privateMcp' in draft) && draft.workflow && draft.evidence.length
-            ? <a className="btn" href={`#brain?tab=sop&candidate=${encodeURIComponent(draft.key)}${fromOrganization ? '&org=1' : ''}`}>{t('useCandidate')}</a> : null}
+            ? <a className="btn" href={flowHref(route, `candidate=${encodeURIComponent(draft.key)}${fromOrganization ? '&org=1' : ''}`)}>{t('useCandidate')}</a> : null}
         </article>
       } /> : <p className="helper">{t('noDrafts')}</p> : null}
   </section>;
@@ -311,7 +323,7 @@ function WorkflowPreview({ draft, recommendations }: { draft: Recommendation; re
   </div>;
 }
 
-function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate }: DraftViewProps & { initialSop: string; candidate: string }) {
+export function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate, route = 'brain' }: DraftViewProps & { initialSop: string; candidate: string; route?: FlowRoute }) {
   const t = useT(TEXT);
   const [sops, setSops] = useState<SopSummary[] | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -491,7 +503,7 @@ function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate }: Draf
         <h2 className="h2">{t('workflowPackTitle')}</h2>
         <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />
         {knowledge.status === 'ready' && !packs.length ? <p className="helper">{t('noWorkflowPacks')}</p> : null}
-        {privateWorkflows ? <a href="#brain?type=sop">{t('viewPrivateWorkflows')}</a> : null}
+        {privateWorkflows ? <a href={route === 'knowledge' ? '#knowledge?view=sop&sub=candidates' : '#brain?type=sop'}>{t('viewPrivateWorkflows')}</a> : null}
         <ul className="onto-list">
           {packs.map((p) => (
             <li key={p.key} data-pack={p.key}>
@@ -727,7 +739,7 @@ function GraphEditor({ graph, tools, employees, onChange }: { graph: SopGraph; t
   );
 }
 
-function OntologyView({ knowledge, retryKnowledge }: DraftViewProps) {
+export function OntologyView({ knowledge, retryKnowledge }: DraftViewProps) {
   if (knowledge.status !== 'ready') return <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />;
   const { recommendations, mcpRecommendations } = knowledge.drafts;
   return <OntologyGraphView

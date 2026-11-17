@@ -126,12 +126,13 @@ export class KnowledgeService {
       plugins: MANIFESTS.map(m => ({ ...m, installed: true, builtIn: true, enabled: !s.disabledPlugins.includes(m.id), configured: m.id === 'local-file' || m.id === 'mcp' || (m.id === 'database' && !!this.deps.database?.list(ctx).length) || !!this.deps.plugins?.[m.id] })),
       databaseResources: this.deps.database?.list(ctx) ?? [],
       connections: s.source.connections.filter(c => this.connectionAllowed(s, ctx, c.id)).map(c => ({ id: c.id, name: s.connectionMeta[c.id]!.name, pluginId: c.pluginId, status: c.status, scope: this.connectionScopeSummary(c.scope) })),
-      items: items.map(i => ({ id: hash(i.id), title: i.title, version: i.version, status: i.status, confirmed: this.allowed(s, ctx, i), locator: i.locator, pluginId: s.source.connections.find(c => c.id === i.connectionId)!.pluginId, profile: this.profileView(s, ctx, i, refining) })),
+      items: items.map(i => ({ id: hash(i.id), title: i.title, version: i.version, status: i.status, confirmed: this.allowed(s, ctx, i), confirmedAt: this.allowed(s, ctx, i) ? s.confirmations[i.id]?.confirmedAt : undefined, locator: i.locator, pluginId: s.source.connections.find(c => c.id === i.connectionId)!.pluginId, profile: this.profileView(s, ctx, i, refining) })),
       analyses: s.analyses.filter(r => r.actor.userId === ctx.userId).map(run => ({
         id: run.id, status: run.status, stage: run.stage, signature: run.signature, createdAt: run.createdAt, error: run.error,
         mcpSources: run.mcpSources?.map(source => source.name), skippedRelations: run.skippedRelations,
       })),
       ...this.recommendationView(s, ctx),
+      organizationConfirmedAt: s.organization?.confirmedAt,
       canConfirm: ctx.roles.some(role => role === 'owner' || role === 'admin'),
       parseJobs: s.parseJobs.filter(j => j.actor.userId === ctx.userId && s.connectionMeta[j.connectionId]?.audience.includes(ctx.userId) && s.connectionMeta[j.connectionId]!.projectIds.every(p => ctx.projectScopes.includes(p))).map(j => ({ id: j.id, name: j.name, status: j.status, error: j.error })),
     };

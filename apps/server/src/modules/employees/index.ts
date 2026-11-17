@@ -9,7 +9,7 @@ export const employeesModule: FastifyPluginAsync<{ service?: EmployeeService }> 
   const svc = opts.service ?? employeesState.current;
   const view = (id: string) => {
     const e = svc.get(id);
-    return { id: e.id, name: e.name, duty: e.duty, status: e.status, source: e.source, promptVersion: svc.currentPrompt(id).version, modelTier: e.modelTier };
+    return { id: e.id, name: e.name, duty: e.duty, status: e.status, source: e.source, owner: e.owner, promptVersion: svc.currentPrompt(id).version, modelTier: e.modelTier };
   };
   app.get('/', async () => svc.list().map((e) => view(e.id)));
   // ownerUserId names the person who answers for this employee (sees and reports its work in the command room).

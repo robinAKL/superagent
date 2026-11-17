@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { useLang, useT, type Dict } from '../i18n';
 import './KnowledgePage.css';
@@ -6,6 +6,9 @@ import { DatabaseSourcePanel } from './DatabaseSourcePanel';
 import { MaterialReview, type Material } from './MaterialReview';
 import { AnalysisDraftIndex } from './AnalysisDraftIndex';
 import type { McpConnection } from './McpKnowledge';
+import { OntologyGraphView } from '../components/OntologyGraphView';
+import { AnalysisResults, SopWorkspace, useDraftRead } from './SuperAgentPage';
+import { AssertionFacts, DimensionChips, KnowledgeTimeline, RuleCard, TimeBar, dimensionsOf, objectNames, recordedOf, timeFromParams, visibleAt, type Dimension, type KnowledgeTime } from './KnowledgeLenses';
 
 interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string; retrievedAt?: string }
 interface Plugin { id: string; name: string; enabled: boolean; configured: boolean; capabilities: string[] }
@@ -15,7 +18,7 @@ interface Connection { id: string; name: string; pluginId: string; status: strin
 interface ConnectionPreview { connectionId: string; name: string; pluginId: string; status: string; scope: SourceScope; items: { id: string; title: string; version: string; locator: string; selected: boolean }[]; blocked: number }
 type Item = Material;
 interface Recommendation {
-  id: string; kind: string; name: string; description: string; humanLocked: boolean; deleted: boolean; stale?: boolean;
+  id: string; key: string; kind: string; name: string; description: string; humanLocked: boolean; deleted: boolean; stale?: boolean;
   proposedChange?: { name: string; description: string; evidence?: Evidence[] }; evidence: Evidence[];
   relation?: { from: string; to: string; label: string };
   origin?: 'manual' | 'inferred';
@@ -23,7 +26,8 @@ interface Recommendation {
 interface Overview {
   spaceName: string; sourceResources: SourceResource[];
   plugins: Plugin[]; connections: Connection[]; items: Item[];
-  analyses: { id: string; status: string; stage: string; error?: string | null; mcpSources?: string[]; skippedRelations?: number }[];
+  analyses: { id: string; status: string; stage: string; createdAt?: string; error?: string | null; mcpSources?: string[]; skippedRelations?: number }[];
+  organizationConfirmedAt?: string;
   recommendations: Recommendation[];
   mcpRecommendations?: Recommendation[];
   analysisReadiness?: { ready: true } | { ready: false; code: string };
@@ -171,9 +175,19 @@ const TEXT = {
     errDocRead: 'Unable to read document file.',
     pageTitle: 'Enterprise Knowledge',
     workspaceNav: 'Knowledge workspace',
-    workspaceMaterials: 'Materials',
-    workspaceAnalysis: 'Analysis',
-    workspaceSearch: 'Search',
+    workspaceMaterials: 'Library',
+    workspaceAnalysis: 'Classification & candidates',
+    workspaceGraph: 'Ontology graph',
+    workspaceTimeline: 'Timeline',
+    workspaceSop: 'Workflows / SOP',
+    workspaceSearch: 'Grounded search',
+    subtitleLibrary: 'Manage company materials and confirm where rules and working methods come from.',
+    subtitleKnowledge: 'Turn materials into knowledge with sources, relationships and dates that can be confirmed, then hand it to the Super Agent.',
+    subtitleSop: 'Raw materials, structured knowledge, the ontology and SOPs share sources and versions.',
+    viewAgentContext: 'View Super Agent context',
+    sopIntro: 'A workflow is one kind of knowledge. The flowchart defines triggers and execution order; the ontology graph defines objects and relationships. Nodes reuse roles, tools, human roles and sources.',
+    sopFlows: 'Published & draft graphs', sopCandidates: 'Extract SOP from knowledge', sopSwitch: 'Workflow view',
+    graphIntro: 'The graph shows concrete business objects and the relationships the sources support. Select a node to see its sources.',
     closeSources: 'Back to materials',
     analysisHistory: 'Earlier runs',
     analysisSourceOptions: 'MCP source options ({count} selected)',
@@ -210,7 +224,7 @@ const TEXT = {
     connFormHint: 'Default reader is the current user. Connections are read-only; confirmation cannot override source permissions or project scopes.',
     creatingConn: 'Verifying…',
     createConnBtn: 'Verify and connect',
-    sec2Title: 'Materials',
+    sec2Title: 'Company materials',
     itemNameLabel: 'Material name',
     itemNamePlaceholder: 'operations-handbook.md',
     itemTextLabel: 'Text content',
@@ -411,9 +425,19 @@ const TEXT = {
     errDocRead: '无法读取文档文件。',
     pageTitle: '企业知识',
     workspaceNav: '知识工作区',
-    workspaceMaterials: '资料',
-    workspaceAnalysis: '分析',
-    workspaceSearch: '检索',
+    workspaceMaterials: '资料库',
+    workspaceAnalysis: '分类与候选',
+    workspaceGraph: '本体关系图',
+    workspaceTimeline: '时间线',
+    workspaceSop: '工作流 / SOP',
+    workspaceSearch: '有依据地查询',
+    subtitleLibrary: '管理企业资料，确认规则和工作方法的来源。',
+    subtitleKnowledge: '把资料变成有来源、有关系、有时间、可确认的知识，再交给超级智能体使用。',
+    subtitleSop: '原始资料、结构化知识、本体与 SOP 共享来源和版本。',
+    viewAgentContext: '查看超级智能体上下文',
+    sopIntro: '工作流是知识的一种。流程图定义触发与执行顺序；本体关系图定义对象与关系。节点复用岗位、工具、人类角色和来源标识。',
+    sopFlows: '已发布图与草稿图', sopCandidates: '从知识提取 SOP', sopSwitch: '工作流视图',
+    graphIntro: '图表达具体实体与有证据的关系。选中节点查看属性与来源。',
     closeSources: '返回资料',
     analysisHistory: '历史分析',
     analysisSourceOptions: 'MCP 来源设置（已选 {count} 个）',
@@ -450,7 +474,7 @@ const TEXT = {
     connFormHint: '默认读者为当前用户。连接只读；确认操作不能覆盖来源权限和项目范围。需要额外授权的来源由服务端校验。',
     creatingConn: '验证中…',
     createConnBtn: '验证并连接',
-    sec2Title: '资料',
+    sec2Title: '企业资料',
     itemNameLabel: '资料名称',
     itemNamePlaceholder: '操作手册.md',
     itemTextLabel: '文本内容',
@@ -576,14 +600,45 @@ const STATUS_KEYS: Record<string, TextKey> = {
 };
 
 const CARD_ORDER = ['local-file', 'mcp', 'database', 'email', 'sharepoint'] as const;
-type KnowledgeView = 'materials' | 'analysis' | 'search' | 'sources';
-const VIEW_LABELS = { materials: 'workspaceMaterials', analysis: 'workspaceAnalysis', search: 'workspaceSearch' } as const;
+type KnowledgeView = 'materials' | 'analysis' | 'graph' | 'timeline' | 'sop' | 'search' | 'sources';
+/** The five tabs of prototype v12. Grounded search lives inside the library tab. */
+const WORKSPACE_TABS = ['materials', 'analysis', 'graph', 'timeline', 'sop'] as const;
+const VIEW_LABELS = { materials: 'workspaceMaterials', analysis: 'workspaceAnalysis', graph: 'workspaceGraph', timeline: 'workspaceTimeline', sop: 'workspaceSop' } as const;
+const TIMED_VIEWS = new Set<KnowledgeView>(['analysis', 'graph', 'timeline']);
 
+function hashParams() { return new URLSearchParams(typeof window === 'undefined' ? '' : window.location.hash.split('?')[1]); }
 function viewFromHash(): KnowledgeView {
-  const params = new URLSearchParams(window.location.hash.split('?')[1]);
+  const params = hashParams();
   const view = params.get('view');
   if (view === 'sources' || params.has('source') || params.has('mcp_callback')) return 'sources';
-  return view === 'analysis' || view === 'search' ? view : 'materials';
+  return view === 'analysis' || view === 'search' || view === 'graph' || view === 'timeline' || view === 'sop' ? view : 'materials';
+}
+function sopFromHash() {
+  const params = hashParams();
+  const candidate = params.get('candidate') ?? '', sop = params.get('sop') ?? '';
+  return { sop, candidate, sub: params.get('sub') === 'candidates' && !candidate && !sop ? 'candidates' as const : 'flows' as const };
+}
+
+/** 工作流 / SOP tab: the published/draft graphs (existing editor and publish gate) and the candidates extracted from knowledge. */
+function KnowledgeFlows({ t }: { t: Translate }) {
+  const [knowledge, retryKnowledge] = useDraftRead();
+  const [route, setRoute] = useState(sopFromHash);
+  useEffect(() => {
+    const update = () => setRoute(sopFromHash());
+    window.addEventListener('hashchange', update);
+    return () => window.removeEventListener('hashchange', update);
+  }, []);
+  return <div className="knowledge-flows">
+    <p className="helper knowledge-tab-intro">{t('sopIntro')}</p>
+    <div className="knowledge-flow-switch" role="group" aria-label={t('sopSwitch')}>
+      {(['flows', 'candidates'] as const).map(sub => <button key={sub} type="button" className="lens-chip" aria-pressed={route.sub === sub}
+        onClick={() => { window.location.hash = sub === 'flows' ? 'knowledge?view=sop' : 'knowledge?view=sop&sub=candidates'; }}>
+        {t(sub === 'flows' ? 'sopFlows' : 'sopCandidates')}</button>)}
+    </div>
+    {route.sub === 'candidates'
+      ? <AnalysisResults knowledge={knowledge} retryKnowledge={retryKnowledge} initialKind="" fromOrganization={false} route="knowledge" />
+      : <SopWorkspace key={`${route.sop}|${route.candidate}`} knowledge={knowledge} retryKnowledge={retryKnowledge} initialSop={route.sop} candidate={route.candidate} route="knowledge" />}
+  </div>;
 }
 
 function EvidenceList({ evidence, t, collapsible = false }: { evidence: Evidence[]; t: Translate; collapsible?: boolean }) {
@@ -703,8 +758,8 @@ function ItemPreview({ item, request, errorMessage, t }: {
   </details>;
 }
 
-function RecommendationCard({ recommendation: r, privateMcp, disabled, onAction, label, t }: {
-  recommendation: Recommendation; privateMcp?: boolean; disabled: boolean;
+function RecommendationCard({ recommendation: r, privateMcp, disabled, onAction, label, t, facts }: {
+  recommendation: Recommendation; privateMcp?: boolean; disabled: boolean; facts?: ReactNode;
   onAction: (key: string, path: string, body: unknown, success: string) => Promise<boolean>;
   label: (value: string) => string;
   t: Translate;
@@ -724,11 +779,11 @@ function RecommendationCard({ recommendation: r, privateMcp, disabled, onAction,
       </div>
       <span className={`knowledge-badge ${r.humanLocked ? 'is-green' : ''}`}>{r.humanLocked ? t('recHumanLocked') : t('recPendingReview')}</span>
     </header>
+    {facts}
     <form onSubmit={save}>
       {r.stale ? <p className="knowledge-alert">{t('recStaleAlert')}</p> : null}
       <div className="knowledge-recommendation-body">
         <div className="knowledge-form knowledge-recommendation-editor">
-          {r.relation ? <p className="helper">{r.relation.from} → {r.relation.to} · {r.relation.label}</p> : null}
           <label className="field"><span>{t('recName')}</span><input required maxLength={160} value={name} onChange={event => setName(event.target.value)} /></label>
           <label className="field"><span>{t('recDesc')}</span><textarea required maxLength={4000} rows={4} value={description} onChange={event => setDescription(event.target.value)} /></label>
         </div>
@@ -797,6 +852,8 @@ export function KnowledgePage() {
   const [activeSourceCard, setActiveSourceCard] = useState<string | null>(() =>
     window.location.hash === '#knowledge?source=mcp' ? 'mcp' : null);
   const [view, setView] = useState(viewFromHash);
+  const [time, setTime] = useState<KnowledgeTime>(() => timeFromParams(hashParams()));
+  const [dimension, setDimension] = useState<Dimension | ''>('');
   const [dragging, setDragging] = useState(false);
   const [fileSubmissions, setFileSubmissions] = useState<FileSubmission[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -837,7 +894,7 @@ export function KnowledgePage() {
   }, []);
   useEffect(() => { void load(); return () => { refreshSequence.current++; searchSequence.current++; }; }, [load]);
   useEffect(() => {
-    const updateView = () => setView(viewFromHash());
+    const updateView = () => { setView(viewFromHash()); setTime(timeFromParams(hashParams())); };
     window.addEventListener('hashchange', updateView);
     return () => window.removeEventListener('hashchange', updateView);
   }, []);
@@ -899,6 +956,12 @@ export function KnowledgePage() {
   const drafts = [...mcpRecommendations.map(draft => ({ ...draft, privateMcp: true })), ...recommendations];
   const runs = overview?.analyses.slice(-5).reverse() ?? [];
   const liveDrafts = drafts.filter(draft => !draft.stale);
+  const lensRuns = overview?.analyses ?? [];
+  const lastRunAt = lensRuns.filter(run => run.status === 'completed' && run.createdAt).map(run => run.createdAt!).sort().at(-1);
+  const timedDrafts = drafts.filter(draft => visibleAt(recordedOf(draft, lensRuns), time));
+  const hiddenByTime = drafts.length - timedDrafts.length;
+  const names = objectNames(drafts);
+  const shownDrafts = dimension ? timedDrafts.filter(draft => dimensionsOf(draft).includes(dimension)) : timedDrafts;
   const draftCount = (kind: string) => liveDrafts.filter(draft => draft.kind === kind).length;
   // The review step follows a finished analysis; a hand-added role alone does not replace "Start analysis".
   const orgReady = !analysisActive && runs[0]?.status === 'completed' && draftCount('employee') > 0;
@@ -939,10 +1002,16 @@ export function KnowledgePage() {
     finally { actionInFlight.current = false; setBusy(''); }
   }
 
-  function openView(next: KnowledgeView) {
+  function openView(next: KnowledgeView, nextTime = time) {
     setView(next);
-    window.location.hash = next === 'materials' ? 'knowledge' : `knowledge?view=${next}`;
+    const now = timeFromParams(new URLSearchParams());
+    const timed = TIMED_VIEWS.has(next) && (nextTime.at !== now.at || nextTime.known !== now.known) ? `&at=${nextTime.at}&known=${nextTime.known}` : '';
+    window.location.hash = next === 'materials' ? 'knowledge' : `knowledge?view=${next}${timed}`;
     window.scrollTo({ top: 0 });
+  }
+  function changeTime(next: KnowledgeTime) {
+    setTime(next);
+    openView(view, next);
   }
 
   function startAnalysis() {
@@ -1078,18 +1147,24 @@ export function KnowledgePage() {
     <header className="page-head knowledge-head">
       <div>
         <h1>{t('pageTitle')}</h1>
+        <p className="knowledge-subtitle">{t(view === 'materials' || view === 'search' || view === 'sources' ? 'subtitleLibrary' : view === 'sop' ? 'subtitleSop' : 'subtitleKnowledge')}</p>
         {overview?.spaceName && overview.spaceName !== DEFAULT_SPACE_NAME ? <p className="knowledge-space-name">{overview.spaceName}</p> : null}
       </div>
       <div className="knowledge-actions">
+        <a className="btn knowledge-quiet" href="#brain">{t('viewAgentContext')}</a>
         <button className="btn knowledge-quiet" type="button" onClick={() => { setAnalysisFeedback(null); void load(); }} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
         <button className="btn" type="button" onClick={() => openView(view === 'sources' ? 'materials' : 'sources')}
           aria-expanded={view === 'sources'} aria-controls="knowledge-sources">{t(view === 'sources' ? 'closeSources' : 'manageSources')}</button>
       </div>
     </header>
     {overview ? <nav className="knowledge-workspace-nav" aria-label={t('workspaceNav')}>
-      {(['materials', 'analysis', 'search'] as const).map(entry => <button key={entry} type="button" aria-current={view === entry ? 'page' : undefined}
+      {WORKSPACE_TABS.map(entry => <button key={entry} type="button" aria-current={view === entry || (entry === 'materials' && view === 'search') ? 'page' : undefined}
         onClick={() => openView(entry)}>{t(VIEW_LABELS[entry])}</button>)}
     </nav> : null}
+    {overview && TIMED_VIEWS.has(view) ? <div className="knowledge-lenses">
+      <TimeBar time={time} onChange={changeTime} lastRun={lastRunAt} hidden={hiddenByTime} />
+      <RuleCard drafts={timedDrafts.filter(draft => !draft.stale)} runs={lensRuns} names={names} onSeeAll={() => { setDimension('rule'); openView('analysis'); }} />
+    </div> : null}
     {error ? <div className="knowledge-alert" role="alert">{error}</div> : null}
     {notice ? <div className="knowledge-notice" role="status">{notice}</div> : null}
     {!overview && loading ? <div className="panel knowledge-empty" role="status">{t('loadingState')}</div> : null}
@@ -1102,6 +1177,7 @@ export function KnowledgePage() {
               <button className="btn" type="button" disabled={!!busy || analysisActive} onClick={() => void startAnalysis()}>
                 {analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}
               </button> : null}
+            <button className="btn" type="button" onClick={() => openView('search')}>{t('workspaceSearch')}</button>
             {canUpload ? <button className="btn primary" type="button" disabled={!!busy} onClick={() => fileInput.current?.click()}>{t('addMaterials')}</button> : null}
           </div>
         </div>
@@ -1231,7 +1307,7 @@ export function KnowledgePage() {
           <div className="knowledge-actions">
             <button className={`btn ${orgReady ? '' : 'primary'}`} disabled={!!busy || analysisActive || (!confirmedCount && !mcpSourceIds.length) || !!analysisBlock || !overview.canConfirm}
               onClick={() => void startAnalysis()}>{busy === 'analysis' ? t('submitting') : analysisActive ? t('analyzingBtn') : t(orgReady ? 'reanalyzeBtn' : 'startAnalysisBtn')}</button>
-            {orgReady ? <a className="btn primary" href="#employees">{t('reviewOrgBtn')}</a> : null}
+            {orgReady ? <a className="btn primary" href="#employees?view=draft">{t('reviewOrgBtn')}</a> : null}
           </div>
         </div>
         {orgReady ? <p className="knowledge-notice">{t('orgReadyHint', { roles: draftCount('employee'), tools: draftCount('tool'), sops: draftCount('sop') })}</p> : null}
@@ -1263,9 +1339,11 @@ export function KnowledgePage() {
           <summary>{t('analysisHistory')}</summary>
           <ul className="knowledge-runs">{runs.slice(1).map(renderRun)}</ul>
         </details> : null}
-        {drafts.length ? <>
-          <AnalysisDraftIndex drafts={drafts} renderDraft={draft => <div className="knowledge-recommendations">
-            <RecommendationCard key={draft.id} recommendation={draft} privateMcp={'privateMcp' in draft} disabled={!!busy} onAction={action} label={label} t={t} />
+        {drafts.length ? <DimensionChips drafts={timedDrafts} value={dimension} onChange={setDimension} /> : null}
+        {shownDrafts.length ? <>
+          <AnalysisDraftIndex key={dimension} drafts={shownDrafts} renderDraft={draft => <div className="knowledge-recommendations">
+            <RecommendationCard key={draft.id} recommendation={draft} privateMcp={'privateMcp' in draft} disabled={!!busy} onAction={action} label={label} t={t}
+              facts={<AssertionFacts draft={draft} runs={lensRuns} names={names} stale={draft.stale} />} />
           </div>} />
         </> : <p className="knowledge-empty">{t('noRecommendations')}</p>}
       </section>
@@ -1276,6 +1354,20 @@ export function KnowledgePage() {
         {searchError ? <p className="knowledge-alert" role="alert">{searchError}</p> : null}
         {searchResult ? <div className="knowledge-search-result" aria-live="polite">{searchResult.hits.length ? <><p className="knowledge-answer">{searchResult.answer || t('searchFoundDefault')}</p><EvidenceList evidence={searchResult.hits} t={t} /></> : <p className="knowledge-empty">{t('searchNoHits')}</p>}</div> : <p className="helper">{t('searchIdleHint')}</p>}
       </section>
+
+      {view === 'graph' ? <section className="panel knowledge-section knowledge-graph-tab" aria-labelledby="knowledge-graph-heading">
+        <div className="knowledge-section-head"><div><h2 id="knowledge-graph-heading">{t('workspaceGraph')}</h2><p className="helper">{t('graphIntro')}</p></div></div>
+        <OntologyGraphView shared={timedDrafts.filter(draft => !('privateMcp' in draft) && !draft.stale && draft.evidence.length > 0)}
+          personal={timedDrafts.filter(draft => 'privateMcp' in draft && !draft.stale && draft.evidence.length > 0)} />
+      </section> : null}
+
+      {view === 'timeline' ? <section className="panel knowledge-section">
+        <KnowledgeTimeline items={overview.items} runs={lensRuns} drafts={timedDrafts.filter(draft => !draft.stale)} organizationConfirmedAt={overview.organizationConfirmedAt} time={time} />
+      </section> : null}
+
+      {view === 'sop' ? <section className="knowledge-section knowledge-sop-tab" aria-label={t('workspaceSop')}>
+        <KnowledgeFlows t={t} />
+      </section> : null}
 
       <details className="panel knowledge-advanced" hidden={view !== 'sources'} open={advancedOpen} onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
         <summary className="knowledge-advanced-summary">
