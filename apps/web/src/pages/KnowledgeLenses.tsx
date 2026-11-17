@@ -16,6 +16,7 @@ export interface LensEvidence { locator: string; quote: string; retrievedAt?: st
 export interface LensDraft {
   id: string; kind: string; name: string; description: string; humanLocked?: boolean;
   evidence: LensEvidence[]; relation?: { from: string; to: string; label: string };
+  recordedAt?: string; effectiveFrom?: string; effectiveTo?: string;
 }
 export interface LensRun { id: string; status: string; createdAt?: string }
 export interface LensItem { id: string; title: string; version: string; confirmed: boolean; confirmedAt?: string }
@@ -65,8 +66,9 @@ export function timeFromParams(params: URLSearchParams): KnowledgeTime {
 }
 export function isNow(time: KnowledgeTime) { const now = today(); return time.at >= now && time.known >= now; }
 
-/** When the platform learned a draft: its newest evidence read, else the newest completed analysis run. */
+/** When the platform learned a draft: recordedAt, else newest evidence read, else the newest completed analysis run. */
 export function recordedOf(draft: LensDraft, runs: LensRun[]): string | undefined {
+  if (draft.recordedAt) return draft.recordedAt;
   const read = draft.evidence.map(e => e.retrievedAt).filter((v): v is string => !!v).sort().at(-1);
   if (read) return read;
   return runs.filter(run => run.status === 'completed' && run.createdAt).map(run => run.createdAt!).sort().at(-1);
@@ -76,6 +78,17 @@ export function visibleAt(recorded: string | undefined, time: KnowledgeTime) {
   if (!recorded) return true;
   const day = recorded.slice(0, 10);
   return day <= time.at && day <= time.known;
+}
+/** Known-by filters recordedAt; business date filters effectiveFrom/To when the source stated them. */
+export function visibleDraft(draft: LensDraft, runs: LensRun[], time: KnowledgeTime) {
+  const recorded = recordedOf(draft, runs);
+  if (recorded && recorded.slice(0, 10) > time.known) return false;
+  if (draft.effectiveFrom || draft.effectiveTo) {
+    if (draft.effectiveFrom && time.at < draft.effectiveFrom) return false;
+    if (draft.effectiveTo && time.at > draft.effectiveTo) return false;
+    return true;
+  }
+  return visibleAt(recorded, time);
 }
 const day = (iso?: string) => iso ? iso.slice(0, 10) : '';
 
@@ -87,6 +100,7 @@ const TEXT = {
     presetNow: 'Today', presetLastRun: 'As known at the last analysis ({date})', hidden: '{n} items were recorded after these dates and are hidden.',
     ruleTitle: 'Key rule', ruleConfirmed: 'Confirmed', rulePending: 'Pending review', ruleRecorded: 'Platform record: {date}', ruleEffective: 'Business effect: not stated in the source — counted from {date}',
     ruleSource: 'Source: {source}', ruleMore: '{n} more rules', ruleEmpty: 'No rule found yet. Rules from analysed materials, such as approval thresholds, appear here with their source.',
+    ruleEffectiveStated: 'Business effect: {date}', factTimeStated: 'Effective {from}{to}; recorded {date}', factTimeUntil: ' to {to}',
     ruleSeeAll: 'View all rules',
     factDims: 'Dimensions', factEntity: 'Entity / relation', factSource: 'Source evidence', factTime: 'Time', factStatus: 'Status',
     factSourceMore: '{source} and {n} more', factNoSource: 'No locatable source', factTimeValue: 'Recorded {date}; business effect not stated',
@@ -111,6 +125,7 @@ const TEXT = {
     presetNow: '今天', presetLastRun: '上次分析时所知（{date}）', hidden: '有 {n} 条在所选日期之后才记录，已隐藏。',
     ruleTitle: '关键规则', ruleConfirmed: '已确认', rulePending: '待核对', ruleRecorded: '平台记录：{date} 起', ruleEffective: '业务有效：资料未写明，按 {date} 计',
     ruleSource: '来源：{source}', ruleMore: '另有 {n} 条规则', ruleEmpty: '还没有找到规则。分析资料后，审批阈值这类规则会带着来源显示在这里。',
+    ruleEffectiveStated: '业务有效：{date}', factTimeStated: '业务有效 {from}{to}；平台记录 {date}', factTimeUntil: ' 至 {to}',
     ruleSeeAll: '查看全部规则',
     factDims: '内容维度', factEntity: '实体/关系', factSource: '来源证据', factTime: '时间', factStatus: '状态',
     factSourceMore: '{source} 等 {n} 处', factNoSource: '没有可定位的来源', factTimeValue: '平台记录 {date}；业务有效期资料未写明',
@@ -159,13 +174,14 @@ export function RuleCard({ drafts, runs, names, onSeeAll }: { drafts: LensDraft[
   if (!rule) return <aside className="lens-rule is-empty" aria-label={t('ruleTitle')}><p>{t('ruleEmpty')}</p></aside>;
   const recorded = day(recordedOf(rule, runs));
   const source = rule.evidence[0]?.locator;
+  const effect = rule.effectiveFrom;
   return <aside className="lens-rule" aria-label={t('ruleTitle')}>
     <div className="lens-rule-main">
       <span className="lens-eyebrow">{t('ruleTitle')}</span>
       <strong>{rule.description || rule.name}</strong>
       {rule.relation ? <p>{relationText(rule, names)}</p> : null}
       <p className="lens-rule-meta">
-        {recorded ? <span>{t('ruleEffective', { date: recorded })}</span> : null}
+        {effect ? <span>{t('ruleEffectiveStated', { date: effect })}</span> : recorded ? <span>{t('ruleEffective', { date: recorded })}</span> : null}
         {recorded ? <span>{t('ruleRecorded', { date: recorded })}</span> : null}
         {source ? <span>{t('ruleSource', { source })}</span> : null}
       </p>
@@ -232,7 +248,9 @@ export function AssertionFacts({ draft, runs, names, stale }: { draft: LensDraft
     <div><dt>{t('factDims')}</dt><dd className="lens-fact-dims">{dims.map(dim => <span key={dim}>{t(`dim_${dim}` as keyof typeof TEXT.en)}</span>)}</dd></div>
     <div><dt>{t('factEntity')}</dt><dd>{draft.relation ? relationText(draft, names) : draft.name}</dd></div>
     <div><dt>{t('factSource')}</dt><dd>{source ? draft.evidence.length > 1 ? t('factSourceMore', { source, n: draft.evidence.length }) : source : t('factNoSource')}</dd></div>
-    {recorded ? <div><dt>{t('factTime')}</dt><dd>{t('factTimeValue', { date: recorded })}</dd></div> : null}
+    {recorded ? <div><dt>{t('factTime')}</dt><dd>{draft.effectiveFrom
+      ? t('factTimeStated', { from: draft.effectiveFrom, to: draft.effectiveTo ? t('factTimeUntil', { to: draft.effectiveTo }) : '', date: recorded })
+      : t('factTimeValue', { date: recorded })}</dd></div> : null}
     <div><dt>{t('factStatus')}</dt><dd>{t(stale ? 'factStale' : draft.humanLocked ? 'factConfirmed' : 'factPending')}</dd></div>
   </dl>;
 }

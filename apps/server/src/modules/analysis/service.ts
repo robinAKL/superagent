@@ -61,7 +61,9 @@ export function validateProposals(value: unknown): Omit<Recommendation, 'id' | '
     const keys = (value: unknown) => Array.isArray(value) ? [...new Set(value.filter((k): k is string => typeof k === 'string' && !!k.trim() && k.length <= 120).map(k => k.trim()))].slice(0, 12) : [];
     const assignment = p.kind === 'employee' && (p.uses !== undefined || p.sops !== undefined) ? { assignment: { tools: keys(p.uses), sops: keys(p.sops) } } : {};
     const workflow = p.kind === 'sop' ? recommendedWorkflow(p.workflow, evidence.length) : undefined;
-    return { workflow, key: p.key as string, name: p.name as string, description: p.description as string, kind: p.kind as Recommendation['kind'], evidence, ...assignment, ...(p.kind==='relation'?{relation:{from:relation!.from as string,to:relation!.to as string,label:relation!.label as string}}:{}) };
+    const day = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
+    const validity = { ...(day(p.effectiveFrom) ? { effectiveFrom: day(p.effectiveFrom) } : {}), ...(day(p.effectiveTo) ? { effectiveTo: day(p.effectiveTo) } : {}) };
+    return { workflow, key: p.key as string, name: p.name as string, description: p.description as string, kind: p.kind as Recommendation['kind'], evidence, ...assignment, ...validity, ...(p.kind==='relation'?{relation:{from:relation!.from as string,to:relation!.to as string,label:relation!.label as string}}:{}) };
   });
 }
 

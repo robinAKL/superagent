@@ -8,7 +8,7 @@ import { AnalysisDraftIndex } from './AnalysisDraftIndex';
 import type { McpConnection } from './McpKnowledge';
 import { OntologyGraphView } from '../components/OntologyGraphView';
 import { AnalysisResults, SopWorkspace, useDraftRead } from './SuperAgentPage';
-import { AssertionFacts, DimensionChips, KnowledgeTimeline, RuleCard, TimeBar, dimensionsOf, objectNames, recordedOf, timeFromParams, visibleAt, type Dimension, type KnowledgeTime } from './KnowledgeLenses';
+import { AssertionFacts, DimensionChips, KnowledgeTimeline, RuleCard, TimeBar, dimensionsOf, objectNames, timeFromParams, visibleDraft, type Dimension, type KnowledgeTime } from './KnowledgeLenses';
 
 interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string; retrievedAt?: string }
 interface Plugin { id: string; name: string; enabled: boolean; configured: boolean; capabilities: string[] }
@@ -21,6 +21,7 @@ interface Recommendation {
   id: string; key: string; kind: string; name: string; description: string; humanLocked: boolean; deleted: boolean; stale?: boolean;
   proposedChange?: { name: string; description: string; evidence?: Evidence[] }; evidence: Evidence[];
   relation?: { from: string; to: string; label: string };
+  recordedAt?: string; effectiveFrom?: string; effectiveTo?: string;
   assignment?: { tools: string[]; sops: string[] };
   origin?: 'manual' | 'inferred';
 }
@@ -959,7 +960,7 @@ export function KnowledgePage() {
   const liveDrafts = drafts.filter(draft => !draft.stale);
   const lensRuns = overview?.analyses ?? [];
   const lastRunAt = lensRuns.filter(run => run.status === 'completed' && run.createdAt).map(run => run.createdAt!).sort().at(-1);
-  const timedDrafts = drafts.filter(draft => visibleAt(recordedOf(draft, lensRuns), time));
+  const timedDrafts = drafts.filter(draft => visibleDraft(draft, lensRuns, time));
   const hiddenByTime = drafts.length - timedDrafts.length;
   const names = objectNames(drafts);
   const shownDrafts = dimension ? timedDrafts.filter(draft => dimensionsOf(draft).includes(dimension)) : timedDrafts;
