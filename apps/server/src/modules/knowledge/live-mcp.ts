@@ -98,10 +98,14 @@ const readOnlyTools = (client: Client) => client.getServerCapabilities()?.tools
   }) : Promise.resolve([]);
 
 async function discover(client: Client, endpoint: string, allowTools: boolean) {
-  const [items, patterns, tools] = await Promise.all([resources(client), templates(client), allowTools ? readOnlyTools(client) : []]);
+  const [items, patterns] = await Promise.all([resources(client), templates(client)]);
+  // A server that publishes no documents is only readable through its read-only queries, so opting out would leave
+  // nothing to read. Servers that also publish documents keep the explicit opt-in.
+  const queryOnly = !items.length && !patterns.length;
+  const tools = allowTools || queryOnly ? await readOnlyTools(client) : [];
   const name = (client.getServerVersion()?.title || client.getServerVersion()?.name || new URL(endpoint).hostname).slice(0, 160);
   return {
-    name, source: endpoint,
+    name, source: endpoint, allowTools: allowTools || (queryOnly && tools.length > 0),
     resources: items.map(({ uri, name, title, description, mimeType }) => ({ uri, name, title, description, mimeType })),
     resourceTemplates: patterns.map(({ uriTemplate, name, title, description }) => ({ uriTemplate, name, title, description })),
     tools: tools.map(({ name, title, description, inputSchema }) => ({ name, title, description, inputSchema })),
@@ -129,7 +133,7 @@ export class LiveMcpKnowledge {
         enabled(state);
         const entry = updateEntries(state, user);
         const previous = entry.sources[id]?.grant?.secret;
-        entry.sources[id] = { id, endpoint, name: catalog.name, allowTools, revision: newId() };
+        entry.sources[id] = { id, endpoint, name: catalog.name, allowTools: catalog.allowTools, revision: newId() };
         return previous;
       });
       await this.disable(old);
@@ -196,7 +200,7 @@ export class LiveMcpKnowledge {
       if (entry.completing !== attempt.key) throw invalidCallback();
       const previous = entry.sources[id]?.grant?.secret;
       const grant = await this.saveGrant(ctx, id, reply);
-      entry.sources[id] = { id, endpoint, name: catalog.name, allowTools, oauth, grant, revision: newId() };
+      entry.sources[id] = { id, endpoint, name: catalog.name, allowTools: catalog.allowTools, oauth, grant, revision: newId() };
       delete entry.completing;
       return previous;
     });
@@ -236,9 +240,10 @@ export class LiveMcpKnowledge {
   async call(ctx: UserContext, id: unknown, name: unknown, args: unknown, revision?: string) {
     if (typeof name !== 'string' || !/^[\w.-]{1,128}$/.test(name) || !args || typeof args !== 'object' || Array.isArray(args)) throw new KnowledgeError('invalid_input', 'MCP 查询参数无效。');
     const { source, token } = await this.access(ctx, id, revision);
-    if (!source.allowTools) throw new KnowledgeError('mcp_query_unavailable', '此来源未启用只读 MCP 查询。', 403);
     return this.request(source.endpoint, token, async client => {
-      if (!(await readOnlyTools(client)).some(tool => tool.name === name)) throw new KnowledgeError('mcp_query_unavailable', '该 MCP 服务未公开此只读查询。', 403);
+      const catalog = await discover(client, source.endpoint, source.allowTools);
+      if (!catalog.allowTools) throw new KnowledgeError('mcp_query_unavailable', '此来源未启用只读 MCP 查询。', 403);
+      if (!catalog.tools.some(tool => tool.name === name)) throw new KnowledgeError('mcp_query_unavailable', '该 MCP 服务未公开此只读查询。', 403);
       const result = await client.callTool({ name, arguments: args as Record<string, unknown> });
       if (result.isError) throw new KnowledgeError('mcp_query_failed', 'MCP 查询失败，请检查参数和账号权限。', 422);
       return { source: source.endpoint, tool: name, retrievedAt: new Date().toISOString(), result: result.structuredContent ?? result.content };

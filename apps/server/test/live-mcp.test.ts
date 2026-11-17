@@ -19,15 +19,21 @@ const connection = root + '/connections/mcp/live/' + hash(endpoint);
 const finishPath = root + '/connections/mcp/oauth/finish';
 const schemas = { type: 'object', properties: {} };
 
-it('keeps more than one public source and requires opt-in before executing a tool', async () => {
+it('keeps more than one public source and requires opt-in before executing a tool beside documents', async () => {
   const first = 'https://handbooks.example.net/mcp', second = 'https://reference.example.org/mcp';
+  const queryOnly = 'https://guide.example.com/mcp';
   const network = vi.fn<typeof fetch>(async (input, init) => {
-    expect([first, second]).toContain(String(input));
+    const url = String(input);
+    expect([first, second, queryOnly]).toContain(url);
     if (init?.method !== 'POST') return new Response(null, { status: 405 });
     const req = JSON.parse(String(init.body));
     if (req.method === 'notifications/initialized') return new Response(null, { status: 202 });
+    const capabilities = url === queryOnly ? { tools: {} } : { resources: {}, tools: {} };
     const result = req.method === 'initialize'
-      ? { protocolVersion: req.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: new URL(String(input)).hostname, version: '1' } }
+      ? { protocolVersion: req.params.protocolVersion, capabilities, serverInfo: { name: new URL(url).hostname, version: '1' } }
+      : req.method === 'resources/list' ? { resources: [{ uri: 'handbook://current', name: 'Handbook' }] }
+      : req.method === 'resources/templates/list' ? { resourceTemplates: [] }
+      : req.method === 'tools/call' ? { content: [{ type: 'text', text: 'Guide' }] }
       : { tools: [{ name: 'lookup', inputSchema: schemas, annotations: { readOnlyHint: true } }] };
     return Response.json({ jsonrpc: '2.0', id: req.id, result });
   });
@@ -39,9 +45,20 @@ it('keeps more than one public source and requires opt-in before executing a too
   await live.connect(ctx, { endpoint: second, allowTools: true });
   const sources = live.list(await repo.read(ctx), ctx);
   expect(sources.map(({ endpoint }) => endpoint)).toEqual([first, second]);
+  expect(sources.map(({ allowTools }) => allowTools)).toEqual([false, true]);
   expect((await live.catalog(ctx, hash(first))).tools).toEqual([]);
   await expect(live.call(ctx, hash(first), 'lookup', {})).rejects.toMatchObject({ code: 'mcp_query_unavailable' });
   expect((await live.catalog(ctx, hash(second))).tools.map(tool => tool.name)).toEqual(['lookup']);
+
+  // A server without documents is only readable through its read-only queries, so they are enabled on connect.
+  await live.connect(ctx, { endpoint: queryOnly });
+  expect(live.list(await repo.read(ctx), ctx).find(source => source.endpoint === queryOnly)).toMatchObject({ allowTools: true });
+  expect((await live.catalog(ctx, hash(queryOnly))).tools.map(tool => tool.name)).toEqual(['lookup']);
+  expect((await live.call(ctx, hash(queryOnly), 'lookup', {})).result).toEqual([{ type: 'text', text: 'Guide' }]);
+  // Connections saved before this rule keep working without reconnecting.
+  await repo.transact(ctx, state => { state.liveMcp[hash(ctx.userId)]!.sources[hash(queryOnly)]!.allowTools = false; });
+  expect((await live.call(ctx, hash(queryOnly), 'lookup', {})).tool).toBe('lookup');
+
   const colleague = { ...ctx, userId: 'bob' };
   expect(live.list(await repo.read(colleague), colleague)).toEqual([]);
 });
