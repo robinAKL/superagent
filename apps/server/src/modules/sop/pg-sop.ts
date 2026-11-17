@@ -168,3 +168,15 @@ export async function claimSopEvent(
   ]);
   return result.rows.length === 1;
 }
+
+/** Active versions from the shared store, independently of any process's editor cache. */
+export async function loadActiveWorkflows(db: Queryable, sopId?: string): Promise<SopVersion[]> {
+  const result = await db.query<VersionRow>(`
+    SELECT DISTINCT ON (sop_id) id, sop_id, number, definition, status, report, revision, validated_revision, effective_at
+    FROM sop_versions
+    WHERE status = 'published' AND ($1::text IS NULL OR sop_id = $1)
+      AND (effective_at IS NULL OR effective_at::timestamptz <= now())
+    ORDER BY sop_id, number DESC
+  `, [sopId ?? null]);
+  return result.rows.map(fromVersionRow);
+}

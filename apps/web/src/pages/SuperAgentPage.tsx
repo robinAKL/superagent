@@ -6,6 +6,7 @@ import { KIND_LABEL, SopGraphView } from '../components/SopGraphView';
 import { graphFromPack, knowledgeImpact, packFromRecommendation, unconfirmedItems, validationState, type KnowledgeEvidence, type SopPack } from './sop-workflow';
 import { McpKnowledge } from './McpKnowledge';
 import { AnalysisDraftIndex } from './AnalysisDraftIndex';
+import { CompanyContextPanel } from './CompanyContextPanel';
 import { ExecutionsPanel } from './ExecutionsPanel';
 import './SuperAgentPage.css';
 
@@ -25,7 +26,7 @@ export interface SopVersionView {
   /** Bumped by every saved revision; validation is valid only for the revision it ran on. */
   revision?: number;
   validatedRevision?: number | null;
-  definition: { graph?: SopGraph; pack?: SopPack | null; [k: string]: unknown };
+  definition: { graph?: SopGraph; pack?: SopPack | null; workflow?: { title: string; completion: string }; [k: string]: unknown };
 }
 interface SopSummary {
   sopId: string;
@@ -65,7 +66,9 @@ interface DraftViewProps { knowledge: DraftRead; retryKnowledge: () => void }
 const READ_TIMEOUT_MS = 15_000;
 const TEXT = {
   en: {
-    title: 'Super Agent', subtitle: 'Workflows (SOP) and business ontology',
+    title: 'Super Agent', subtitle: 'Company context and operating workflows',
+    context: 'Company context', candidates: 'Workflow candidates', useCandidate: 'Open in workflow editor',
+    workflowTitle: 'Workflow name', completion: 'Expected deliverable', runWorkflow: 'Open in command room',
     results: 'Analysis results', sop: 'Workflows', ontology: 'Ontology', mcp: 'MCP knowledge',
     loadingDrafts: 'Loading analysis drafts…', draftError: 'Could not load analysis drafts.',
     retry: 'Try again', loadingSops: 'Loading workflows…', sopError: 'Could not load workflows.',
@@ -82,7 +85,9 @@ const TEXT = {
     employeeDraft: 'Role', toolDraft: 'Tool',
   },
   zh: {
-    title: '超级智能体', subtitle: '流程（SOP）与企业本体',
+    title: '超级智能体', subtitle: '企业上下文与运行流程',
+    context: '企业上下文', candidates: '候选流程', useCandidate: '在流程编辑器中打开',
+    workflowTitle: '流程名称', completion: '预期交付', runWorkflow: '在指挥室运行',
     results: '分析结果', sop: '流程', ontology: '本体关系', mcp: 'MCP 知识',
     loadingDrafts: '正在读取分析草案…', draftError: '无法读取分析草案。',
     retry: '重试', loadingSops: '正在读取流程…', sopError: '无法读取流程列表。',
@@ -102,13 +107,13 @@ const TEXT = {
 const DRAFT_KIND: Record<string, keyof typeof TEXT.en> = {
   sop: 'sopDraft', object: 'objectDraft', relation: 'relationDraft', employee: 'employeeDraft', tool: 'toolDraft',
 };
-type AgentTab = 'results' | 'sop' | 'ontology' | 'mcp';
-const TABS: readonly AgentTab[] = ['results', 'sop', 'ontology', 'mcp'];
+type AgentTab = 'context' | 'results' | 'sop' | 'ontology' | 'mcp';
+const TABS: readonly AgentTab[] = ['context', 'results', 'sop', 'ontology', 'mcp'];
 
 function agentLocation() {
   const params = new URLSearchParams(typeof window === 'undefined' ? undefined : window.location.hash.split('?')[1]);
-  const tab = TABS.find(entry => entry === params.get('tab')) ?? 'results';
-  return { tab, draftType: params.get('type') ?? '' };
+  const tab = TABS.find(entry => entry === params.get('tab')) ?? (params.has('type') ? 'results' : 'context');
+  return { tab, draftType: params.get('type') ?? '', workflowId: params.get('sop') ?? '', candidate: params.get('candidate') ?? '', fromOrganization: params.has('org') };
 }
 
 const STATUS_LABEL: Record<SopVersionView['status'], string> = { draft: '草稿', passed: '校验通过', failed: '校验未通过', published: '已发布' };
@@ -144,12 +149,12 @@ function rulesTo(r: RulesForm): { requiredFields: string[]; threshold: { field: 
 }
 
 export function employeeContext(rows: EmployeeRow[]): SopGraphContext['employees'] {
-  return Object.fromEntries(rows.map((e) => [e.id, { status: e.status === 'online' || e.status === 'active' ? 'active' : e.status === 'paused' ? 'paused' : 'offline' }]));
+  return Object.fromEntries(rows.map((e) => [e.id, { status: e.status === 'online' || e.status === 'busy' || e.status === 'active' ? 'active' : e.status === 'paused' ? 'paused' : 'offline' }]));
 }
 
 export function SuperAgentPage() {
   const t = useT(TEXT);
-  const [{ tab, draftType }, setLocation] = useState(agentLocation);
+  const [{ tab, draftType, workflowId, candidate, fromOrganization }, setLocation] = useState(agentLocation);
   useEffect(() => {
     const updateTab = () => setLocation(agentLocation());
     window.addEventListener('hashchange', updateTab);
@@ -174,7 +179,7 @@ export function SuperAgentPage() {
     setKnowledge({ status: 'loading' });
     setAttempt(value => value + 1);
   }
-  const count = knowledge.status === 'ready' ? knowledge.drafts.recommendations.length + knowledge.drafts.mcpRecommendations.length : 0;
+  const count = knowledge.status === 'ready' ? [...knowledge.drafts.recommendations, ...knowledge.drafts.mcpRecommendations].filter(draft => draft.kind === 'sop').length : 0;
   return (
     <>
       <div className="page-head">
@@ -183,12 +188,13 @@ export function SuperAgentPage() {
       </div>
       <div className="tabs" role="tablist" aria-label={t('title')}>
         {TABS.map(entry => <button key={entry} role="tab" type="button" aria-selected={tab === entry} className="tab" onClick={() => {
-          if (tab !== entry) window.location.hash = entry === 'results' ? 'brain' : `brain?tab=${entry}`;
-        }}>{t(entry)}{entry === 'results' && count ? ` (${count})` : ''}</button>)}
+          if (tab !== entry) window.location.hash = entry === 'context' ? 'brain' : `brain?tab=${entry}${fromOrganization ? '&org=1' : ''}`;
+        }}>{t(entry === 'results' ? 'candidates' : entry)}{entry === 'results' && count ? ` (${count})` : ''}</button>)}
       </div>
-      {tab === 'sop' ? <SopWorkspace knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
+      {tab === 'context' ? <CompanyContextPanel fromOrganization={fromOrganization} /> :
+        tab === 'sop' ? <SopWorkspace key={`${workflowId}|${candidate}`} initialSop={workflowId} candidate={candidate} fromOrganization={fromOrganization} knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
         tab === 'ontology' ? <OntologyView knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
-        tab === 'results' ? <AnalysisResults key={draftType} knowledge={knowledge} retryKnowledge={retryKnowledge} initialKind={draftType} /> : <McpKnowledge />}
+        tab === 'results' ? <AnalysisResults key={draftType} knowledge={knowledge} retryKnowledge={retryKnowledge} initialKind={draftType} fromOrganization={fromOrganization} /> : <McpKnowledge />}
     </>
   );
 }
@@ -203,15 +209,15 @@ function DraftLoadStatus({ knowledge, retryKnowledge }: DraftViewProps) {
   </div>;
 }
 
-function AnalysisResults({ knowledge, retryKnowledge, initialKind }: DraftViewProps & { initialKind: string }) {
+function AnalysisResults({ knowledge, retryKnowledge, initialKind, fromOrganization }: DraftViewProps & { initialKind: string; fromOrganization: boolean }) {
   const t = useT(TEXT);
   const drafts = knowledge.status === 'ready' ? [
     ...knowledge.drafts.mcpRecommendations.map(draft => ({ ...draft, privateMcp: true })),
     ...knowledge.drafts.recommendations,
-  ].sort((a, b) => Number(b.kind === 'sop') - Number(a.kind === 'sop')) : [];
+  ].filter(draft => initialKind || draft.kind === 'sop').sort((a, b) => Number(b.kind === 'sop') - Number(a.kind === 'sop')) : [];
   return <section className="panel stack" aria-labelledby="agent-results-heading">
     <div className="agent-results-head">
-      <h2 className="h2" id="agent-results-heading">{t('results')}</h2>
+      <h2 className="h2" id="agent-results-heading">{t(initialKind ? 'results' : 'candidates')}</h2>
       <a href="#knowledge?view=analysis">{t('reviewDrafts')}</a>
     </div>
     <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />
@@ -226,22 +232,25 @@ function AnalysisResults({ knowledge, retryKnowledge, initialKind }: DraftViewPr
             <summary>{t('evidence')}</summary>
             <Evidences ev={draft.evidence} label={t('evidence')} />
           </details> : null}
+          {draft.kind === 'sop' && !('privateMcp' in draft) && draft.evidence.length
+            ? <a className="btn" href={`#brain?tab=sop&candidate=${encodeURIComponent(draft.key)}${fromOrganization ? '&org=1' : ''}`}>{t('useCandidate')}</a> : null}
         </article>
       } /> : <p className="helper">{t('noDrafts')}</p> : null}
   </section>;
 }
 
-function SopWorkspace({ knowledge, retryKnowledge }: DraftViewProps) {
+function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate, fromOrganization }: DraftViewProps & { initialSop: string; candidate: string; fromOrganization: boolean }) {
   const t = useT(TEXT);
   const [sops, setSops] = useState<SopSummary[] | null>(null);
   const [unavailable, setUnavailable] = useState(false);
-  const [sopId, setSopId] = useState('');
+  const [sopId, setSopId] = useState(initialSop);
   const [newSopId, setNewSopId] = useState('');
   const [versions, setVersions] = useState<SopVersionView[]>([]);
   const [tools, setTools] = useState<ToolRow[]>([]);
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [draft, setDraft] = useState<SopGraph>({ nodes: [], edges: [] });
   const [pack, setPack] = useState<SopPack | undefined>();
+  const [workflow, setWorkflow] = useState({ title: '', completion: '' });
   const [rules, setRules] = useState<RulesForm>(rulesFrom(undefined));
   const [pendingPack, setPendingPack] = useState<SopPack | undefined>();
   const [selected, setSelected] = useState<string>();
@@ -273,6 +282,7 @@ function SopWorkspace({ knowledge, retryKnowledge }: DraftViewProps) {
     setDraft(structuredClone(editable?.definition.graph ?? { nodes: [], edges: [] }));
     setPack(editable?.definition.pack ? structuredClone(editable.definition.pack) : undefined);
     setRules(rulesFrom(editable?.definition));
+    setWorkflow(editable?.definition.workflow ?? { title: editable?.definition.pack?.name ?? '', completion: '' });
     setPendingPack(undefined);
     setSelected(undefined);
   }, []);
@@ -293,20 +303,35 @@ function SopWorkspace({ knowledge, retryKnowledge }: DraftViewProps) {
     !!saved &&
     (JSON.stringify(saved.definition.graph ?? { nodes: [], edges: [] }) !== JSON.stringify(draft) ||
       JSON.stringify(saved.definition.pack ?? null) !== JSON.stringify(pack ?? null) ||
-      JSON.stringify(rulesFrom(saved.definition)) !== JSON.stringify(rules));
+      JSON.stringify(rulesFrom(saved.definition)) !== JSON.stringify(rules) ||
+      JSON.stringify(saved.definition.workflow ?? { title: saved.definition.pack?.name ?? '', completion: '' }) !== JSON.stringify(workflow));
   const vstate = validationState(openDraft, dirty);
   const unconfirmed = unconfirmedItems(pack);
   const recs = knowledge.status === 'ready' ? knowledge.drafts.recommendations : [];
-  const packs = recs.filter((r) => r.kind === 'sop').map(packFromRecommendation);
+  const packs = recs.filter(r => r.kind === 'sop' && r.evidence.length && (!candidate || r.key === candidate)).map(packFromRecommendation);
+  const [organization, setOrganization] = useState<{
+    sops: { key: string; privateSource: boolean }[];
+    employees: { employeeId: string | null; sops: string[]; privateSource: boolean }[];
+    confirmation: unknown;
+    changedSinceConfirmation: boolean;
+  }>();
+  useEffect(() => {
+    if (!fromOrganization) return;
+    const request = new AbortController();
+    void api<NonNullable<typeof organization>>('/api/v1/knowledge/organization', { signal: request.signal }).then(({ status, body }) => {
+      if (!request.signal.aborted && status === 200 && Array.isArray(body.sops) && Array.isArray(body.employees)) setOrganization(body);
+    }).catch(() => undefined);
+    return () => request.abort();
+  }, [fromOrganization]);
   const privateWorkflows = knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.some(draft => draft.kind === 'sop');
   const impact = knowledge.status === 'ready' ? knowledgeImpact(pack, recs) : [];
   const node = draft.nodes.find((n) => n.id === selected);
   const canValidate = !!openDraft && !dirty && !issues.length && !unconfirmed.length;
   const canPublish = canValidate && vstate.kind === 'valid';
 
-  async function save(graph = draft, nextPack = pack, forSop = sopId) {
+  async function save(graph = draft, nextPack = pack, forSop = sopId, metadata = workflow) {
     const base = forSop === sopId ? (openDraft ?? published) : undefined;
-    const definition = { ...(base?.definition ?? { employeeStatus: 'active' }), ...rulesTo(rules), graph, pack: nextPack ?? null };
+    const definition = { ...(base?.definition ?? { employeeStatus: 'active' }), ...rulesTo(rules), graph, workflow: metadata, pack: nextPack ?? null };
     const r = base
       ? await api<SopVersionView>(`/api/v1/sop/drafts/${encodeURIComponent(base.id)}`, { method: 'PUT', body: JSON.stringify({ definition }) })
       : await api<SopVersionView>('/api/v1/sop/drafts', { method: 'POST', body: JSON.stringify({ sopId: forSop, definition }) });
@@ -347,9 +372,24 @@ function SopWorkspace({ knowledge, retryKnowledge }: DraftViewProps) {
     setPendingPack(undefined);
     const target = sopId || newSopId.trim() || `sop.${p.key}`;
     const fresh = structuredClone(p);
-    setDraft(graphFromPack(fresh));
+    const graph = graphFromPack(fresh);
+    if (organization?.confirmation && !organization.changedSinceConfirmation &&
+        organization.sops.some(sop => sop.key === p.key && !sop.privateSource)) {
+      const participants = organization.employees.filter(employee => employee.employeeId && !employee.privateSource && employee.sops.includes(p.key));
+      const participant = participants.length === 1 ? participants[0]?.employeeId : null;
+      if (participant) {
+        const name = employees.find(employee => employee.id === participant)?.name;
+        if (name) {
+          graph.nodes.splice(2, 0, { id: 'employee', kind: 'employee', label: name, ref: participant });
+          graph.edges.splice(1, 1, { from: 'a', to: 'employee' }, { from: 'employee', to: 'h' });
+        }
+      }
+    }
+    const metadata = { title: fresh.name, completion: '' };
+    setDraft(graph);
     setPack(fresh);
-    await save(graphFromPack(fresh), fresh, target);
+    setWorkflow(metadata);
+    await save(graph, fresh, target, metadata);
   }
 
   return (
@@ -422,6 +462,14 @@ function SopWorkspace({ knowledge, retryKnowledge }: DraftViewProps) {
 
           <section className="panel stack" aria-label="流程图">
             <h2 className="h2">{openDraft ? `草稿 v${openDraft.number}` : published ? `已发布 v${published.number}（编辑将新建草稿）` : '新流程草稿'}</h2>
+            <div className="agent-fields">
+              <label className="field"><span>{t('workflowTitle')}</span>
+                <input maxLength={160} value={workflow.title} onChange={event => setWorkflow({ ...workflow, title: event.target.value })} />
+              </label>
+              <label className="field"><span>{t('completion')}</span>
+                <input maxLength={1000} value={workflow.completion} onChange={event => setWorkflow({ ...workflow, completion: event.target.value })} />
+              </label>
+            </div>
             <SopGraphView graph={draft} issues={issues} selected={selected} onSelect={setSelected} />
             {node ? <NodeDetail node={node} tools={tools} employees={employees} onRemove={() => {
               setDraft((g) => ({ nodes: g.nodes.filter((n) => n.id !== node.id), edges: g.edges.filter((e) => e.from !== node.id && e.to !== node.id) }));
@@ -504,6 +552,7 @@ function SopWorkspace({ knowledge, retryKnowledge }: DraftViewProps) {
             {!openDraft ? <p className="helper">先保存草稿，再校验和发布。</p> : null}
           </section>
 
+          {published ? <a className="btn" href={`#room?workflow=${encodeURIComponent(sopId)}`}>{t('runWorkflow')}</a> : null}
           <ExecutionsPanel sopId={sopId} publishedVersionId={published?.id ?? null} />
         </>
       ) : null}

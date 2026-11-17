@@ -40,6 +40,17 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
     expect((await overview(page)).items).toEqual([expect.objectContaining({ confirmed: true })]);
   });
 
+  await test.step('company context is saved and reloaded from the Super Agent entry point', async () => {
+    await page.goto('/#brain');
+    await page.getByLabel('企业名称').fill('测试财务部');
+    await page.getByLabel('业务目标').fill('核对供应商发票并完成付款登记');
+    await page.getByLabel('决策边界').fill('审批人确认后才能登记付款');
+    await page.getByRole('button', { name: '保存企业上下文' }).click();
+    await expect(page.getByRole('status').filter({ hasText: '已保存上下文' })).toBeVisible();
+    await page.reload();
+    await expect(page.getByLabel('业务目标')).toHaveValue('核对供应商发票并完成付款登记');
+  });
+
   let employeeId = '';
   await test.step('analysis recommends the employee and the tool from the cited policy', async () => {
     await json(page.request.post('/api/v1/knowledge/analyses', { data: {} }));
@@ -87,19 +98,37 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
     await page.goto('/#brain?tab=sop');
     await page.getByLabel('选择流程').selectOption(SOP);
     await expect(page.locator('main')).toContainText('结构检查通过');
+    await page.getByLabel('流程名称').fill('供应商付款');
+    await page.getByLabel('预期交付').fill('付款已登记，金额与批准记录一致');
+    await page.getByRole('button', { name: '保存草稿' }).click();
     await page.getByRole('button', { name: '校验（运行回归用例）' }).click();
     await expect(page.getByRole('list', { name: '回归用例' }).locator('li.ok')).toHaveCount(10);
     await page.getByRole('button', { name: '发布', exact: true }).click();
     await expect(page.locator('tr[data-version="1"]')).toContainText('已发布');
+    await json(page.request.post('/api/v1/sop/drafts', { data: { sopId: SOP, definition: { graph, requiredFields: [], employeeStatus: 'active' } } }));
+    const active = await json<{ workflows: { sopId: string; version: number }[] }>(page.request.get('/api/v1/sop/published'));
+    expect(active.workflows.find(workflow => workflow.sopId === SOP)?.version).toBe(1);
   });
 
-  await test.step('trigger: the run stops at the human review; nothing is written yet', async () => {
+  await test.step('command room: missing input blocks the original run, then it resumes to approval', async () => {
+    await page.getByRole('link', { name: '在指挥室运行' }).click();
+    await expect(page.getByLabel('已发布流程')).toHaveValue(SOP);
     const runs = page.getByRole('region', { name: '运行记录' });
-    await runs.getByLabel('事件编号').fill('INV-480');
-    await runs.getByLabel('输入数据').fill(JSON.stringify({ invoiceNo: 'INV-480', amount: 480 }));
-    await runs.getByRole('button', { name: '按已发布版本触发' }).click();
-    await expect(page.getByLabel('触发结果')).toContainText('等待人工');
-    await expect(runs.locator('[data-step="h"]')).toHaveAttribute('data-step-status', 'waiting_human');
+    await expect(runs).toContainText('付款已登记，金额与批准记录一致');
+    await runs.getByLabel('业务编号').fill('INV-480');
+    await runs.getByLabel('invoiceNo').fill('INV-480');
+    await runs.getByRole('button', { name: '启动流程', exact: true }).click();
+    const run = runs.locator('li[data-run]').filter({ hasText: 'INV-480' });
+    await expect(run.locator('[data-run-status]')).toHaveText('已阻塞');
+    await expect(run.locator('[data-step="t"]')).toContainText('缺少必填字段：amount');
+    await expect(run.locator('[data-step="t"]')).toContainText('负责人');
+    await expect(run).toContainText('企业上下文 v1');
+    const originalRunId = await run.getAttribute('data-run');
+    await page.reload();
+    await run.getByLabel('amount').fill('480');
+    await run.getByRole('button', { name: '补齐信息并继续' }).click();
+    await expect(run.locator('[data-step="h"]')).toHaveAttribute('data-step-status', 'waiting_human');
+    expect(await run.getAttribute('data-run')).toBe(originalRunId);
     expect(await json<Record<string, unknown>>(page.request.get('/__e2e/erp/ledger'))).toEqual({});
   });
 
@@ -117,13 +146,19 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
 
   await test.step('the gateway writes once and the read-back matches: the run completes', async () => {
     await expect.poll(async () => json<Record<string, { amount: number }>>(page.request.get('/__e2e/erp/ledger'))).toEqual({ 'INV-480': { invoiceNo: 'INV-480', amount: 480 } });
-    await page.goto('/#brain?tab=sop');
-    await page.getByLabel('选择流程').selectOption(SOP);
+    await page.goto(`/#room?workflow=${encodeURIComponent(SOP)}`);
     const run = page.getByRole('region', { name: '运行记录' }).locator('li[data-run]').filter({ hasText: 'INV-480' });
     await expect(run.locator('[data-run-status]')).toHaveText('已完成');
     await expect(run).toContainText('事件 INV-480 · v1'); // which event, which published version
     await expect(run.locator('[data-step="w"]')).toContainText('已写入并回读一致（ERP-INV-480）');
     await expect(run.locator('[data-step="w"] .readback')).toContainText('"amount":480');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('button', { name: 'EN', exact: true }).click();
+    await expect(page.getByLabel('Published workflow')).toHaveValue(SOP);
+    await expect(run.locator('[data-run-status]')).toHaveText('Completed');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.getByRole('button', { name: '中文', exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 900 });
   });
 
   await test.step('the run can be traced to who started it and who approved its write, and nobody else can claim it (qa-outcomes#7)', async () => {
@@ -139,6 +174,9 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
     expect([403, 404]).toContain(forged.status());
     expect((await approvalOf()).decision?.by).toBe(run.startedBy);
   });
+
+  await page.goto('/#brain?tab=sop');
+  await page.getByLabel('选择流程').selectOption(SOP);
 
   await test.step('missing required input: blocked and asks for it, nothing runs or is written', async () => {
     const runs = page.getByRole('region', { name: '运行记录' });

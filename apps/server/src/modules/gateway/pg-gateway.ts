@@ -55,8 +55,8 @@ export async function saveGatewaySnapshot(db: Queryable, snapshot: GatewaySnapsh
   }
 }
 
-export async function loadGatewaySnapshot(db: Queryable): Promise<GatewaySnapshot> {
-  const result = await db.query<ActionRow>(LOAD_ACTIONS_SQL, []);
+export async function loadGatewaySnapshot(db: Queryable, instanceId?: string): Promise<GatewaySnapshot> {
+  const result = await db.query<ActionRow>(instanceId ? `${LOAD_ACTIONS_SQL} WHERE instance_id = $1` : LOAD_ACTIONS_SQL, instanceId ? [instanceId] : []);
   return {
     actions: result.rows.map((row) => ({
       id: row.id,

@@ -1,8 +1,9 @@
 import { validateSopGraph } from '@superagent/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { toolsState } from '../tools/index.js';
-import { loadSopSnapshot, saveSopSnapshot, type Queryable } from './pg-sop.js';
+import { loadActiveWorkflows, loadSopSnapshot, saveSopSnapshot, type Queryable } from './pg-sop.js';
 import { OriginalRequests } from './original-request.js';
+import { CompanyContextStore, contextInput } from './company-context.js';
 import { setSopGraphCheck, SopRuntime, type SopDefinition, type SopGraphContext } from './sop.js';
 
 setSopGraphCheck((graph, context) => validateSopGraph(graph, context as Parameters<typeof validateSopGraph>[1]));
@@ -11,9 +12,11 @@ export const sopState = { current: new SopRuntime() };
 export const originalRequestState = { current: new OriginalRequests() };
 
 let sopStore: Queryable | null = null;
+export const companyContext = { current: new CompanyContextStore(null) };
 
 export function bindSopStore(db: Queryable | null): void {
   sopStore = db;
+  companyContext.current = new CompanyContextStore(db);
 }
 
 /** Writes the process cache. A worker reads the tables; it does not trust this process's memory. */
@@ -60,6 +63,32 @@ function resumeFacts(toolId: string, target: string): { sopConfirmed: boolean; t
 
 export const sopModule: FastifyPluginAsync = async (app) => {
   app.get('/', async () => ({ sops: sopState.current.list() }));
+  app.get('/company-context', async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return { context: await companyContext.current.read(req.user!.tenantId) };
+  });
+  app.put('/company-context', async (req, reply) => {
+    const input = contextInput(req.body);
+    if (!input) return reply.code(400).send({ error: 'invalid_company_context' });
+    const { expectedVersion, ...fields } = input;
+    const context = await companyContext.current.save(req.user!.tenantId, req.user!.userId, fields, expectedVersion);
+    return context ? { context } : reply.code(409).send({ error: 'company_context_changed' });
+  });
+  app.get('/published', async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const now = Date.now();
+    const versions = sopStore ? await loadActiveWorkflows(sopStore) : sopState.current.list().flatMap(({ sopId }) => {
+      const active = sopState.current.activePublished(sopId, now);
+      return active ? [active] : [];
+    });
+    return { workflows: versions.filter(version => version.definition.graph?.nodes.length).map(active => {
+      const { sopId } = active;
+      const { definition } = active;
+      return { id: active.id, sopId, version: active.number, title: definition.workflow?.title || sopId,
+        completion: definition.workflow?.completion ?? '', requiredFields: definition.requiredFields ?? [],
+        numericField: definition.threshold?.field ?? null };
+    }) };
+  });
 
   app.get('/original-requests', async () => ({ requests: originalRequestState.current.list() }));
 

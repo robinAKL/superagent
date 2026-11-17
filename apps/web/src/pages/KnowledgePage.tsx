@@ -1250,7 +1250,7 @@ export function KnowledgePage() {
           <ul className="knowledge-runs">{runs.slice(1).map(renderRun)}</ul>
         </details> : null}
         {drafts.length ? <>
-          <a className="knowledge-analysis-results-link" href="#brain">{t('analysisOpenMcpDrafts')}</a>
+          <a className="knowledge-analysis-results-link" href="#brain?tab=results&type=all">{t('analysisOpenMcpDrafts')}</a>
           <AnalysisDraftIndex drafts={drafts} renderDraft={draft => <div className="knowledge-recommendations">
             <RecommendationCard key={draft.id} recommendation={draft} privateMcp={'privateMcp' in draft} disabled={!!busy} onAction={action} label={label} t={t} />
           </div>} />

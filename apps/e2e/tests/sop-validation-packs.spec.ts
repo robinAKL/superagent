@@ -71,7 +71,8 @@ test('a validation report missing baseline regression cases blocks publishing', 
 
 test('a pack starts as a draft with every rule and trigger unconfirmed; it cannot be validated or published until confirmed', async ({ page }) => {
   await knowledge(page, { s1: 'v1', s2: 'v1' });
-  await page.goto('/#brain?tab=sop');
+  await page.goto('/#brain?tab=results');
+  await page.getByRole('link', { name: '在流程编辑器中打开' }).click();
   await page.getByLabel('新流程编号').fill('e2e.invoice-intake');
   await page.locator('[data-pack="invoice-intake"]').getByRole('button', { name: '套用到草稿' }).click();
   await expect(page.getByRole('status')).toContainText('已保存为草稿 v1');

@@ -10,6 +10,7 @@
 import type { SopGraph, ToolEffect } from '@superagent/shared';
 import { OutcomeUnknownError, payloadHash, type ToolGateway } from '../gateway/gateway.js';
 import type { WorkInbox, WorkItem } from '../humanwork/work-items.js';
+import type { CompanyContext } from '../sop/company-context.js';
 import type { SopRuntime, SopVersion } from '../sop/sop.js';
 
 /** A tool implementation (installed connector / replayed procedure). Synchronous like the gateway's call. */
@@ -32,6 +33,8 @@ export interface ExecutionStep {
   workItemId: string | null;
   actionId: string | null;
   readback: unknown | null;
+  resumeReason?: 'input' | 'readiness';
+  missingFields?: string[];
 }
 
 export interface Execution {
@@ -47,6 +50,14 @@ export interface Execution {
   status: ExecutionStatus;
   steps: ExecutionStep[];
   exceptionItemId: string | null;
+  startedAt?: string;
+  companyContext?: CompanyContext | null;
+  workflow?: SopVersion['definition']['workflow'];
+}
+
+function hasValue(input: Record<string, unknown>, key: string): boolean {
+  const value = Object.hasOwn(input, key) ? input[key] : undefined;
+  return value !== undefined && value !== null && (typeof value !== 'string' || !!value.trim());
 }
 
 export interface ExecutorDeps {
@@ -55,6 +66,7 @@ export interface ExecutorDeps {
   gateway: ToolGateway;
   tools: (toolId: string) => ToolInfo | null;
   connectors: Map<string, Connector>;
+  employeeUnavailable?: (employeeId: string) => string | null;
   /** Who receives approvals and exceptions (the SOP owner by default). */
   reviewerOf: (execution: Execution) => string;
   /**
@@ -68,7 +80,7 @@ export interface ExecutorDeps {
    * Persist the gateway snapshot after a row is marked executing and before the connector runs.
    * Absent in unit tests, which call the tool without a database.
    */
-  commitBeforeCall?: () => Promise<void>;
+  commitBeforeCall?: (run: Execution) => Promise<void>;
   /**
    * Fresh external values for an unknown write. This is a read, not the write connector.
    * Absent or throwing means reconcile refuses without calling gateway.readBack.
@@ -191,8 +203,13 @@ export class SopExecutor {
     return structuredClone(copy);
   }
 
+  /** Refresh the cached copy of a durable run before a process advances it. */
+  restore(run: Execution): void {
+    this.runs.set(run.id, structuredClone(run));
+  }
+
   /** Trigger: open a SOP instance for a published version and run until a human step or the end. */
-  async start(input: { tenantId: string; versionId: string; eventId: string; startedBy: string; data: Record<string, unknown> }): Promise<Execution> {
+  async start(input: { tenantId: string; versionId: string; eventId: string; startedBy: string; data: Record<string, unknown>; companyContext?: CompanyContext | null }): Promise<Execution> {
     const sop = this.deps.sop();
     const version = sop.get(input.versionId);
     if (version.status !== 'published') throw new ExecutionError('not_published', 'only a published SOP version can run');
@@ -214,6 +231,9 @@ export class SopExecutor {
       status: 'running',
       steps: stepOrder(graph).map((id) => ({ nodeId: id, kind: byId.get(id)!.kind, label: byId.get(id)!.label, status: 'pending', detail: null, workItemId: null, actionId: null, readback: null })),
       exceptionItemId: null,
+      companyContext: input.companyContext,
+      startedAt: new Date().toISOString(),
+      workflow: version.definition.workflow,
     };
     this.runs.set(run.id, run);
     return this.settle(run, version, graph);
@@ -225,7 +245,7 @@ export class SopExecutor {
    * commitRun is awaited before any tool call; if it throws, the local run is dropped and nothing is invoked.
    */
   async runClaimed(
-    input: { tenantId: string; versionId: string; instanceId: string; eventId: string; startedBy: string; data: Record<string, unknown> },
+    input: { tenantId: string; versionId: string; instanceId: string; eventId: string; startedBy: string; data: Record<string, unknown>; companyContext?: CompanyContext | null },
     commitRun?: (run: Execution) => Promise<void>,
   ): Promise<Execution> {
     const existing = this.byInstance(input.tenantId, input.instanceId);
@@ -249,6 +269,9 @@ export class SopExecutor {
       status: 'running',
       steps: stepOrder(graph).map((id) => ({ nodeId: id, kind: byId.get(id)!.kind, label: byId.get(id)!.label, status: 'pending', detail: null, workItemId: null, actionId: null, readback: null })),
       exceptionItemId: null,
+      companyContext: input.companyContext,
+      startedAt: new Date().toISOString(),
+      workflow: version.definition.workflow,
     };
     this.runs.set(run.id, run);
     if (commitRun) {
@@ -263,15 +286,42 @@ export class SopExecutor {
   }
 
   private async settle(run: Execution, version: SopVersion, graph: SopGraph): Promise<Execution> {
-    const missing = (version.definition.requiredFields ?? []).filter((f) => run.input[f] === undefined || run.input[f] === '');
+    const missing = (version.definition.requiredFields ?? []).filter(f => !hasValue(run.input, f));
     if (missing.length) {
       const item = this.deps.inbox().create({ id: this.itemId(run, run.steps[0]?.nodeId ?? 'start', 'supply_info'), tenantId: run.tenantId, kind: 'supply_info', assigneeUserId: this.deps.reviewerOf(run), payload: { executionId: run.id, title: `补资料：缺少 ${missing.join('、')}（事件 ${run.eventId}）`, missingFields: missing } });
       run.status = 'blocked';
       run.steps[0]!.status = 'blocked';
       run.steps[0]!.detail = `缺少必填字段：${missing.join('，')}`;
       run.steps[0]!.workItemId = item.id;
+      run.steps[0]!.resumeReason = 'input';
+      run.steps[0]!.missingFields = missing;
       return structuredClone(run);
     }
+    await this.advance(run, graph);
+    return structuredClone(run);
+  }
+
+  /** Continue a pre-call blocker on its pinned version. A step with an external attempt is never retried here. */
+  async resume(tenantId: string, runId: string, actor: string, input: Record<string, unknown>): Promise<Execution> {
+    const run = this.runs.get(runId);
+    if (!run || run.tenantId !== tenantId || run.startedBy !== actor) throw new ExecutionError('not_found', 'run_not_found', 404);
+    const step = run.steps.find(candidate => candidate.status === 'blocked');
+    if (run.status !== 'blocked' || !step?.resumeReason || step.actionId) throw new ExecutionError('cannot_resume', 'run_cannot_resume', 409);
+    const version = this.deps.sop().get(run.versionId);
+    const graph = version.definition.graph!;
+    if (step.resumeReason === 'input') {
+      const missing = step.missingFields ?? [];
+      if (!missing.length || Object.keys(input).some(key => !missing.includes(key)) || missing.some(key => !hasValue(input, key))) {
+        throw new ExecutionError('invalid_supplement', 'missing_required_input', 422);
+      }
+      if (step.workItemId) this.deps.inbox().recordHumanEvidence(step.workItemId, `Run ${run.id}`);
+      run.input = { ...run.input, ...structuredClone(input) };
+      delete step.missingFields;
+      step.workItemId = null;
+    }
+    delete step.resumeReason;
+    step.status = 'pending';
+    step.detail = null;
     await this.advance(run, graph);
     return structuredClone(run);
   }
@@ -297,6 +347,13 @@ export class SopExecutor {
       if (step.status === 'done') continue;
       if (step.status !== 'pending') return; // waiting / blocked / unknown stop the run here
       const node = graph.nodes.find((n) => n.id === step.nodeId)!;
+      if (node.kind === 'employee' && node.ref) {
+        const unavailable = this.deps.employeeUnavailable?.(node.ref);
+        if (unavailable) {
+          this.block(run, step, unavailable, 'readiness');
+          return;
+        }
+      }
       if (node.kind === 'human_review') {
         const next = this.nextWriteTool(run, graph, step.nodeId);
         const params = this.paramsFor(run);
@@ -305,7 +362,7 @@ export class SopExecutor {
           tenantId: run.tenantId,
           kind: 'action_approval',
           assigneeUserId: this.deps.reviewerOf(run),
-          payload: { executionId: run.id, stepId: next?.id ?? step.nodeId, toolId: next?.ref ?? null, sop: `${run.sopId} v${run.versionNumber}`, title: next ? `批准写入「${next.label}」（事件 ${run.eventId}）` : `确认「${step.label}」（事件 ${run.eventId}）`, ...params },
+          payload: { ...params, executionId: run.id, stepId: next?.id ?? step.nodeId, toolId: next?.ref ?? null, sop: `${run.sopId} v${run.versionNumber}`, title: next ? `批准写入「${next.label}」（事件 ${run.eventId}）` : `确认「${step.label}」（事件 ${run.eventId}）` },
         });
         step.status = 'waiting_human';
         step.workItemId = item.id;
@@ -325,8 +382,8 @@ export class SopExecutor {
   private async runTool(run: Execution, step: ExecutionStep, toolId: string): Promise<boolean> {
     const tool = this.deps.tools(toolId);
     const connector = this.deps.connectors.get(toolId);
-    if (!tool || !tool.available) return this.block(run, step, `工具 ${toolId} 不可用（未发布、未部署或未完成账号绑定）`);
-    if (!connector) return this.block(run, step, `工具 ${toolId} 没有已安装的连接器`);
+    if (!tool || !tool.available) return this.block(run, step, `工具 ${toolId} 不可用（未发布、未部署或未完成账号绑定）`, 'readiness');
+    if (!connector) return this.block(run, step, `工具 ${toolId} 没有已安装的连接器`, 'readiness');
     const params = this.paramsFor(run);
     const write = tool.effect === 'write' || tool.effect === 'external';
     let approvalHash: string | null = null;
@@ -361,7 +418,7 @@ export class SopExecutor {
     });
     if (reserved.pending && this.deps.commitBeforeCall) {
       try {
-        await this.deps.commitBeforeCall();
+        await this.deps.commitBeforeCall(run);
       } catch (error) {
         this.deps.gateway.abort(reserved.action.idempotencyKey);
         const message = error instanceof Error ? error.message : 'commit_failed';
@@ -369,6 +426,9 @@ export class SopExecutor {
       }
     }
     const result = reserved.pending ? this.deps.gateway.finish(reserved.action.idempotencyKey, call) : reserved;
+    if (result.action.reason === 'unauthorized' && result.action.calls === 0) {
+      return this.block(run, step, `未授权，未写入：${refusal ?? '执行时鉴权未通过'}`, 'readiness');
+    }
     step.actionId = result.action.id;
     step.readback = result.action.readback;
     if (result.action.status === 'confirmed') {
@@ -391,7 +451,6 @@ export class SopExecutor {
       run.exceptionItemId = ex.id;
       return false;
     }
-    if (result.action.reason === 'unauthorized') return this.block(run, step, `未授权，未写入：${refusal ?? '执行时鉴权未通过'}`);
     return this.block(run, step, result.action.reason === 'approval_mismatch' ? '批准与写入参数不匹配' : `未执行：${result.action.reason ?? result.action.status}`);
   }
 
@@ -399,9 +458,10 @@ export class SopExecutor {
     return run.id.startsWith('run_') ? `wi_${run.id}_${nodeId}_${kind}` : undefined;
   }
 
-  private block(run: Execution, step: ExecutionStep, why: string): false {
+  private block(run: Execution, step: ExecutionStep, why: string, resumeReason?: ExecutionStep['resumeReason']): false {
     step.status = 'blocked';
     step.detail = why;
+    step.resumeReason = resumeReason;
     run.status = 'blocked';
     return false;
   }
@@ -428,6 +488,11 @@ export class SopExecutor {
       if (n.kind === 'employee') return n.ref ?? null;
     }
     return null;
+  }
+
+  assignedEmployee(run: Execution, step: ExecutionStep): string | null {
+    if (step.kind === 'employee') return this.deps.sop().get(run.versionId).definition.graph?.nodes.find(node => node.id === step.nodeId)?.ref ?? null;
+    return step.kind === 'tool' ? this.employeeFor(run, step.nodeId) : null;
   }
 
   private approvalFor(run: Execution, toolNodeId: string): WorkItem | null {

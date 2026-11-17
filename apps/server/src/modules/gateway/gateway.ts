@@ -208,9 +208,9 @@ export class ToolGateway {
   }
 
   /** Replaces this gateway's rows. Call it on the instance the executor already holds. */
-  load(saved: GatewaySnapshot): void {
-    this.byKey.clear();
-    let seq = 0;
+  load(saved: GatewaySnapshot, merge = false): void {
+    if (!merge) this.byKey.clear();
+    let seq = merge ? this.seq : 0;
     for (const action of saved.actions) {
       const copy = structuredClone(action);
       // A row left executing did not finish its flush after the call. A write must not be sent again.
@@ -238,7 +238,7 @@ export class ToolGateway {
 
   private create(input: ExecuteInput, idempotencyKey: string, hash: string): ActionRecord {
     const action: ActionRecord = {
-      id: `act_${++this.seq}`,
+      id: input.instanceId.startsWith('cmd_') ? `act_${payloadHash(idempotencyKey)}` : `act_${++this.seq}`,
       tenantId: input.tenantId,
       instanceId: input.instanceId,
       stepId: input.stepId,

@@ -2,14 +2,18 @@
  * SOP executions (T-56): start a run of a published SOP version, list and inspect runs. Approvals arrive through
  * 待我处理 (work-items decide) and resume the run; this module never writes without one.
  */
+import { randomUUID } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import { flushGateway, gatewayState, hydrateGateway } from '../gateway/index.js';
 import { employeesState } from '../employees/index.js';
 import { flushInbox, inboxState, workItemEvents } from '../humanwork/index.js';
 import { insertWorkItem, loadWorkItemsForRun, updateWorkItem } from '../humanwork/pg-inbox.js';
-import { insertRun, loadClaimedRuns, loadRunById, loadRunByInstance, loadRuns, saveRuns, updateRun, type Queryable } from './pg-runs.js';
-import { flushSop, sopState } from '../sop/index.js';
-import { loadVersionById } from '../sop/pg-sop.js';
+import {
+  claimCommandAdvance, completeCommandInstance, insertCommandRun, insertRun, loadClaimedRuns,
+  loadCommandRuns, loadRunById, loadRunByInstance, loadRuns, saveRuns, updateRun, type Queryable,
+} from './pg-runs.js';
+import { companyContext, flushSop, sopState } from '../sop/index.js';
+import { loadActiveWorkflows, loadVersionById } from '../sop/pg-sop.js';
 import { toolsState } from '../tools/index.js';
 import { ExecutionError, SopExecutor, type Connector, type Execution } from './executor.js';
 
@@ -28,16 +32,21 @@ function toolInfo(toolId: string) {
   }
 }
 
-/** Call-time authorisation: the performing employee is online and the tool is installed and bound for it. */
-function authorize(_run: unknown, toolId: string, employeeId: string | null): string | null {
-  if (!employeeId) return '流程里没有负责执行这一步的数字员工';
+function employeeUnavailable(employeeId: string): string | null {
   let status: string;
   try {
     status = employeesState.current.get(employeeId).status;
   } catch {
     return `数字员工 ${employeeId} 不存在`;
   }
-  if (status !== 'online' && status !== 'busy') return `数字员工当前状态为 ${status}，不能执行`;
+  return status === 'online' || status === 'busy' ? null : `数字员工当前状态为 ${status}，不能执行`;
+}
+
+/** Call-time authorisation: the performing employee is online and the tool is installed and bound for it. */
+function authorize(_run: unknown, toolId: string, employeeId: string | null): string | null {
+  if (!employeeId) return '流程里没有负责执行这一步的数字员工';
+  const unavailable = employeeUnavailable(employeeId);
+  if (unavailable) return unavailable;
   if (!toolsState.current.callable(employeeId).some((t) => t.toolId === toolId)) return `工具 ${toolId} 没有为该数字员工安装并绑定账号`;
   return null;
 }
@@ -51,6 +60,7 @@ export const executionState = {
     connectors,
     reviewerOf: (run) => run.startedBy,
     authorize,
+    employeeUnavailable,
     identityOf: (employeeId, toolId) => {
       const bound = toolsState.current.callable(employeeId).find((t) => t.toolId === toolId);
       if (!bound) return null;
@@ -60,7 +70,7 @@ export const executionState = {
         return null;
       }
     },
-    commitBeforeCall: () => flushGateway(),
+    commitBeforeCall: run => flushGateway(isCommandRun(run.id) ? run.instanceId : undefined),
     readBackActual: (toolId, params) => {
       const read = readbacks.get(toolId);
       if (!read) throw new ExecutionError('readback_unavailable', '只读核对暂不可用，没有重新提交外部动作', 503);
@@ -70,6 +80,7 @@ export const executionState = {
 };
 
 let runStore: Queryable | null = null;
+const isCommandRun = (id: string) => id.startsWith('run_cmd_');
 
 export function bindExecutionStore(db: Queryable | null): void {
   runStore = db;
@@ -77,7 +88,8 @@ export function bindExecutionStore(db: Queryable | null): void {
 
 export async function flushExecutions(): Promise<void> {
   if (!runStore) return;
-  const snapshot = executionState.current.snapshot();
+  const current = executionState.current.snapshot();
+  const snapshot = { ...current, runs: current.runs.filter(run => !isCommandRun(run.id)) };
   await saveRuns(runStore, snapshot);
   for (const run of snapshot.runs) {
     if (run.id.startsWith('run_')) await updateRun(runStore, run);
@@ -189,8 +201,44 @@ export async function runClaimedInstance(input: {
   }
 }
 
+async function persistCommandRun(db: Queryable, run: Execution): Promise<void> {
+  await flushGateway(run.instanceId);
+  await persistClaimedItems(run);
+  await persistReadback(run.id);
+  await updateRun(db, run);
+  await completeCommandInstance(db, run);
+}
+
+async function advanceCommandRun(
+  db: Queryable, current: Execution, operation: () => Promise<Execution | null>,
+): Promise<Execution> {
+  await ensurePinned(current.versionId);
+  await restoreClaimedItems(current.id);
+  if (!(await claimCommandAdvance(db, current))) throw new ExecutionError('run_changed', 'run_changed');
+  executionState.current.restore(current);
+  let run: Execution | null;
+  try {
+    run = await operation();
+  } catch (error) {
+    if (error instanceof ExecutionError) await updateRun(db, current);
+    throw error;
+  }
+  await persistCommandRun(db, run ?? current);
+  return run ?? current;
+}
+
 workItemEvents.decided.push(async (item) => {
   const executionId = item.payload.executionId;
+  if (runStore && typeof executionId === 'string' && isCommandRun(executionId)) {
+    const current = await loadRunById(runStore, executionId);
+    if (!current || current.tenantId !== item.tenantId || current.status !== 'waiting_human' || item.kind !== 'action_approval') return;
+    try {
+      await advanceCommandRun(runStore, current, () => executionState.current.onDecided(item));
+    } catch (error) {
+      if (!(error instanceof ExecutionError) || error.code !== 'run_changed') throw error;
+    }
+    return;
+  }
   if (runStore && typeof executionId === 'string') {
     try {
       executionState.current.get(item.tenantId, executionId);
@@ -216,27 +264,92 @@ export const executionModule: FastifyPluginAsync = async (app) => {
     return reply.send(err);
   });
 
-  app.post<{ Body: { versionId?: string; eventId?: string; input?: Record<string, unknown> } }>('/', async (req, reply) => {
+  app.post<{ Body: { versionId?: string; sopId?: string; eventId?: string; input?: Record<string, unknown> } }>('/', async (req, reply) => {
     const b = req.body ?? {};
-    if (!b.versionId || !b.eventId || typeof b.input !== 'object' || b.input === null) return reply.code(400).send({ error: 'missing_fields' });
-    const run = await executionState.current.start({ tenantId: req.user!.tenantId, versionId: b.versionId, eventId: b.eventId, startedBy: req.user!.userId, data: b.input });
-    await flushSop();
+    if (typeof b.versionId !== 'string' || !b.versionId || typeof b.eventId !== 'string' || !b.eventId.trim() ||
+        typeof b.input !== 'object' || b.input === null || Array.isArray(b.input)) return reply.code(400).send({ error: 'missing_fields' });
+    const { tenantId, userId } = req.user!;
+    if (b.sopId !== undefined && (typeof b.sopId !== 'string' || !b.sopId)) return reply.code(400).send({ error: 'missing_fields' });
+    const context = await companyContext.current.read(tenantId);
+    const input = { tenantId, versionId: b.versionId, eventId: b.eventId.trim(), startedBy: userId, data: b.input, companyContext: context };
+    let run: Execution;
+    if (b.sopId && runStore) {
+      const db = runStore;
+      const [active] = await loadActiveWorkflows(db, b.sopId);
+      if (!active || active.id !== b.versionId) return reply.code(409).send({ error: 'published_version_changed' });
+      if (active.definition.employeeStatus === 'paused') throw new ExecutionError('not_started', 'the SOP is paused');
+      sopState.current.pin(active);
+      run = await executionState.current.runClaimed({ ...input, instanceId: `cmd_${randomUUID()}` }, async draft => {
+        if (!(await insertCommandRun(db, draft))) throw new ExecutionError('not_started', 'the same event already opened an instance');
+      });
+      await persistCommandRun(db, run);
+    } else {
+      if (b.sopId && sopState.current.activePublished(b.sopId)?.id !== b.versionId) return reply.code(409).send({ error: 'published_version_changed' });
+      run = await executionState.current.start(input);
+      await flushSop();
+      await flushExecutions();
+      await flushInbox();
+      await flushGateway();
+    }
+    reply.code(201);
+    return present(run, userId);
+  });
+
+  app.get<{ Querystring: { sopId?: string } }>('/', async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const { tenantId, userId } = req.user!;
+    const local = executionState.current.list(tenantId, req.query.sopId);
+    const runs = runStore ? [
+      ...local.filter(run => !isCommandRun(run.id)),
+      ...await loadCommandRuns(runStore, tenantId, req.query.sopId),
+    ] : local;
+    runs.sort((a, b) => (a.startedAt ?? '').localeCompare(b.startedAt ?? ''));
+    return { executions: runs.map(run => present(run, userId)) };
+  });
+  app.post<{ Params: { id: string } }>('/:id/reconcile', async (req) => present(await reconcile(req.user!.tenantId, req.params.id, req.user!.userId), req.user!.userId));
+  app.post<{ Params: { id: string }; Body: { input?: Record<string, unknown> } }>('/:id/resume', async (req, reply) => {
+    const { tenantId, userId } = req.user!;
+    const input = req.body?.input ?? {};
+    if (typeof input !== 'object' || Array.isArray(input)) return reply.code(400).send({ error: 'invalid_supplement' });
+    if (runStore && isCommandRun(req.params.id)) {
+      const current = await loadRunById(runStore, req.params.id);
+      if (!current || current.tenantId !== tenantId || current.startedBy !== userId) throw new ExecutionError('not_found', 'run_not_found', 404);
+      if (current.status !== 'blocked') throw new ExecutionError('cannot_resume', 'run_cannot_resume');
+      const continued = await advanceCommandRun(runStore, current, () => executionState.current.resume(tenantId, current.id, userId, input));
+      return present(continued, userId);
+    }
+    const run = await executionState.current.resume(tenantId, req.params.id, userId, input);
     await flushExecutions();
     await flushInbox();
     await flushGateway();
-    reply.code(201);
-    return run;
+    return present(run, userId);
   });
-
-  app.get<{ Querystring: { sopId?: string } }>('/', async (req) => ({
-    executions: executionState.current.list(req.user!.tenantId, req.query.sopId).map((run) => present(run, req.user!.userId)),
-  }));
-  app.post<{ Params: { id: string } }>('/:id/reconcile', async (req) => present(await reconcile(req.user!.tenantId, req.params.id, req.user!.userId), req.user!.userId));
-  app.get<{ Params: { id: string } }>('/:id', async (req) => present(executionState.current.get(req.user!.tenantId, req.params.id), req.user!.userId));
+  app.get<{ Params: { id: string } }>('/:id', async (req) => {
+    const { tenantId, userId } = req.user!;
+    if (runStore && isCommandRun(req.params.id)) {
+      const run = await loadRunById(runStore, req.params.id);
+      if (!run || run.tenantId !== tenantId) throw new ExecutionError('not_found', 'run_not_found', 404);
+      return present(run, userId);
+    }
+    return present(executionState.current.get(tenantId, req.params.id), userId);
+  });
 };
 
 function present(run: Execution, userId: string) {
-  return { ...run, canReconcile: run.status === 'outcome_unknown' && run.startedBy === userId };
+  const employees = new Map(employeesState.current.list().map(employee => [employee.id, employee]));
+  const items = new Map(inboxState.current.all().filter(item => item.tenantId === run.tenantId && item.payload.executionId === run.id).map(item => [item.id, item]));
+  return {
+    ...run,
+    canReconcile: run.status === 'outcome_unknown' && run.startedBy === userId,
+    canResume: run.status === 'blocked' && run.startedBy === userId && run.steps.some(step => step.status === 'blocked' && step.resumeReason && !step.actionId),
+    steps: run.steps.map(step => {
+      let employeeId: string | null = null;
+      try { employeeId = executionState.current.assignedEmployee(run, step); } catch { /* a historic version may be unavailable */ }
+      const employee = employeeId ? employees.get(employeeId) : undefined;
+      const item = step.workItemId ? items.get(step.workItemId) : undefined;
+      return { ...step, responsible: item?.assigneeUserId ?? employee?.name ?? employeeId ?? run.startedBy };
+    }),
+  };
 }
 
 /** Test seam: runs after the approval is restored and before its row is written. */
@@ -256,6 +369,16 @@ async function persistReadback(runId: string): Promise<void> {
 
 /** Load one existing run and read it back. Does not start, claim, or open a second run. */
 export async function reconcile(tenantId: string, runId: string, actorUserId: string): Promise<Execution> {
+  if (runStore && isCommandRun(runId)) {
+    const current = await loadRunById(runStore, runId);
+    if (!current || current.tenantId !== tenantId || current.startedBy !== actorUserId)
+      throw new ExecutionError('not_found', '找不到可核对的原执行，或当前身份没有访问权限', 404);
+    if (current.status !== 'outcome_unknown') return current;
+    return advanceCommandRun(runStore, current, async () => {
+      await hydrateGateway(current.instanceId);
+      return executionState.current.reconcile(tenantId, runId, actorUserId);
+    });
+  }
   try {
     executionState.current.get(tenantId, runId);
   } catch {
