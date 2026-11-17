@@ -256,9 +256,9 @@ test('an employee sees and assigns only their own digital employee; drafts stay 
   await expect(page.locator('.page-head p')).toContainText('跟进自己负责');
   const h1 = await page.locator('.page-head h1').boundingBox();
   const sub = await page.locator('.page-head p').boundingBox();
-  const mid = (b: { y: number; height: number }) => b.y + b.height / 2;
-  expect(Math.abs(mid(h1!) - mid(sub!))).toBeLessThanOrEqual(4); // same single row as the owner's header
-  expect(sub!.x).toBeGreaterThan(h1!.x + h1!.width - 1);
+  // same head as every page (prototype v12): the subtitle sits under the title, aligned with it
+  expect(Math.abs(sub!.x - h1!.x)).toBeLessThanOrEqual(1);
+  expect(sub!.y).toBeGreaterThanOrEqual(h1!.y + h1!.height - 1);
 
   // their own task is there; the other employee's work is nowhere on the page
   await expect(taskCards(page)).toHaveCount(1);
