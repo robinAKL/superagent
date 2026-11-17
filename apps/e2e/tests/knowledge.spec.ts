@@ -404,3 +404,78 @@ test('[qa-database-knowledge#38] No browser errors or real SQL execution', async
   await queryUi(page);
   await expect(page.getByRole('cell', { name: 'LOT-P1', exact: true })).toBeVisible();
 });
+
+test('Workflows / SOP opens on the extracted flowchart when the only workflow is a private MCP draft', async ({ page }) => {
+  await response(page.request.post('/__test/knowledge/seed-live-mcp', { data: {} }));
+  await page.reload();
+  await openWorkspace(page, '分类与候选');
+  await page.getByRole('button', { name: '开始分析', exact: true }).click();
+  await expect(page.getByRole('button', { name: '分析进行中', exact: true })).toBeDisabled();
+  await response(page.request.post('/__test/knowledge/advance', { data: {} }));
+  // No saved (published or draft) workflow in this workspace yet.
+  await page.route('**/api/v1/sop', route => route.fulfill({ status: 200, json: { sops: [] } }));
+  await page.goto('/#knowledge?view=sop');
+  await page.reload();
+  const sw = page.getByRole('group', { name: '工作流视图' });
+  await expect(sw.getByRole('button', { name: /从知识提取 SOP/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(sw.getByRole('button', { name: /从知识提取 SOP/ })).toContainText('(1)');
+  const drafts = page.getByRole('region', { name: /候选流程|分析结果/ });
+  await expect(drafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
+  await expect(drafts.getByRole('group', { name: '流程图', exact: true }).locator('[data-edge="check:record"]')).toHaveAttribute('marker-end', /url/);
+  // An explicit choice is kept.
+  await sw.getByRole('button', { name: '已发布图与草稿图' }).click();
+  await expect(sw.getByRole('button', { name: '已发布图与草稿图' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page).toHaveURL(/sub=flows/);
+});
+
+test('Workflows / SOP does not treat a failed workflow list as empty', async ({ page }) => {
+  await page.route('**/api/v1/sop', route => route.fulfill({ status: 200, json: { error: 'unavailable' } }));
+  await page.goto('/#knowledge?view=sop');
+  await page.reload();
+  await expect(page.getByRole('alert')).toContainText('无法读取已发布图与草稿图');
+  await expect(page.getByRole('heading', { name: '还没有工作流' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '重试读取知识状态' })).toBeVisible();
+});
+
+test('Workflows / SOP says how to get a workflow when there is none', async ({ page }) => {
+  await page.route('**/api/v1/sop', route => route.fulfill({ status: 200, json: { sops: [] } }));
+  await page.goto('/#knowledge?view=sop');
+  await page.reload();
+  const empty = page.locator('.knowledge-flow-empty');
+  await expect(empty.getByRole('heading', { name: '还没有工作流' })).toBeVisible();
+  await expect(empty.getByRole('link', { name: '打开资料库' })).toHaveAttribute('href', '#knowledge');
+  await expect(page.getByLabel('选择流程')).toHaveCount(0);
+});
+
+test.describe('English Workflows / SOP empty and MCP-only panes', () => {
+  test.use({ lang: 'en' });
+
+  test('Workflows / SOP opens on the extracted flowchart when the only workflow is a private MCP draft (en)', async ({ page }) => {
+    await response(page.request.post('/__test/knowledge/seed-live-mcp', { data: {} }));
+    await page.reload();
+    await page.getByRole('navigation', { name: 'Knowledge workspace' }).getByRole('button', { name: 'Classification & candidates', exact: true }).click();
+    await page.getByRole('button', { name: 'Start analysis', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Analysis running', exact: true })).toBeDisabled();
+    await response(page.request.post('/__test/knowledge/advance', { data: {} }));
+    await page.route('**/api/v1/sop', route => route.fulfill({ status: 200, json: { sops: [] } }));
+    await page.goto('/#knowledge?view=sop');
+    await page.reload();
+    const sw = page.getByRole('group', { name: 'Workflow view' });
+    await expect(sw.getByRole('button', { name: /Extract SOP from knowledge/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sw.getByRole('button', { name: /Extract SOP from knowledge/ })).toContainText('(1)');
+    const drafts = page.getByRole('region', { name: /Workflow candidates|Analysis results/ });
+    await expect(drafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
+    await expect(drafts.getByRole('group', { name: 'Flow chart', exact: true }).locator('[data-edge="check:record"]')).toHaveAttribute('marker-end', /url/);
+  });
+
+  test('Workflows / SOP says how to get a workflow when there is none (en)', async ({ page }) => {
+    await page.route('**/api/v1/sop', route => route.fulfill({ status: 200, json: { sops: [] } }));
+    await page.goto('/#knowledge?view=sop');
+    await page.reload();
+    const empty = page.locator('.knowledge-flow-empty');
+    await expect(empty.getByRole('heading', { name: 'No workflows yet' })).toBeVisible();
+    await expect(empty.getByRole('link', { name: 'Open the Library' })).toHaveAttribute('href', '#knowledge');
+    await expect(page.getByLabel('Select workflow')).toHaveCount(0);
+    await expect(page.getByLabel('选择流程')).toHaveCount(0);
+  });
+});
