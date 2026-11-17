@@ -149,9 +149,9 @@ export function datesInText(text: string): string[] {
 export function validityOf(p: { effectiveFrom?: unknown; effectiveTo?: unknown; evidence: Evidence[] }): { effectiveFrom?: string; effectiveTo?: string } {
   const quotes = p.evidence.map(e => e.quote).join('\n');
   const allowed = new Set(datesInText(quotes));
-  const fromCited = new Set([...quotes.matchAll(/(?:自|从|from|生效|valid from)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:起|生效|开始)/gi)]
+  const fromCited = new Set([...quotes.matchAll(/(?:takes effect(?:\s+on)?|valid from|effective(?:\s+(?:from|on))?|自|生效于?)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:起(?:生效)?|生效)/gi)]
     .map(match => match[1] ?? match[2]).filter((day): day is string => !!day && allowed.has(day)));
-  const toCited = new Set([...quotes.matchAll(/(?:至|到|until|止于|失效|截止)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:止|失效|截止)/gi)]
+  const toCited = new Set([...quotes.matchAll(/(?:valid until|effective until|止于|失效|截止)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:止|失效|截止)/gi)]
     .map(match => match[1] ?? match[2]).filter((day): day is string => !!day && allowed.has(day)));
   const pick = (value: unknown, cited: Set<string>) => typeof value === 'string' && cited.has(value) ? value : [...cited][0];
   const effectiveFrom = pick(p.effectiveFrom, fromCited);

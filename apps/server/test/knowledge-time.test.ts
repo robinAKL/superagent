@@ -17,6 +17,15 @@ describe('dual time on analysis drafts', () => {
       evidence: [evidence('Meeting held on 2026-08-01. Approval requires two signatures.')],
       effectiveFrom: '2026-08-01',
     })).toEqual({});
+    expect(validityOf({
+      evidence: [evidence('The rule takes effect on 2026-08-01.')],
+      effectiveFrom: '2026-08-01',
+    })).toEqual({ effectiveFrom: '2026-08-01' });
+    expect(validityOf({
+      evidence: [evidence('Collect data from 2026-08-01 until 2026-10-31.')],
+      effectiveFrom: '2026-08-01',
+      effectiveTo: '2026-10-31',
+    })).toEqual({});
   });
 
   it('stamps recordedAt on merge and keeps it on a later update', () => {
