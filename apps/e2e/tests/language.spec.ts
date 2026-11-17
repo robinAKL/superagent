@@ -48,7 +48,7 @@ test.describe('nothing chosen yet', () => {
       await page.goto(`/#${hash}`);
       await expect(page.getByRole('heading', { level: 1 }), `#${hash}`).toHaveText(heading);
       await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-      const chrome = await page.locator('header, nav, .page-head, [role="tablist"]').innerText();
+      const chrome = (await page.locator('header, nav, .page-head, [role="tablist"]').allInnerTexts()).join('\n');
       expect(chrome, `#${hash} chrome`).not.toMatch(han);
     }
     await page.getByRole('group', { name: 'Language' }).getByRole('button', { name: '中文' }).click();
