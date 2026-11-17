@@ -620,11 +620,21 @@ export class KnowledgeService {
         if (result.created && !org.employees[e.id]) createdEmployees++;
         org.employees[e.id] = { employeeId: result.employeeId, name: e.name, duty: e.duty, prompt: e.prompt };
       }
-      // Roles that left the draft (merged, deleted, replaced by a team plan) leave the confirmed team too.
+      // Roles that left the draft (merged, deleted, replaced by a team plan) leave the confirmed team too. That also
+      // covers employees an earlier confirmation created that no record points at any more (e.g. from before roles
+      // were retired). Someone with work in progress cannot be removed; they are reported, not silently kept.
       let retiredEmployees = 0;
+      const busyEmployees: string[] = [];
       for (const [recId, done] of Object.entries(org.employees)) {
         if (draft.employees.some(e => e.id === recId)) continue;
         if (sink.retireEmployee?.(done.employeeId) ?? true) { delete org.employees[recId]; retiredEmployees++; }
+        else busyEmployees.push(done.name);
+      }
+      const current = new Set(Object.values(org.employees).map(e => e.employeeId));
+      for (const leftover of sink.organizationEmployees?.() ?? []) {
+        if (current.has(leftover.id)) continue;
+        if (sink.retireEmployee?.(leftover.id) ?? false) retiredEmployees++;
+        else busyEmployees.push(leftover.name);
       }
       for (const t of draft.tools) {
         const known = org.tools[t.id];
@@ -638,7 +648,7 @@ export class KnowledgeService {
       }
       Object.assign(org, { confirmedAt: stamp(), confirmedBy: ctx.userId, revision: org.revision + 1 });
       s.organization = org;
-      return { revision: org.revision, employees: Object.values(org.employees), tools: Object.values(org.tools), createdEmployees, createdTools, retiredEmployees };
+      return { revision: org.revision, employees: Object.values(org.employees), tools: Object.values(org.tools), createdEmployees, createdTools, retiredEmployees, busyEmployees };
     });
   }
   private planSources(s: KnowledgeState, ctx: UserContext) {

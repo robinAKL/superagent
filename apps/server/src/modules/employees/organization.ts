@@ -16,6 +16,8 @@ export interface OrganizationSink {
   present(kind: 'employee' | 'tool', id: string): boolean;
   /** Removes an employee whose role left the organization; false (kept) while it still has active work. */
   retireEmployee?(employeeId: string): boolean;
+  /** Every employee an organization confirmation created (id prefix emp-org-), whatever record still points at it. */
+  organizationEmployees?(): { id: string; name: string }[];
 }
 
 export const orgEmployeeId = (recId: string) => `emp-org-${recId}`;
@@ -50,6 +52,9 @@ export function createOrganizationSink(employees: () => EmployeeService, tools: 
       const svc = employees();
       if (!svc.has(employeeId)) return true;
       try { svc.remove(employeeId); return true; } catch { return false; }
+    },
+    organizationEmployees() {
+      return employees().list().filter(e => e.id.startsWith('emp-org-')).map(e => ({ id: e.id, name: e.name }));
     },
     present(kind, id) {
       if (kind === 'employee') return employees().has(id);

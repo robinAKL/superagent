@@ -79,6 +79,9 @@ export const TEXT = {
     unsaved: 'Changes not yet applied',
     saved: 'Saved.', merged: 'Merged.', removed: 'Deleted.', added: 'Role added.',
     confirmed: 'Organization confirmed. {e} new employees, {t} new tool placeholders.',
+    confirmedRetired: 'Organization confirmed. {e} new, {r} removed, {t} new tool placeholders.',
+    busyKept: 'Not removed yet because they still have work in progress: {names}. Reassign or finish that work, then confirm again.',
+    planPending: 'A plan for {n} roles is waiting below. Confirming now uses the current {m} roles — adopt the plan first if you want {n}.',
     error_analysis_running: 'Analysis is still running.',
     error_analysis_stale: 'Materials changed during analysis. Run it again first.',
     error_no_employees: 'The draft has no roles yet.',
@@ -134,6 +137,9 @@ export const TEXT = {
     unsaved: '有未应用的修改',
     saved: '已保存。', merged: '已合并。', removed: '已删除。', added: '已添加岗位。',
     confirmed: '组织已确认。新建 {e} 名员工、{t} 个工具占位。',
+    confirmedRetired: '组织已确认。新建 {e} 名、移除 {r} 名员工，新建 {t} 个工具占位。',
+    busyKept: '以下员工还有进行中的工作，暂未移除：{names}。请先改派或完成这些工作，再确认一次。',
+    planPending: '下方有一个 {n} 个岗位的人数方案还没采用。现在确认会按当前 {m} 个岗位创建员工；想要 {n} 个请先「采用这个方案」。',
     error_analysis_running: '分析仍在进行。',
     error_analysis_stale: '资料在分析期间有变化，请先重新分析。',
     error_no_employees: '草案里还没有岗位。',
@@ -332,8 +338,11 @@ export function EmployeesPage() {
   async function confirm() {
     setBusy(true); setError(null); setNotice(null);
     try {
-      const result = await post('/organization/confirm') as { createdEmployees: number; createdTools: number };
-      setNotice(t('confirmed', { e: result.createdEmployees, t: result.createdTools }));
+      const result = await post('/organization/confirm') as { createdEmployees: number; createdTools: number; retiredEmployees?: number; busyEmployees?: string[] };
+      const done = result.retiredEmployees
+        ? t('confirmedRetired', { e: result.createdEmployees, r: result.retiredEmployees, t: result.createdTools })
+        : t('confirmed', { e: result.createdEmployees, t: result.createdTools });
+      setNotice(result.busyEmployees?.length ? `${done} ${t('busyKept', { names: result.busyEmployees.join(t('sep')) })}` : done);
       await load();
     } catch (caught) { setError(describe(caught)); }
     finally { setBusy(false); }
@@ -473,6 +482,7 @@ export function EmployeesPage() {
           : confirmedState ? t('summaryDone', { e: org.confirmation!.employees, t: org.confirmation!.tools })
           : org.confirmation ? t('summaryChanged')
           : t('summaryNew', { e: newEmployees, t: newTools })}</p>
+        {org.teamPlan && org.teamPlan.target !== org.employees.length ? <p className="org-plan-pending" role="note">{t('planPending', { n: org.teamPlan.target, m: org.employees.length })}</p> : null}
         {confirmedState ? <div className="org-row">
           <a className="btn" href="#tools">{t('openTools')}</a>
           <a className="btn primary" href="#brain?org=1">{t('nextFlow')}</a>

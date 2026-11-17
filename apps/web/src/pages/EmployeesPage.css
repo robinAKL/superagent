@@ -158,3 +158,5 @@
 .emp-drawer-facts dt { color: var(--color-muted); font-size: 12px; }
 .emp-drawer-facts dd { margin: 0; overflow-wrap: anywhere; }
 .emp-tool-list { margin: 0; padding-left: var(--space-md); }
+
+.org-plan-pending { margin: 0; color: var(--color-warning); font-size: 13.5px; }

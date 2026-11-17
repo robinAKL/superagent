@@ -405,6 +405,32 @@ test('[qa-database-knowledge#38] No browser errors or real SQL execution', async
   await expect(page.getByRole('cell', { name: 'LOT-P1', exact: true })).toBeVisible();
 });
 
+test('shrinking the team to 2 and confirming leaves exactly 2 team employees; an unadopted plan is called out first', async ({ page }) => {
+  await localFile(page); await analyse(page);
+  await page.goto('/#employees?view=draft');
+  await page.getByRole('button', { name: '确认组织', exact: true }).click();
+  await page.goto('/#employees');
+  await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(4);
+
+  await page.goto('/#employees?view=draft');
+  await page.locator('.team-size-stepper input').fill('2');
+  await page.getByRole('button', { name: '按人数重新规划', exact: true }).click();
+  await expect(page.getByText('新方案：2 个岗位')).toBeVisible();
+  // Not adopted yet: confirming now would keep 4 roles, and the bar says so.
+  await expect(page.locator('.org-plan-pending')).toContainText('2 个岗位的人数方案还没采用');
+  await expect(page.locator('.org-plan-pending')).toContainText('当前 4 个岗位');
+  await page.getByRole('button', { name: '采用这个方案', exact: true }).click();
+  await expect(page.locator('.org-plan-pending')).toHaveCount(0);
+  await page.getByRole('button', { name: /确认组织|应用修改/ }).click();
+  await expect(page.getByRole('status').filter({ hasText: '移除 4 名' })).toBeVisible();
+  await page.goto('/#employees');
+  await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(2);
+  const registry = await (await page.request.get('/api/v1/employees/')).json() as { id: string }[];
+  expect(registry.filter(e => e.id.startsWith('emp-org-'))).toHaveLength(2);
+  // Leave no draft or team behind for later files (the shell spec checks the empty state).
+  await response(page.request.post('/__test/knowledge/reset', { data: {} }));
+});
+
 test('Workflows / SOP opens on the extracted flowchart when the only workflow is a private MCP draft', async ({ page }) => {
   await response(page.request.post('/__test/knowledge/seed-live-mcp', { data: {} }));
   await page.reload();
