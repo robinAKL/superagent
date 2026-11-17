@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { SetupPage } from './pages/SetupPage';
+import { Icon } from './components/Icon';
 import { Placeholder } from './pages/Placeholder';
 import { ToolsPage } from './pages/ToolsPage';
 import { KnowledgePage } from './pages/KnowledgePage';
@@ -41,7 +42,7 @@ const NAV: { group: NavGroupId; items: NavItem[] }[] = [
   },
 ];
 
-type ShellKey = `group.${NavGroupId}` | `nav.${NavItemId}` | 'menu' | 'signOut' | 'language';
+type ShellKey = `group.${NavGroupId}` | `nav.${NavItemId}` | 'menu' | 'signOut' | 'language' | 'workspace' | 'collapse' | 'expand';
 
 const TEXT: Dict<ShellKey> = {
   en: {
@@ -58,6 +59,9 @@ const TEXT: Dict<ShellKey> = {
     menu: 'Main menu',
     signOut: 'Sign out',
     language: 'Language',
+    workspace: 'Workspace',
+    collapse: 'Collapse menu',
+    expand: 'Expand menu',
   },
   zh: {
     'group.daily': '日常工作',
@@ -73,6 +77,9 @@ const TEXT: Dict<ShellKey> = {
     menu: '主菜单',
     signOut: '退出',
     language: '语言',
+    workspace: '企业工作区',
+    collapse: '收起菜单',
+    expand: '展开菜单',
   },
 };
 
@@ -106,6 +113,17 @@ function useRoles(): string[] | null {
   return roles;
 }
 
+const SIDEBAR_KEY = 'superagent.sidebar';
+/** Desktop sidebar collapsed to an icon rail; remembered in this browser (storage may be blocked — then it just resets). */
+function useCollapsedSidebar(): [boolean, () => void] {
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(SIDEBAR_KEY) === 'collapsed'; } catch { return false; } });
+  const toggle = () => setCollapsed(value => {
+    try { localStorage.setItem(SIDEBAR_KEY, value ? 'expanded' : 'collapsed'); } catch { /* not remembered */ }
+    return !value;
+  });
+  return [collapsed, toggle];
+}
+
 function useHashPage(): string {
   const read = () => window.location.hash.slice(1).split('?')[0] || 'room';
   const [page, setPage] = useState(read);
@@ -122,6 +140,7 @@ export function App({ user = { mode: 'dev' } }: { user?: SignedIn }) {
   const page = useHashPage();
   const nav = navFor(useRoles());
   const current = nav.flatMap((g) => g.items).find((i) => i.id === page) ?? nav[0]!.items[0]!;
+  const [collapsed, toggleSidebar] = useCollapsedSidebar();
   return (
     <>
       <header className="topbar">
@@ -137,14 +156,20 @@ export function App({ user = { mode: 'dev' } }: { user?: SignedIn }) {
           ) : null}
         </span>
       </header>
-      <div className="app">
+      <div className={`app${collapsed ? ' is-collapsed' : ''}`}>
         <nav className="sidebar" aria-label={t('menu')}>
+          <div className="sidebar-head">
+            <span className="sidebar-title">{t('workspace')}</span>
+            <button type="button" className="sidebar-toggle" aria-pressed={collapsed} aria-label={t(collapsed ? 'expand' : 'collapse')} title={t(collapsed ? 'expand' : 'collapse')} onClick={toggleSidebar}>
+              <Icon name={collapsed ? 'expand' : 'collapse'} />
+            </button>
+          </div>
           {nav.map((g) => (
             <div key={g.group}>
               <div className="nav-group">{t(`group.${g.group}`)}</div>
               {g.items.map((i) => (
-                <a key={i.id} className="nav-item" href={`#${i.id}`} aria-current={i.id === current.id ? 'page' : undefined}>
-                  {t(`nav.${i.id}`)}
+                <a key={i.id} className="nav-item" href={`#${i.id}`} title={collapsed ? t(`nav.${i.id}`) : undefined} aria-current={i.id === current.id ? 'page' : undefined}>
+                  <Icon name={i.id} /><span className="nav-label">{t(`nav.${i.id}`)}</span>
                 </a>
               ))}
             </div>

@@ -5,6 +5,7 @@ import { useLang, type Lang } from '../i18n';
 import { roomMessage, roomText } from './command-room-copy';
 import { CommandWorkflowPanel } from './CommandWorkflowPanel';
 import { WorkerApprovals } from './WorkerApprovals';
+import { Icon } from '../components/Icon';
 
 /**
  * Command room (PRD §3.7), layout and copy from the accepted v12 prototype. Everything on the page comes from the
@@ -299,6 +300,17 @@ export function CommandRoomPage() {
   const [notice, setNotice] = useState('');
   const [sending, setSending] = useState(false);
   const [acting, setActing] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
+  // Business workflows live behind a header button (prototype); a #room?workflow= link opens them directly.
+  const linkedWorkflow = () => typeof window !== 'undefined' && new URLSearchParams(window.location.hash.split('?')[1] ?? '').has('workflow');
+  const [flowsOpen, setFlowsOpen] = useState(linkedWorkflow);
+  useEffect(() => {
+    const open = () => { if (linkedWorkflow()) setFlowsOpen(true); };
+    window.addEventListener('hashchange', open);
+    return () => window.removeEventListener('hashchange', open);
+  }, []);
+  const [taskTab, setTaskTab] = useState<'open' | 'review' | 'all'>('all');
+  const summaryRef = useRef<HTMLDivElement | null>(null);
 
   const cursor = useRef(0);
   const pulling = useRef(false);
@@ -568,27 +580,54 @@ export function CommandRoomPage() {
   const [lang] = useLang();
   const t = (copy: string) => roomText(copy, lang);
 
+  const reviewStatus = new Set(['reported', 'outcome_unknown']);
+  const tabTasks = taskTab === 'open' ? tasks.filter((task) => OPEN_STATUS.has(task.status))
+    : taskTab === 'review' ? tasks.filter((task) => reviewStatus.has(task.status)) : tasks;
+  const counts = { open: tasks.filter((task) => OPEN_STATUS.has(task.status)).length, review: tasks.filter((task) => reviewStatus.has(task.status)).length };
+  const firstEmployee = employees.find((employee) => employee.status === 'active') ?? employees[0];
+  function startWith(text: string) {
+    changeDraft(text);
+    window.setTimeout(() => { const el = input.current; if (el) { el.focus(); el.setSelectionRange(text.length, text.length); } }, 0);
+  }
+  function showSummary() {
+    setTaskTab('all');
+    summaryRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    summaryRef.current?.focus();
+  }
+
   return (
-    <section className="exec-room" aria-label={t('Agent Room 指挥室')} data-view={viewer ? (viewer.owner ? 'owner' : 'employee') : 'loading'}>
-      <div className="page-head">
-        <h1>{t('Agent Room 指挥室')}</h1>
+    <section className="exec-room room" aria-label={t('Agent Room 指挥室')} data-view={viewer ? (viewer.owner ? 'owner' : 'employee') : 'loading'}>
+      <div className="page-head room-head">
+        <h1>{t('指挥室')}</h1>
         <p>
           {employeeView
             ? t('跟进自己负责的数字员工：交给它的任务、它的回报和追问都在这里。')
-            : t('同一件工作里，企业负责人、超级智能体和数字员工共享目标、上下文、任务与回报。')}
+            : t('和超级智能体一起，把工作推进到交付。')}
         </p>
-        {viewer?.owner ? <a className="exec-action" href="#brain">{t('配置超级智能体')}</a> : null}
+        <div className="room-head-actions">
+          <button type="button" className="room-head-btn" aria-expanded={teamOpen} aria-controls="room-team" onClick={() => setTeamOpen((open) => !open)}>
+            <Icon name="team" /><span>{t('团队')}</span>
+          </button>
+          <button type="button" className="room-head-btn" onClick={showSummary}><Icon name="summary" /><span>{t('工作摘要')}</span></button>
+          {viewer?.owner ? <button type="button" className="room-head-btn" aria-expanded={flowsOpen} onClick={() => setFlowsOpen((open) => !open)}><Icon name="flow" /><span>{t('业务流程')}</span></button> : null}
+          {viewer?.owner ? <a className="exec-action room-head-btn" href="#brain"><Icon name="brain" /><span>{t('配置超级智能体')}</span></a> : null}
+        </div>
       </div>
       {viewer?.owner ? <>
-        <CommandWorkflowPanel />
+        {flowsOpen ? <CommandWorkflowPanel defaultOpen /> : null}
         <WorkerApprovals key={viewer.userId} />
       </> : null}
       <div className="exec-grid">
-        <section className="panel exec-pane" aria-label={t('共享协作记录')}>
-          <div className="exec-pane-head">
-            <h2>{t('共享协作记录')}</h2>
-            <span>{t('展示任务理由与结果摘要，不展示隐藏思维链')}</span>
-          </div>
+        <section className="panel exec-pane room-chat" aria-label={t('共享协作记录')}>
+          <header className="room-chat-head">
+            <span className="room-avatar" aria-hidden="true"><Icon name="brain" size={20} /></span>
+            <div className="room-chat-id">
+              <h2 className="sr-only">{t('共享协作记录')}</h2>
+              <strong>{t('超级智能体')}</strong>
+              <span>{t('统一协调，按企业规则工作')}</span>
+            </div>
+            <span className="room-chip">{t('展示任务理由与结果摘要，不展示隐藏思维链')}</span>
+          </header>
           <div
             className="exec-scroll exec-stream"
             ref={scroller}
@@ -598,13 +637,31 @@ export function CommandRoomPage() {
             }}
           >
             {messages.length === 0 ? (
-              <p className="exec-empty">{roster ? t('还没有对话。闲聊只会得到回复；要派活请 @数字员工 并说清楚要做的事。') : offline ? t('暂时连不上指挥室，稍后会自动重试。') : t('正在读取指挥室…')}</p>
+              roster && viewer ? (
+                <div className="room-welcome">
+                  <span className="room-avatar room-avatar-lg" aria-hidden="true"><Icon name="brain" size={26} /></span>
+                  <h3>{t('今天，有什么工作要推进？')}</h3>
+                  <p className="exec-empty">{t('还没有对话。闲聊只会得到回复；要派活请 @数字员工 并说清楚要做的事。')}</p>
+                  <div className="room-starts">
+                    <button type="button" className="room-start" onClick={() => startWith(firstEmployee ? `@${firstEmployee.name} ` : '@')}>
+                      <Icon name="mail" /><span><strong>{t('交办一项工作')}</strong><small>{firstEmployee ? `@${firstEmployee.name} · ${t('写清要做的事和交付物')}` : t('先在数字员工页确认组织')}</small></span><Icon name="arrow" />
+                    </button>
+                    <button type="button" className="room-start" onClick={() => startWith(t('今天要推进的目标是：'))}>
+                      <Icon name="box" /><span><strong>{t('说说今天的目标')}</strong><small>{t('超级智能体会拆解并建议分工')}</small></span><Icon name="arrow" />
+                    </button>
+                    <button type="button" className="room-start" onClick={() => setTeamOpen(true)}>
+                      <Icon name="team" /><span><strong>{t('看看团队状态')}</strong><small>{t('了解谁在线、谁可以接单')}</small></span><Icon name="arrow" />
+                    </button>
+                  </div>
+                </div>
+              ) : <p className="exec-empty">{offline ? t('暂时连不上指挥室，稍后会自动重试。') : t('正在读取指挥室…')}</p>
             ) : messages.map((message) => (
               <article
                 key={message.id}
                 id={`room-msg-${message.id}`}
                 data-message={message.id}
                 data-kind={message.kind ?? 'message'}
+                data-mine={message.authorUserId === viewerId ? 'yes' : undefined}
                 className={`exec-message${focusMessageId === message.id ? ' exec-message-focus' : ''}`}
               >
                 <header>
@@ -618,57 +675,101 @@ export function CommandRoomPage() {
               </article>
             ))}
           </div>
-          <form className="exec-composer" onSubmit={(event) => { event.preventDefault(); void sendDraft(); }}>
-            <label htmlFor="room-draft">{t('发给指挥室')}</label>
+          <form className="exec-composer room-composer" onSubmit={(event) => { event.preventDefault(); void sendDraft(); }}>
+            <label htmlFor="room-draft" className="sr-only">{t('发给指挥室')}</label>
             {followupTask ? (
               <p className="exec-followup" data-followup={followupTask.id}>
                 <span>{t('追问：')}{followupTask.title}</span>
                 <button type="button" onClick={() => setFollowupId(null)}>{t('不追问了')}</button>
               </p>
             ) : null}
-            <textarea
-              id="room-draft"
-              ref={input}
-              value={draft}
-              disabled={!viewer}
-              onChange={(event) => changeDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape' && mentionOpen) {
-                  setMentionOpen(false);
-                  return;
-                }
-                if (event.nativeEvent.isComposing || roomDraftKey(event.key, event.shiftKey) !== 'send') return;
-                event.preventDefault();
-                void sendDraft();
-              }}
-              placeholder={followupTask ? t('写下要追问的内容，原任务的员工和上下文会带上。') : t('闲聊只会得到回复。要派活请 @数字员工。')}
-            />
-            {mentionOpen ? (
-              <div className="exec-mentions" role="listbox" aria-label={t('选择数字员工')}>
-                {employees.length === 0 ? (
-                  <p>{t('还没有可以指派的数字员工。')}</p>
-                ) : employees.map((employee) => (
-                  <button type="button" role="option" aria-selected="false" key={employee.id} data-mention={employee.id} onClick={() => pickMention(employee.name)}>
-                    <strong>@{employee.name}</strong>
-                    <span>{[employee.duty, t(EMPLOYEE_STATE[employee.status])].filter(Boolean).join(' · ')}</span>
-                  </button>
-                ))}
+            <div className="room-composer-box">
+              <textarea
+                id="room-draft"
+                ref={input}
+                value={draft}
+                disabled={!viewer}
+                onChange={(event) => changeDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && mentionOpen) {
+                    setMentionOpen(false);
+                    return;
+                  }
+                  if (event.nativeEvent.isComposing || roomDraftKey(event.key, event.shiftKey) !== 'send') return;
+                  event.preventDefault();
+                  void sendDraft();
+                }}
+                placeholder={followupTask ? t('写下要追问的内容，原任务的员工和上下文会带上。') : t('发消息，或 @数字员工…')}
+              />
+              {mentionOpen ? (
+                <div className="exec-mentions" role="listbox" aria-label={t('选择数字员工')}>
+                  {employees.length === 0 ? (
+                    <p>{t('还没有可以指派的数字员工。')}</p>
+                  ) : employees.map((employee) => (
+                    <button type="button" role="option" aria-selected="false" key={employee.id} data-mention={employee.id} onClick={() => pickMention(employee.name)}>
+                      <strong>@{employee.name}</strong>
+                      <span>{[employee.duty, t(EMPLOYEE_STATE[employee.status])].filter(Boolean).join(' · ')}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <div className="exec-composer-actions room-composer-bar">
+                <button type="button" className="room-icon-btn" aria-label={t('@ 提及')} title={t('@ 提及')} aria-haspopup="listbox" aria-expanded={mentionOpen} disabled={!viewer} onClick={() => setMentionOpen((open) => !open)}><Icon name="at" size={20} /></button>
+                <span>{t('Enter 发送，Shift+Enter 换行')}</span>
+                <button type="submit" className="room-send" aria-label={t('发送')} title={t('发送')} disabled={sending || !viewer}><Icon name="send" size={18} /></button>
               </div>
-            ) : null}
-            <div className="exec-composer-actions">
-              <button type="submit" disabled={sending || !viewer}>{t('发送')}</button>
-              <button type="button" aria-haspopup="listbox" aria-expanded={mentionOpen} disabled={!viewer} onClick={() => setMentionOpen((open) => !open)}>{t('@ 提及')}</button>
-              <span>{t('Enter 发送，Shift+Enter 换行。同事的新消息不会清掉这里的草稿')}</span>
             </div>
             <p className="exec-notice" role="status" aria-label={t('指挥室提示')}>{t(notice)}</p>
           </form>
         </section>
-        <aside className="panel exec-pane" aria-label={t('任务列表')}>
-          <div className="exec-pane-head">
-            <h2>{t('任务')}</h2>
-            <span>{t('由对话产生，链回原消息')}</span>
+        <aside className="panel exec-pane room-tasks" aria-label={t('任务列表')}>
+          {teamOpen ? (
+            <section id="room-team" className="room-team" aria-label={t('团队')}>
+              <div className="room-section-head">
+                <h3>{t('团队')} <span className="room-count">{employees.length}</span></h3>
+                <button type="button" className="room-icon-btn" aria-label={t('关闭')} onClick={() => setTeamOpen(false)}><Icon name="close" size={16} /></button>
+              </div>
+              {employees.length === 0 ? <p className="exec-empty">{t('还没有可以指派的数字员工。')}</p> : (
+                <ul>
+                  {employees.map((employee) => (
+                    <li key={employee.id} data-team-member={employee.id}>
+                      <span className={`room-dot is-${employee.status}`} aria-hidden="true" />
+                      <span><strong>{employee.name}</strong><small>{[employee.duty, t(EMPLOYEE_STATE[employee.status])].filter(Boolean).join(' · ')}</small></span>
+                      {viewer ? <button type="button" className="exec-link" onClick={() => { startWith(`@${employee.name} `); }}>{t('交办')}</button> : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ) : null}
+          <div className="exec-pane-head room-tasks-head">
+            <h2>{t('任务')} <span className="room-count">{tasks.length}</span></h2>
+            <span>{t('进展、待办与交付，都在这里。')}</span>
           </div>
-          <div data-outcome="summary">
+          <div className="room-tabs" role="tablist" aria-label={t('任务')}>
+            {(['open', 'review', 'all'] as const).map((tab) => (
+              <button key={tab} type="button" role="tab" aria-selected={taskTab === tab} onClick={() => setTaskTab(tab)}>
+                {t(tab === 'open' ? '进行中' : tab === 'review' ? '待复核' : '全部')}{tab !== 'all' && counts[tab] ? <span className="room-count">{counts[tab]}</span> : null}
+              </button>
+            ))}
+          </div>
+          <div className="exec-scroll room-task-list">
+            {tabTasks.length === 0 ? (
+              <div className="room-tasks-empty">
+                <Icon name="check" size={22} />
+                <strong>{tasks.length === 0 ? t('还没有待处理任务') : t('这一栏暂时没有任务')}</strong>
+                <p className="exec-empty">{tasks.length === 0 ? t('当前没有由对话产生的任务。') : t('切换到「全部」查看其他任务。')}</p>
+                {tasks.length === 0 ? <p className="exec-empty">{t('明确交办的工作会形成任务。普通讨论可以直接继续。')}</p> : null}
+              </div>
+            ) : tabTasks.map((task) => (
+              <button type="button" className="exec-task" key={task.id} data-task={task.id} data-status={task.status} aria-current={openTaskId === task.id ? 'true' : undefined} onClick={() => openTaskDrawer(task.id)}>
+                <strong>{task.title}</strong>
+                <span>{taskLine(task, employees, lang)}</span>
+              </button>
+            ))}
+          </div>
+          <div className="room-summary" data-outcome="summary" ref={summaryRef} tabIndex={-1} aria-label={t('工作摘要')}>
+            <h3>{t('工作摘要')}</h3>
             {tasks.length === 0 ? <p>{t('暂无事项')}</p> : (
               <ul>
                 {tasks.map((task) => (
@@ -685,16 +786,6 @@ export function CommandRoomPage() {
                 ))}
               </ul>
             )}
-          </div>
-          <div className="exec-scroll">
-            {tasks.length === 0 ? (
-              <p className="exec-empty">{t('当前没有由对话产生的任务。')}</p>
-            ) : tasks.map((task) => (
-              <button type="button" className="exec-task" key={task.id} data-task={task.id} data-status={task.status} onClick={() => openTaskDrawer(task.id)}>
-                <strong>{task.title}</strong>
-                <span>{taskLine(task, employees, lang)}</span>
-              </button>
-            ))}
           </div>
         </aside>
         {openTask && may ? (

@@ -24,10 +24,10 @@ function workflowInLocation() {
   return new URLSearchParams(window.location.hash.split('?')[1]).get('workflow') ?? '';
 }
 
-export function CommandWorkflowPanel() {
+export function CommandWorkflowPanel({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
   const t = useT(TEXT);
   const [selected, setSelected] = useState(workflowInLocation);
-  const [open, setOpen] = useState(() => Boolean(workflowInLocation()));
+  const [open, setOpen] = useState(() => defaultOpen || Boolean(workflowInLocation()));
   const [workflows, setWorkflows] = useState<PublishedWorkflow[] | null>();
   const [attempt, setAttempt] = useState(0);
 

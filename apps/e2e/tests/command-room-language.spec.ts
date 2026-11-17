@@ -17,7 +17,7 @@ test('command room defaults to English and switches system copy live', async ({ 
       [element.getAttribute('aria-label'), element.getAttribute('placeholder')].join(' ')),
   ].join(' ')).join(' '))).not.toMatch(/\p{Script=Han}/u);
   await expect(room.getByRole('heading', { name: 'Command room' })).toBeVisible();
-  await expect(room.getByRole('heading', { name: 'Agent confirmations' })).toBeVisible();
+  // Agent confirmations appear only while an agent is waiting (prototype); other specs may leave some behind.
   await expect(room.getByRole('heading', { name: 'Conversation' })).toBeVisible();
   await expect(room.getByRole('heading', { name: 'Tasks' })).toBeVisible();
   await expect(room.getByRole('link', { name: 'Configure Super Agent' })).toBeVisible();
@@ -43,9 +43,8 @@ test('command room defaults to English and switches system copy live', async ({ 
   await textbox.press('Enter');
   await expect(room.getByText('请保留这条原始消息', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '中文', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Agent Room 指挥室' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '指挥室', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: '共享协作记录' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: '待确认的 agent 操作' })).toBeVisible();
   await page.getByRole('button', { name: 'EN', exact: true }).click();
   await expect(room.getByRole('heading', { name: 'Conversation' })).toBeVisible();
   await expect(room.getByText('请保留这条原始消息', { exact: true })).toBeVisible();
