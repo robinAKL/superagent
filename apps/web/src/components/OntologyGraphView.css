@@ -1,0 +1,78 @@
+.onto { display: grid; gap: var(--space-sm); min-width: 0; }
+.onto-bar { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
+.onto-scope { display: inline-flex; padding: 3px; border: 1px solid var(--color-rule); border-radius: 999px; background: var(--color-paper); }
+.onto-scope button { border: 0; background: transparent; color: var(--color-muted); font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 999px; cursor: pointer; min-height: 32px; }
+.onto-scope button span { margin-left: 4px; font-size: 12px; opacity: .8; }
+.onto-scope button[aria-selected="true"] { background: var(--color-well); color: var(--color-ink); }
+.onto-scope-label { font-size: 14px; }
+.onto-summary { color: var(--color-muted); font-size: 13px; }
+.onto-tools { margin-left: auto; display: inline-flex; gap: var(--space-2xs); }
+.onto-icon { min-width: 34px; height: 34px; border: 1px solid var(--color-rule); border-radius: var(--radius-sm); background: var(--color-paper-2); color: var(--color-ink); font: inherit; cursor: pointer; padding: 0 10px; }
+.onto-icon:hover { border-color: var(--color-subtle); }
+.onto-fit { font-size: 13px; }
+.onto-note { margin: 0; font-size: 12px; color: var(--color-warning); }
+
+.onto-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--space-md); align-items: stretch; min-width: 0; }
+.onto-canvas { position: relative; min-width: 0; border: 1px solid var(--color-soft-rule); border-radius: var(--radius); overflow: hidden;
+  background: radial-gradient(circle at 1px 1px, var(--color-soft-rule) 1px, transparent 0) 0 0 / 22px 22px, var(--color-paper); }
+.onto-canvas svg { display: block; width: 100%; cursor: grab; touch-action: pan-y; user-select: none; }
+.onto-canvas svg:active { cursor: grabbing; }
+.onto-hint { position: absolute; left: var(--space-sm); bottom: var(--space-xs); margin: 0; font-size: 11px; color: var(--color-subtle); pointer-events: none; }
+
+.onto-node { cursor: pointer; transition: opacity .15s; }
+.onto-node rect { fill: var(--color-paper-3); stroke: var(--color-rule); stroke-width: 1.2; transition: fill .15s, stroke .15s; }
+.onto-node circle { fill: var(--color-accent); }
+.onto-node text { fill: var(--color-ink); font-size: 13px; font-weight: 600; pointer-events: none; }
+.onto-node:hover rect { stroke: var(--color-subtle); }
+.onto-node.is-selected rect { fill: color-mix(in srgb, var(--color-accent) 20%, var(--color-paper-3)); stroke: var(--color-accent); stroke-width: 2; }
+.onto-link-line { fill: none; stroke: var(--color-subtle); stroke-opacity: .55; stroke-width: 1.4; transition: stroke .15s, stroke-opacity .15s; }
+.onto-link-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
+.onto-arrowhead { fill: var(--color-subtle); fill-opacity: .7; }
+.onto-arrowhead.is-active { fill: var(--color-accent); fill-opacity: 1; }
+.onto-link-label { cursor: pointer; }
+.onto-link-label rect { fill: var(--color-paper-2); stroke: var(--color-soft-rule); }
+.onto-link-label text { fill: var(--color-muted); font-size: 11px; }
+.onto-link.is-active .onto-link-line { stroke: var(--color-accent); stroke-opacity: 1; stroke-width: 2; }
+.onto-link.is-active .onto-link-label text { fill: var(--color-ink); }
+.onto-link.is-active .onto-link-label rect { stroke: var(--color-accent); }
+svg.has-selection .onto-node:not(.is-near) { opacity: .28; }
+svg.has-selection .onto-link:not(.is-active) { opacity: .18; }
+
+.onto-panel { display: flex; flex-direction: column; gap: var(--space-sm); min-width: 0; max-height: 560px; overflow: auto;
+  border: 1px solid var(--color-soft-rule); border-radius: var(--radius); background: var(--color-paper-2); padding: var(--space-md); }
+.onto-panel h3 { margin: 0; font-size: 17px; line-height: 1.4; overflow-wrap: anywhere; }
+.onto-panel h4 { margin: 0 0 var(--space-2xs); font-size: 13px; color: var(--color-muted); font-weight: 600; }
+.onto-kind { font-size: 11px; color: var(--color-accent); text-transform: uppercase; letter-spacing: .04em; }
+.onto-desc { margin: 0; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.onto-back { align-self: flex-start; border: 0; background: none; color: var(--color-muted); font: inherit; font-size: 13px; padding: 0; cursor: pointer; }
+.onto-back:hover { color: var(--color-ink); }
+.onto-rel-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.onto-rel-title button { border: 0; background: none; padding: 0; font: inherit; color: var(--color-accent); cursor: pointer; text-align: start; }
+.onto-rel-title span { font-size: 13px; font-weight: 400; color: var(--color-muted); }
+.onto-section { border-top: 1px solid var(--color-soft-rule); padding-top: var(--space-sm); }
+.onto-list, .onto-rels, .onto-sources { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.onto-list button, .onto-rels button { width: 100%; display: flex; align-items: center; gap: var(--space-xs); border: 0; border-radius: 6px; background: transparent; color: var(--color-ink);
+  font: inherit; font-size: 14px; text-align: start; padding: 7px 8px; cursor: pointer; }
+.onto-list button:hover, .onto-rels button:hover { background: var(--color-well); }
+.onto-list button span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.onto-list small { color: var(--color-subtle); font-size: 12px; white-space: nowrap; }
+.onto-rels button span { color: var(--color-muted); font-size: 13px; }
+.onto-rels button strong { margin-left: auto; font-weight: 600; text-align: end; overflow-wrap: anywhere; }
+.onto-dir { color: var(--color-accent) !important; width: 14px; }
+.onto-sources li { display: grid; gap: 2px; font-size: 12px; border-left: 2px solid var(--color-rule); padding: 2px 0 2px var(--space-sm); }
+.onto-sources code { color: var(--color-muted); overflow-wrap: anywhere; }
+.onto-sources q { overflow-wrap: anywhere; line-height: 1.55; }
+
+.onto-empty { display: grid; gap: var(--space-xs); justify-items: start; padding: var(--space-lg); border: 1px dashed var(--color-rule); border-radius: var(--radius); }
+.onto-empty h3 { margin: 0; font-size: 16px; }
+.onto-empty a.btn { display: inline-flex; align-items: center; text-decoration: none; }
+
+@media (max-width: 900px) {
+  .onto-body { grid-template-columns: minmax(0, 1fr); }
+  .onto-panel { max-height: none; }
+  .onto-canvas svg { height: 420px !important; }
+}
+@media (max-width: 480px) {
+  .onto-tools { margin-left: 0; }
+  .onto-canvas svg { height: 400px !important; }
+}

@@ -1,0 +1,72 @@
+.sop-graph {
+  min-width: 0;
+  align-self: start;
+  overflow: hidden;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius);
+  background: var(--color-paper);
+}
+.sop-graph-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--color-soft-rule);
+  background: var(--color-paper-2);
+}
+.sop-graph-toolbar strong { font-size: 13px; }
+.sop-graph-controls { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-sm); background: var(--color-paper); }
+.sop-graph-controls button {
+  min-width: 32px;
+  min-height: 34px;
+  padding: 0 var(--space-xs);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sop-graph-controls button:hover { background: var(--color-well); }
+.sop-graph-canvas {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  cursor: grab;
+  background-image: radial-gradient(circle, var(--color-rule) 0.8px, transparent 1px);
+  background-size: 19px 19px;
+}
+.sop-graph-canvas:active { cursor: grabbing; }
+.sop-graph-content { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.sop-edges { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.sop-edge { fill: none; stroke: var(--color-subtle); stroke-width: 1.5; }
+.sop-arrow { fill: var(--color-subtle); }
+.sop-node {
+  --step-ink: var(--color-muted);
+  position: absolute;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  text-align: start;
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--color-rule);
+  border-left: 3px solid var(--step-ink);
+  border-radius: 10px;
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  box-shadow: 0 4px 10px #0002;
+  font: inherit;
+  cursor: pointer;
+}
+.sop-node small { color: var(--step-ink); font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sop-node span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; line-height: 1.3; }
+.sop-node.kind-trigger { --step-ink: var(--color-accent); }
+.sop-node.kind-employee { --step-ink: var(--color-success); }
+.sop-node.kind-tool { --step-ink: #8fbadd; }
+.sop-node.kind-human_review { --step-ink: var(--color-warning); }
+.sop-node.has-issue { border-color: var(--color-error); }
+.sop-node.selected, .sop-node:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.sop-node:hover { background: var(--color-paper-3); }

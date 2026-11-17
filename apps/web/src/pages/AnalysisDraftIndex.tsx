@@ -27,15 +27,17 @@ export function AnalysisDraftIndex<T extends { id: string; name: string; kind: s
   const draftLabel = (value: string) => KINDS.find(key => key === value);
   if (!active) return null;
 
+  // Filter sits above both columns so the list and the detail start on the same line; the list fills the
+  // detail's height and scrolls inside it instead of stretching the page.
   return <div className="analysis-draft-index">
+    <label className="field analysis-draft-filter">
+      <span>{t('kind')}</span>
+      <select value={filter} onChange={event => { setKind(event.target.value); setSelected(''); }}>
+        <option value="">{t('all')} ({drafts.length})</option>
+        {KINDS.filter(key => counts.has(key)).map(key => <option key={key} value={key}>{t(key)} ({counts.get(key)})</option>)}
+      </select>
+    </label>
     <div className="analysis-draft-sidebar">
-      <label className="field">
-        <span>{t('kind')}</span>
-        <select value={filter} onChange={event => { setKind(event.target.value); setSelected(''); }}>
-          <option value="">{t('all')} ({drafts.length})</option>
-          {KINDS.filter(key => counts.has(key)).map(key => <option key={key} value={key}>{t(key)} ({counts.get(key)})</option>)}
-        </select>
-      </label>
       <ul className="analysis-draft-nav" aria-label={t('list')}>
         {visible.map(draft => {
           const label = draftLabel(draft.kind);

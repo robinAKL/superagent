@@ -177,6 +177,11 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await page.getByRole('link', { name: '所有分析草案', exact: true }).click();
   const privateDrafts = page.getByRole('region', { name: '分析结果' });
   await expect(privateDrafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
+  const diagram = privateDrafts.getByRole('group', { name: '流程图', exact: true });
+  await expect(diagram.locator('[data-edge="check:record"]')).toHaveAttribute('marker-end', /url/);
+  await diagram.getByRole('button', { name: /核对收货记录/ }).click();
+  await expect(privateDrafts.getByRole('complementary', { name: '步骤依据' })).toContainText('退货手册 MCP');
+  await expect(privateDrafts.getByRole('link', { name: '在流程编辑器中打开' })).toHaveCount(0);
   await privateDrafts.getByLabel('草案类型').selectOption('employee');
   await expect(privateDrafts.getByRole('heading', { name: '退货专员' })).toBeVisible();
   await privateDrafts.getByLabel('草案类型').selectOption('sop');
@@ -189,6 +194,12 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await expect(page.getByRole('region', { name: '流程包' }).getByText('退货审核流程')).toHaveCount(0);
   await page.getByRole('link', { name: '查看我的 MCP 流程草案', exact: true }).click();
   await expect(privateDrafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
+  await page.getByRole('tab', { name: '本体关系', exact: true }).click();
+  const ontology = page.getByRole('region', { name: '本体关系图', exact: true });
+  await expect(ontology).toContainText('我的 MCP 来源');
+  await expect(ontology.getByRole('img', { name: /2 个业务对象 · 1 条关系/ })).toBeVisible();
+  await ontology.locator('.onto-panel').getByRole('button', { name: /退货记录/ }).click();
+  await expect(ontology.locator('.onto-panel')).toContainText('退货手册 MCP');
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });

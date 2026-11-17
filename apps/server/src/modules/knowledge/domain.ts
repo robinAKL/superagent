@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { UserContext } from '@superagent/shared';
+import type { SopNodeKind, UserContext } from '@superagent/shared';
 import { KnowledgeStore, type Connection, type Item, type Chunk } from './store.js';
 import type { StoredQueryTemplate } from './database.js';
 import { ruleProfile, shingles, similarity, SIMILAR_THRESHOLD, type ItemProfile } from './profile.js';
@@ -9,12 +9,20 @@ export class KnowledgeError extends Error { constructor(public code: string, mes
 export interface Snapshot { connections: Connection[]; items: Item[]; chunks: Chunk[]; citations: [string, string[]][]; flagged: [string, string][] }
 export interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string; retrievedAt?: string }
 export interface McpAnalysisSource { id: string; name: string; revision: string }
+export interface RecommendedWorkflow {
+  completion?: string;
+  steps: {
+    key: string; kind: SopNodeKind; label: string; detail?: string; after: string[];
+    employeeKey?: string; toolKey?: string; citations: number[];
+  }[];
+}
 export interface Recommendation {
   id: string; key: string; kind: 'employee' | 'tool' | 'sop' | 'object' | 'relation'; name: string; description: string;
   origin?: 'manual' | 'inferred';
   relation?: { from: string; to: string; label: string };
+  workflow?: RecommendedWorkflow;
   evidence: Evidence[]; humanLocked: boolean; deleted: boolean;
-  proposedChange?: { name: string; description: string; evidence: Evidence[]; relation?: { from:string;to:string;label:string } };
+  proposedChange?: { name: string; description: string; evidence: Evidence[]; relation?: { from:string;to:string;label:string }; workflow?: RecommendedWorkflow };
   mcpScope?: string;
   mcpRunId?: string;
   /** Employee drafts only: the system prompt the owner reviewed, and which tool / SOP drafts (by key) the role works with. */
@@ -145,8 +153,8 @@ export function mergeRecommendations(
       continue;
     }
     accepted.push(p);
-    if (existing?.humanLocked) { existing.proposedChange = { name: p.name, description: p.description, evidence: p.evidence, ...(p.relation?{relation:p.relation}:{}) }; continue; }
-    const draft = { ...p, origin: 'inferred' as const, ...(mcp && { mcpScope: mcp.mcpScope, mcpRunId: mcp.mcpRunId }) };
+    if (existing?.humanLocked) { existing.proposedChange = { name: p.name, description: p.description, evidence: p.evidence, workflow: p.workflow, ...(p.relation?{relation:p.relation}:{}) }; continue; }
+    const draft = { ...p, workflow: p.workflow, origin: 'inferred' as const, ...(mcp && { mcpScope: mcp.mcpScope, mcpRunId: mcp.mcpRunId }) };
     if (existing) Object.assign(existing, draft);
     else {
       const recommendation = { ...draft, id: id(), humanLocked: false, deleted: false };

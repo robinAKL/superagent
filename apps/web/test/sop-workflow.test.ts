@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { graphFromPack, knowledgeImpact, missingRegressionCases, packFromRecommendation, REGRESSION_CASES, unconfirmedItems, validationState, type GateReport } from '../src/pages/sop-workflow';
+import { graphFromWorkflow, legacyWorkflow, knowledgeImpact, missingRegressionCases, packFromRecommendation, REGRESSION_CASES, unconfirmedItems, validationState, type GateReport } from '../src/pages/sop-workflow';
 
 const full: GateReport = { ok: true, gates: Object.fromEntries(REGRESSION_CASES.map((c) => [c, { ok: true, detail: '' }])) };
 const ev = (sourceId: string, version: string, quote: string) => ({ sourceId, version, locator: `${sourceId}#L1`, quote });
@@ -28,13 +28,33 @@ describe('SOP packs from the knowledge analysis', () => {
   it('every rule and the trigger start unconfirmed and carry their evidence; nothing beyond the cited text', () => {
     const p = packFromRecommendation(rec);
     expect(p.items.map((i) => [i.kind, i.text, i.confirmed])).toEqual([
-      ['trigger', '触发：发票受理', false],
+      ['trigger', '发票受理', false],
       ['rule', '收到发票后核对采购单', false],
       ['rule', '金额超过 5000 需经理审批', false],
     ]);
     expect(unconfirmedItems(p)).toHaveLength(3);
     expect(p.items[2]!.evidence).toEqual([rec.evidence[1]]);
-    expect(graphFromPack(p).nodes.map((n) => n.kind)).toEqual(['trigger', 'agent', 'human_review']);
+    expect(p.workflow).toBeUndefined();
+  });
+
+  it('copies concrete nodes with their exact edges and citations, and binds only existing resources', () => {
+    const workflow = {
+      steps: [
+        { key: 'opened', kind: 'trigger' as const, label: '发票送达', after: [], citations: [1] },
+        { key: 'checks', kind: 'employee' as const, label: '核对采购单', after: ['opened'], citations: [1], employeeKey: 'ap' },
+        { key: 'review', kind: 'human_review' as const, label: '经理审批', after: ['checks'], citations: [2] },
+        { key: 'record', kind: 'tool' as const, label: '登记账务', after: ['review'], citations: [2], toolKey: 'unavailable-tool' },
+      ],
+    };
+    const pack = packFromRecommendation({ ...rec, workflow });
+    expect(pack.items[2]?.evidence).toEqual([rec.evidence[1]]);
+    const graph = graphFromWorkflow(workflow, { employees: new Map([['ap', 'emp-1']]) });
+    expect(graph.nodes[1]).toMatchObject({ id: 'checks', label: '核对采购单', ref: 'emp-1' });
+    expect(graph.nodes[3]?.ref).toBeUndefined();
+    expect(graph.edges).toEqual([{ from: 'opened', to: 'checks' }, { from: 'checks', to: 'review' }, { from: 'review', to: 'record' }]);
+    const legacy = legacyWorkflow('收到发票 → 核对金额 → 登记');
+    expect(legacy?.steps.map(step => step.label)).toEqual(['收到发票', '核对金额', '登记']);
+    expect(legacyWorkflow('一个通用概述。')).toBeUndefined();
   });
 
   it('knowledge changes are reported against the evidence the draft was built on', () => {

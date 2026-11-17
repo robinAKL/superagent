@@ -107,8 +107,8 @@ test('editing after publish opens a new draft; the published version and its run
 test('ontology with configured knowledge but no readable objects stays empty', async ({ page }) => {
   await page.goto('/#brain?tab=sop');
   await page.getByRole('tab', { name: '本体关系' }).click();
-  await expect(page.locator('main')).toContainText('还没有经确认来源支持的对象。先在企业知识里确认来源并运行分析。');
-  await expect(page.locator('[data-object], [data-relation]')).toHaveCount(0);
+  await expect(page.locator('main')).toContainText('还没有业务对象');
+  await expect(page.getByRole('img', { name: /本体关系图/ })).toHaveCount(0);
 });
 
 test('ontology renders objects, a relation and their evidence on the real page (desktop and phone width)', async ({ page }) => {
@@ -129,18 +129,27 @@ test('ontology renders objects, a relation and their evidence on the real page (
   );
   await page.goto('/#brain?tab=sop');
   await page.getByRole('tab', { name: '本体关系' }).click();
-  const objects = page.getByRole('region', { name: '对象与实体' });
-  await expect(objects.locator('[data-object]')).toHaveCount(2); // the employee recommendation is not an ontology object
-  await expect(objects.locator('[data-object="invoice"]')).toContainText('供应商发票');
-  await expect(objects.locator('[data-object="invoice"]')).toContainText('采购制度.md#L3');
-  await expect(objects.locator('[data-object="invoice"]')).toContainText('供应商发票须附采购单号');
-  const relation = page.getByRole('region', { name: '关系' }).locator('[data-relation="invoice-po"]');
-  await expect(relation).toContainText('供应商发票 —须匹配→ 采购单');
-  await expect(relation).toContainText('采购制度.md#L12');
-  await expect(relation).toContainText('付款前发票须与采购单金额一致');
+  const ontology = page.getByRole('region', { name: '本体关系图', exact: true });
+  const canvas = ontology.getByRole('img', { name: /2 个业务对象 · 1 条关系/ });
+  await expect(canvas.locator('.onto-node')).toHaveCount(2); // the employee recommendation is not an ontology object
+  await expect(canvas.locator('.onto-link-line')).toHaveAttribute('marker-end', /onto-arrow/);
+  const inspector = ontology.locator('.onto-panel');
+  await inspector.getByRole('button', { name: /供应商发票/ }).click();
+  await expect(inspector).toContainText('采购制度.md#L3');
+  await expect(inspector).toContainText('供应商发票须附采购单号');
+  await inspector.getByRole('button', { name: /须匹配.*采购单/ }).click();
+  await expect(inspector).toContainText('采购制度.md#L12');
+  await expect(inspector).toContainText('付款前发票须与采购单金额一致');
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(relation).toBeVisible();
+  await expect(inspector.getByText('付款前发票须与采购单金额一致')).toBeVisible();
+  await expect.poll(() => canvas.evaluate(svg => {
+    const bounds = svg.getBoundingClientRect();
+    return Array.from(svg.querySelectorAll('.onto-node')).every(node => {
+      const rect = node.getBoundingClientRect();
+      return rect.left >= bounds.left && rect.right <= bounds.right && rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+    });
+  })).toBe(true);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
