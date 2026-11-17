@@ -900,7 +900,8 @@ export function KnowledgePage() {
   const runs = overview?.analyses.slice(-5).reverse() ?? [];
   const liveDrafts = drafts.filter(draft => !draft.stale);
   const draftCount = (kind: string) => liveDrafts.filter(draft => draft.kind === kind).length;
-  const orgReady = !analysisActive && runs[0]?.status !== 'stale' && draftCount('employee') > 0;
+  // The review step follows a finished analysis; a hand-added role alone does not replace "Start analysis".
+  const orgReady = !analysisActive && runs[0]?.status === 'completed' && draftCount('employee') > 0;
   const selectedResourceScope = JSON.stringify({ scope: selectedResource?.scope, projects: selectedResource?.projectIds });
   useEffect(() => { setReadOnlyAcknowledged(false); }, [selectedPlugin, selectedResource?.id, selectedResourceScope]);
 

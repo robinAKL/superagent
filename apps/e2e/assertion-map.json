@@ -13,14 +13,14 @@
    "suite": "qa-human-work",
    "assertion": "sample-tenant fixtures opt in",
    "status": "n/a",
-   "reason": "prototype demo fixtures; the product starts empty (covered by \"unbuilt modules say who owns them\" and per-feature empty states)"
+   "reason": "prototype demo fixtures; the product starts empty (covered by \"digital employees without an analysed draft say how to start\" and per-feature empty states)"
   },
   {
    "id": "qa-human-work#3",
    "suite": "qa-human-work",
    "assertion": "No invented business tasks before opt in",
    "status": "n/a",
-   "reason": "prototype demo fixtures; the product starts empty (covered by \"unbuilt modules say who owns them\" and per-feature empty states)"
+   "reason": "prototype demo fixtures; the product starts empty (covered by \"digital employees without an analysed draft say how to start\" and per-feature empty states)"
   },
   {
    "id": "qa-human-work#4",

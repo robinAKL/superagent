@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { Pool } from 'pg';
+import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { migrate } from '../src/migrate.js';
+import { restoreConfirmedOrganizations } from '../src/modules/knowledge/runtime.js';
 import type { UserContext } from '@superagent/shared';
 import { KnowledgeService } from '../src/modules/knowledge/service.js';
-import { MemoryKnowledgeRepository } from '../src/modules/knowledge/repository.js';
+import { MemoryKnowledgeRepository, PgKnowledgeRepository } from '../src/modules/knowledge/repository.js';
 import { mergeRecommendations, type Evidence, type KnowledgeState } from '../src/modules/knowledge/domain.js';
 import { validateProposals } from '../src/modules/analysis/service.js';
 import { EmployeeService } from '../src/modules/employees/employees.js';
@@ -101,15 +106,32 @@ describe('organization draft → confirmed team (PRD §3.3)', () => {
     expect(after.employees.find(e => e.key === 'order-reviewer')!.tools).toEqual(['kb-qa']);
   });
 
-  it('after a restart the record survives and a repeat confirmation restores the same ids', async () => {
+  it('after a restart, reading the organization restores the same employees and placeholders without a new confirmation', async () => {
     const f = await fixture();
     const first = await f.service.confirmOrganization(owner);
+    const reviewer = first.employees.find(e => e.name === '订单审核员')!;
     f.restart();
-    expect((await f.service.organization(owner)).missing).toBe(2);
-    const again = await f.service.confirmOrganization(owner);
-    expect(again.employees.map(e => e.employeeId).sort()).toEqual(first.employees.map(e => e.employeeId).sort());
-    expect(f.employees().list()).toHaveLength(2);
-    expect((await f.service.organization(owner)).missing).toBe(0);
+    expect(f.employees().list()).toHaveLength(0);
+    const org = await f.service.organization(owner);
+    expect(org.missing).toBe(0);
+    expect(org.confirmation).toMatchObject({ revision: 1 });
+    expect(f.employees().list().map(e => e.id).sort()).toEqual(first.employees.map(e => e.employeeId).sort());
+    expect(f.employees().get(reviewer.employeeId)).toMatchObject({ name: '订单审核员', status: 'unconnected', owner: 'alice' });
+    expect(f.tools().list().map(t => t.toolId)).toEqual(first.tools.filter(t => t.match === 'placeholder').map(t => t.toolId));
+    expect(f.tools().list()[0]!.contract.purpose).toBe('在内部系统中登记审核结论');
+    // Confirming again afterwards still creates nothing new.
+    expect(await f.service.confirmOrganization(owner)).toMatchObject({ createdEmployees: 0, createdTools: 0 });
+  });
+
+  it('a second web process on the same tenant document restores the team at start-up', async () => {
+    const f = await fixture();
+    const first = await f.service.confirmOrganization(owner);
+    const employeesB = new EmployeeService(), toolsB = new ToolService();
+    const processB = new KnowledgeService({ repo: f.repo, organization: createOrganizationSink(() => employeesB, () => toolsB) });
+    expect(await processB.restoreOrganizations([owner.tenantId, 'tenant-without-organization'])).toBe(3);
+    expect(employeesB.list().map(e => e.id).sort()).toEqual(first.employees.map(e => e.employeeId).sort());
+    expect(toolsB.list()).toHaveLength(1);
+    expect(await processB.restoreOrganizations([owner.tenantId])).toBe(0);
   });
 
   it('refuses confirmation while the latest analysis is stale, and for non-managers', async () => {
@@ -119,5 +141,42 @@ describe('organization draft → confirmed team (PRD §3.3)', () => {
     await expect(f.service.confirmOrganization(owner)).rejects.toMatchObject({ code: 'analysis_stale', statusCode: 409 });
     await expect(f.service.confirmOrganization({ ...owner, roles: ['employee'] })).rejects.toMatchObject({ statusCode: 403 });
     expect(f.employees().list()).toHaveLength(0);
+  });
+});
+
+const dbUrl = process.env.DATABASE_URL;
+(dbUrl ? describe : describe.skip)('organization on PostgreSQL: web process switch', () => {
+  it('process B, sharing the PG tenant document, restores process A\'s confirmed team at start-up and on read', async () => {
+    const pool = new Pool({ connectionString: dbUrl });
+    try {
+      await migrate(pool, undefined, () => undefined);
+      await pool.query(await readFile(new URL('../migrations/0002_knowledge.sql', import.meta.url), 'utf8'));
+      const ctx = { ...owner, tenantId: randomUUID() };
+      const employeesA = new EmployeeService(), toolsA = new ToolService();
+      const depsA = { repo: new PgKnowledgeRepository(pool), organization: createOrganizationSink(() => employeesA, () => toolsA) };
+      const a = new KnowledgeService(depsA);
+      const conn = await a.createConnection(ctx, { name: '资料', pluginId: 'local-file' });
+      await a.confirmConnection(ctx, conn.id);
+      await a.upload(ctx, { connectionId: conn.id, name: 'order-review.md', text: GUIDE });
+      const item = (await depsA.repo.read(ctx)).source.items[0]!;
+      await a.confirm(ctx, item.id, item.version);
+      await depsA.repo.transact(ctx, s => { mergeRecommendations(s, ctx, validateProposals([
+        { key: 'order-reviewer', kind: 'employee', name: '订单审核员', description: '核对订单', evidence: [evidence(s, '信用额度')], uses: ['crm-entry'], sops: [] },
+        { key: 'crm-entry', kind: 'tool', name: '订单登记', description: '登记审核结论', evidence: [evidence(s, '知识库问答')] },
+      ])); });
+      const confirmed = await a.confirmOrganization(ctx);
+
+      const employeesB = new EmployeeService(), toolsB = new ToolService();
+      const depsB = { repo: new PgKnowledgeRepository(pool), organization: createOrganizationSink(() => employeesB, () => toolsB) };
+      expect(await restoreConfirmedOrganizations(depsB)).toBeGreaterThanOrEqual(2);
+      expect(employeesB.get(confirmed.employees[0]!.employeeId)).toMatchObject({ name: '订单审核员', status: 'unconnected' });
+      expect(toolsB.list().map(t => t.toolId)).toContain(confirmed.tools[0]!.toolId);
+
+      const employeesC = new EmployeeService(), toolsC = new ToolService();
+      const c = new KnowledgeService({ repo: new PgKnowledgeRepository(pool), organization: createOrganizationSink(() => employeesC, () => toolsC) });
+      expect((await c.organization(ctx)).missing).toBe(0);
+      expect(employeesC.list().map(e => e.id)).toEqual([confirmed.employees[0]!.employeeId]);
+      await pool.query('DELETE FROM knowledge_chunks WHERE tenant_id=$1', [ctx.tenantId]); await pool.query('DELETE FROM knowledge_tenants WHERE tenant_id=$1', [ctx.tenantId]);
+    } finally { await pool.end(); }
   });
 });
