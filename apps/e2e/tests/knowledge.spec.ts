@@ -194,6 +194,12 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await expect(page.getByRole('region', { name: '流程包' }).getByText('退货审核流程')).toHaveCount(0);
   await page.getByRole('link', { name: '查看我的 MCP 流程草案', exact: true }).click();
   await expect(privateDrafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
+  await page.getByRole('tab', { name: '本体关系', exact: true }).click();
+  const ontology = page.getByRole('region', { name: '本体关系图', exact: true });
+  await expect(ontology).toContainText('我的 MCP 来源');
+  await expect(ontology.getByRole('img', { name: /2 个业务对象 · 1 条关系/ })).toBeVisible();
+  await ontology.locator('.onto-panel').getByRole('button', { name: /退货记录/ }).click();
+  await expect(ontology.locator('.onto-panel')).toContainText('退货手册 MCP');
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });

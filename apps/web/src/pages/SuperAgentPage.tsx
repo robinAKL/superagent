@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { SOP_NODE_KINDS, validateSopGraph, type SopGraph, type SopGraphContext, type SopNodeKind } from '@superagent/shared';
 import { api } from '../api';
 import { useT } from '../i18n';
+import { OntologyGraphView } from '../components/OntologyGraphView';
 import { KIND_LABEL, SopGraphView } from '../components/SopGraphView';
 import { graphFromWorkflow, legacyWorkflow, knowledgeImpact, packFromRecommendation, unconfirmedItems, validationState, type KnowledgeEvidence, type RecommendedWorkflow, type SopPack } from './sop-workflow';
 import { McpKnowledge } from './McpKnowledge';
@@ -58,6 +59,24 @@ interface Recommendation {
   workflow?: RecommendedWorkflow;
 }
 
+interface Organization {
+  sops: { key: string; privateSource: boolean }[];
+  employees: { key: string; employeeId: string | null; privateSource: boolean }[];
+  tools: { key: string; toolId: string | null; privateSource: boolean }[];
+  confirmation: unknown;
+  changedSinceConfirmation: boolean;
+}
+
+async function confirmedOrganization(workflowKey: string): Promise<Organization | undefined> {
+  try {
+    const { status, body } = await api<Organization>('/api/v1/knowledge/organization', { signal: AbortSignal.timeout(7000) });
+    if (status === 200 && body.confirmation && !body.changedSinceConfirmation &&
+        body.sops.some(sop => sop.key === workflowKey && !sop.privateSource)) return body;
+  } catch {
+    // The editor can still create a draft whose assignments are resolved explicitly.
+  }
+}
+
 interface Drafts {
   recommendations: (Recommendation & { evidence: KnowledgeEvidence[] })[];
   mcpRecommendations: Recommendation[];
@@ -73,7 +92,9 @@ const TEXT = {
     legacyStepMap: 'Sequence from an earlier analysis. Analyze again to add evidence and assignments to each step.',
     stepEvidence: 'Step evidence', selectStep: 'Select a step to view its evidence.',
     employeeRef: 'Assigned employee', toolRef: 'Assigned tool', unresolvedRef: 'Choose an assignment',
-    stepName: 'Step name', publishedFlow: 'View the published workflow', closeNode: 'Remove node', ruleLabel: 'Step',
+    importingWorkflow: 'Creating draft…', importFailed: 'Could not create the workflow draft. Try again.',
+    stepDetails: 'Step details', currentStage: 'Current stage {stage}', openTool: 'Open tool card', openEmployee: 'Open employee',
+    stepName: 'Step name', publishedFlow: 'View the published workflow', closeNode: 'Remove node',
     workflowTitle: 'Workflow name', completion: 'Expected deliverable', runWorkflow: 'Open in command room',
     results: 'Analysis results', sop: 'Workflows', ontology: 'Ontology', mcp: 'MCP knowledge',
     loadingDrafts: 'Loading analysis drafts…', draftError: 'Could not load analysis drafts.',
@@ -97,7 +118,9 @@ const TEXT = {
     legacyStepMap: '这是上次分析中记录的步骤顺序。重新分析可补齐逐节点依据和岗位工具。',
     stepEvidence: '步骤依据', selectStep: '选择节点查看原文依据。',
     employeeRef: '执行员工', toolRef: '执行工具', unresolvedRef: '选择执行对象',
-    stepName: '步骤名称', publishedFlow: '查看已发布流程', closeNode: '从草稿删除此节点', ruleLabel: '步骤',
+    importingWorkflow: '正在创建草稿…', importFailed: '无法创建流程草稿，请重试。',
+    stepDetails: '节点详情', currentStage: '当前阶段 {stage}', openTool: '打开工具卡', openEmployee: '查看员工',
+    stepName: '步骤名称', publishedFlow: '查看已发布流程', closeNode: '从草稿删除此节点',
     workflowTitle: '流程名称', completion: '预期交付', runWorkflow: '在指挥室运行',
     results: '分析结果', sop: '流程', ontology: '本体关系', mcp: 'MCP 知识',
     loadingDrafts: '正在读取分析草案…', draftError: '无法读取分析草案。',
@@ -301,6 +324,7 @@ function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate }: Draf
   const [pack, setPack] = useState<SopPack | undefined>();
   const [workflow, setWorkflow] = useState({ title: '', completion: '' });
   const [rules, setRules] = useState<RulesForm>(rulesFrom(undefined));
+  const [applyingPack, setApplyingPack] = useState(false);
   const [pendingPack, setPendingPack] = useState<SopPack | undefined>();
   const [selected, setSelected] = useState<string>();
   const [effectiveAt, setEffectiveAt] = useState('');
@@ -358,22 +382,6 @@ function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate }: Draf
   const unconfirmed = unconfirmedItems(pack);
   const recs = knowledge.status === 'ready' ? knowledge.drafts.recommendations : [];
   const packs = recs.filter(r => r.kind === 'sop' && r.evidence.length && (!candidate || r.key === candidate)).map(packFromRecommendation);
-  const [organization, setOrganization] = useState<{
-    sops: { key: string; privateSource: boolean }[];
-    employees: { key: string; employeeId: string | null; sops: string[]; privateSource: boolean }[];
-    tools: { key: string; toolId: string | null; privateSource: boolean }[];
-    confirmation: unknown;
-    changedSinceConfirmation: boolean;
-  }>();
-  const loadOrganization = packs.some(candidate => candidate.workflow);
-  useEffect(() => {
-    if (!loadOrganization) return;
-    const request = new AbortController();
-    void api<NonNullable<typeof organization>>('/api/v1/knowledge/organization', { signal: request.signal }).then(({ status, body }) => {
-      if (!request.signal.aborted && status === 200 && Array.isArray(body.sops) && Array.isArray(body.employees) && Array.isArray(body.tools)) setOrganization(body);
-    }).catch(() => undefined);
-    return () => request.abort();
-  }, [loadOrganization]);
   const privateWorkflows = knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.some(draft => draft.kind === 'sop');
   const impact = knowledge.status === 'ready' ? knowledgeImpact(pack, recs) : [];
   const node = draft.nodes.find((n) => n.id === selected);
@@ -431,26 +439,28 @@ function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate }: Draf
     else void applyPack(p);
   }
   async function applyPack(p: SopPack) {
+    if (!p.workflow || applyingPack) return;
+    setApplyingPack(true);
     setPendingPack(undefined);
-    const target = sopId || newSopId.trim() || `sop.${p.key}`;
-    if (!p.workflow) return;
-    const fresh = structuredClone(p);
-    const confirmed = organization?.confirmation && !organization.changedSinceConfirmation &&
-      organization.sops.some(sop => sop.key === p.key && !sop.privateSource) ? organization : undefined;
-    const roleRefs = new Map<string, string>();
-    const toolRefs = new Map<string, string>();
-    for (const employee of confirmed?.employees ?? []) {
-      if (employee.employeeId && !employee.privateSource) roleRefs.set(employee.key, employee.employeeId);
+    try {
+      const target = sopId || newSopId.trim() || `sop.${p.key}`;
+      const fresh = structuredClone(p);
+      const organization = await confirmedOrganization(p.key);
+      const employeeRefs = new Map<string, string>();
+      const toolRefs = new Map<string, string>();
+      for (const employee of organization?.employees ?? []) {
+        if (employee.employeeId && !employee.privateSource) employeeRefs.set(employee.key, employee.employeeId);
+      }
+      for (const tool of organization?.tools ?? []) {
+        if (tool.toolId && !tool.privateSource) toolRefs.set(tool.key, tool.toolId);
+      }
+      const graph = graphFromWorkflow(p.workflow, { employees: employeeRefs, tools: toolRefs });
+      await save(graph, fresh, target, { title: fresh.name, completion: p.workflow.completion ?? '' });
+    } catch {
+      setMsg(t('importFailed'));
+    } finally {
+      setApplyingPack(false);
     }
-    for (const tool of confirmed?.tools ?? []) {
-      if (tool.toolId && !tool.privateSource) toolRefs.set(tool.key, tool.toolId);
-    }
-    const graph = graphFromWorkflow(p.workflow, { employees: roleRefs, tools: toolRefs });
-    const metadata = { title: fresh.name, completion: p.workflow.completion ?? '' };
-    setDraft(graph);
-    setPack(fresh);
-    setWorkflow(metadata);
-    await save(graph, fresh, target, metadata);
   }
 
   return (
@@ -462,7 +472,7 @@ function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate }: Draf
         </div> : sops === null ? <p className="helper" role="status">{t('loadingSops')}</p> : null}
         <label className="field">
           <span>{t('chooseWorkflow')}</span>
-          <select disabled={sops === null || unavailable} value={sopId} onChange={(e) => setSopId(e.target.value)}>
+          <select disabled={sops === null || unavailable || applyingPack} value={sopId} onChange={(e) => setSopId(e.target.value)}>
             <option value="">{t('workflowPlaceholder')}</option>
             {sops?.map((s) => (
               <option key={s.sopId} value={s.sopId}>{s.sopId}{s.latest ? `（v${s.latest.number} ${STATUS_LABEL[s.latest.status]}）` : ''}</option>
@@ -486,7 +496,7 @@ function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate }: Draf
           {packs.map((p) => (
             <li key={p.key} data-pack={p.key}>
               <strong>{p.name}</strong>
-              {p.workflow ? <button className="btn" type="button" disabled={sops === null || unavailable} onClick={() => requestPack(p)}>{t('applyPack')}</button>
+              {p.workflow ? <button className="btn" type="button" disabled={sops === null || unavailable || applyingPack} onClick={() => requestPack(p)}>{t(applyingPack ? 'importingWorkflow' : 'applyPack')}</button>
                 : <p className="helper">{t('noStepMap')} <a href="#knowledge?view=analysis">{t('reviewDrafts')}</a></p>}
             </li>
           ))}
@@ -543,8 +553,11 @@ function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate }: Draf
                 evidence={pack?.items.find(item => item.id === pack.key + ':step:' + node.id)?.evidence}
                 onChange={next => setDraft(graph => ({ ...graph, nodes: graph.nodes.map(item => item.id === next.id ? next : item) }))}
                 onRemove={() => {
-              setDraft((g) => ({ nodes: g.nodes.filter((n) => n.id !== node.id), edges: g.edges.filter((e) => e.from !== node.id && e.to !== node.id) }));
-              setSelected(undefined);
+                  setDraft(graph => ({
+                    nodes: graph.nodes.filter(item => item.id !== node.id),
+                    edges: graph.edges.filter(edge => edge.from !== node.id && edge.to !== node.id),
+                  }));
+                  setSelected(undefined);
                 }} /> : <aside className="workflow-inspector"><p className="helper">{t('selectStep')}</p></aside>}
             </div>
             <GraphEditor graph={draft} tools={tools} employees={employees} onChange={setDraft} />
@@ -643,7 +656,7 @@ function NodeDetail({ node, tools, employees, step, evidence, onChange, onRemove
   const employee = node.kind === 'employee' ? employees.find(item => item.id === node.ref) : undefined;
   const options = node.kind === 'tool' ? tools.map(item => ({ key: item.toolId, label: item.name }))
     : node.kind === 'employee' ? employees.map(item => ({ key: item.id, label: item.name })) : null;
-  return <aside className="workflow-inspector" aria-label={t('stepEvidence')}>
+  return <aside className="workflow-inspector" aria-label={t('stepDetails')}>
     <label className="field"><span>{t('stepName')}</span>
       <input value={node.label} maxLength={160} onChange={event => onChange({ ...node, label: event.target.value })} />
     </label>
@@ -656,8 +669,8 @@ function NodeDetail({ node, tools, employees, step, evidence, onChange, onRemove
         {options.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
       </select>
     </label> : null}
-    {tool ? <p className="helper">{tool.stage} · {tool.effect}</p> : null}
-    {employee ? <p className="helper">{employee.status}</p> : null}
+    {tool ? <p className="helper">{t('currentStage', { stage: tool.stage })} · {tool.effect} · <a href="#tools">{t('openTool')}</a></p> : null}
+    {employee ? <p className="helper">{employee.status} · <a href="#employees">{t('openEmployee')}</a></p> : null}
     {evidence?.length ? <Evidences ev={evidence} label={t('stepEvidence')} /> : null}
     <button className="btn" type="button" onClick={onRemove}>{t('closeNode')}</button>
   </aside>;
@@ -714,45 +727,13 @@ function GraphEditor({ graph, tools, employees, onChange }: { graph: SopGraph; t
   );
 }
 
-/** Objects/entities and relations from the knowledge analysis, each with its evidence. Mobile: a readable list. */
 function OntologyView({ knowledge, retryKnowledge }: DraftViewProps) {
   if (knowledge.status !== 'ready') return <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />;
-  return <OntologyList items={knowledge.drafts.recommendations} />;
-}
-
-export function OntologyList({ items }: { items: Recommendation[] }) {
-  const objects = items.filter((i) => i.kind === 'object');
-  const relations = items.filter((i) => i.kind === 'relation' && i.relation);
-  if (!objects.length) return <p className="helper">还没有经确认来源支持的对象。先在企业知识里确认来源并运行分析。</p>;
-  const nameOf = (key: string) => objects.find((o) => o.key === key)?.name ?? key;
-  return (
-    <div className="ontology">
-      <section className="panel stack" aria-label="对象与实体">
-        <h2 className="h2">对象与实体</h2>
-        <ul className="onto-list">
-          {objects.map((o) => (
-            <li key={o.id} data-object={o.key}>
-              <strong>{o.name}</strong> <span className="helper">{o.description}</span>
-              <Evidences ev={o.evidence} />
-            </li>
-          ))}
-        </ul>
-      </section>
-      <section className="panel stack" aria-label="关系">
-        <h2 className="h2">关系</h2>
-        {relations.length ? (
-          <ul className="onto-list">
-            {relations.map((r) => (
-              <li key={r.id} data-relation={r.key}>
-                <strong>{nameOf(r.relation!.from)}</strong> —{r.relation!.label}→ <strong>{nameOf(r.relation!.to)}</strong>
-                <Evidences ev={r.evidence} />
-              </li>
-            ))}
-          </ul>
-        ) : <p className="helper">分析尚未给出带依据的关系。</p>}
-      </section>
-    </div>
-  );
+  const { recommendations, mcpRecommendations } = knowledge.drafts;
+  return <OntologyGraphView
+    shared={recommendations.filter(item => item.evidence.length > 0)}
+    personal={mcpRecommendations.filter(item => item.evidence.length > 0)}
+  />;
 }
 
 function Evidences({ ev, label = '依据' }: { ev: Evidence[]; label?: string }) {

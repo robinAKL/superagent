@@ -24,7 +24,7 @@ const TEXT = {
     emptyBody: 'Confirm materials in Company knowledge and run an analysis. The objects it finds, and how they relate, are drawn here with their sources.',
     openAnalysis: 'Open knowledge analysis',
     zoomIn: 'Zoom in', zoomOut: 'Zoom out', fit: 'Fit to view', canvas: 'Ontology graph',
-    hint: 'Drag to move · scroll to zoom · select an object to see its sources',
+    hint: 'Drag to move · select an object to see its sources',
     objects: 'Objects', object: 'Business object', relation: 'Relationship', relations: 'Relationships ({n})',
     noRelations: 'No relationship found for this object yet.', sources: 'Sources ({n})', noSources: 'No locatable source.',
     personalNote: 'Only you can see drafts from your MCP sources.', back: 'All objects', isolated: 'not linked',
@@ -35,7 +35,7 @@ const TEXT = {
     emptyBody: '先在企业知识里确认资料并运行分析。分析找到的业务对象和它们之间的关系会画在这里，并附上原文依据。',
     openAnalysis: '打开知识分析',
     zoomIn: '放大', zoomOut: '缩小', fit: '适配窗口', canvas: '本体关系图',
-    hint: '拖动节点调整位置 · 滚轮缩放 · 选中对象查看依据',
+    hint: '拖动节点调整位置 · 选中对象查看依据',
     objects: '对象', object: '业务对象', relation: '关系', relations: '关系（{n}）',
     noRelations: '这个对象还没有找到关系。', sources: '依据（{n}）', noSources: '没有可定位的依据。',
     personalNote: '个人 MCP 来源的草案只有你能看到。', back: '全部对象', isolated: '未关联',
@@ -169,18 +169,24 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
     };
     sim.on('tick', tick);
 
-    const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.25, 3]).on('zoom', e => root.attr('transform', e.transform.toString()));
+    const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.18, 3])
+      .filter(event => !event.button && (event.type !== 'wheel' || event.ctrlKey || event.metaKey) &&
+        (event.type !== 'touchstart' || event.touches.length > 1))
+      .on('zoom', event => root.attr('transform', event.transform.toString()));
     svg.call(zoom).on('dblclick.zoom', null).on('click', () => selectRef.current(null));
     const fit = () => {
       const xs = nodes.flatMap(n => [(n.x ?? 0) - n.width / 2, (n.x ?? 0) + n.width / 2]), ys = nodes.flatMap(n => [(n.y ?? 0) - 20, (n.y ?? 0) + 20]);
-      const [x0, x1] = [Math.min(...xs) - 40, Math.max(...xs) + 40], [y0, y1] = [Math.min(...ys) - 40, Math.max(...ys) + 40];
       const box = svgEl.getBoundingClientRect(), cw = box.width || w, ch = (box.height || h) - 24;
-      const k = Math.min(1.4, Math.max(0.25, Math.min(cw / (x1 - x0), ch / (y1 - y0))));
-      svg.transition().duration(400).call(zoom.transform, d3.zoomIdentity.translate(cw / 2 - k * (x0 + x1) / 2, ch / 2 - k * (y0 + y1) / 2).scale(k));
+      const padding = cw < 480 ? 18 : 30;
+      const [x0, x1] = [Math.min(...xs) - padding, Math.max(...xs) + padding];
+      const [y0, y1] = [Math.min(...ys) - padding, Math.max(...ys) + padding];
+      const k = Math.min(1.4, cw / (x1 - x0), ch / (y1 - y0));
+      const transform = d3.zoomIdentity.translate(cw / 2 - k * (x0 + x1) / 2, ch / 2 - k * (y0 + y1) / 2).scale(k);
+      svg.interrupt().call(zoom.transform, transform);
     };
     zoomRef.current = { zoom, fit };
-    let fitted = false;
-    sim.on('end', () => { if (!fitted) { fitted = true; fit(); } });
+    const resize = new ResizeObserver(fit);
+    resize.observe(svgEl);
 
     nodeSel.call(d3.drag<SVGGElement, GraphNode>()
       .on('start', (e, n) => { if (!e.active) sim.alphaTarget(0.25).restart(); n.fx = n.x; n.fy = n.y; })
@@ -189,8 +195,8 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
 
     // Settle quickly so the first frame is already readable, then let it relax.
     for (let i = 0; i < 300; i++) sim.tick();
-    tick(); fit(); fitted = true;
-    return () => { sim.stop(); svg.on('.zoom', null); zoomRef.current = null; };
+    tick(); fit();
+    return () => { resize.disconnect(); sim.stop(); svg.interrupt().on('.zoom', null); zoomRef.current = null; };
   }, [graph, height]);
 
   // Highlight the selection and its neighbourhood.

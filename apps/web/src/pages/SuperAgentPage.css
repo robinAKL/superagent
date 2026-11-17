@@ -84,3 +84,4 @@ textarea { border-radius: var(--radius-sm); border: 1px solid var(--color-rule);
 .agent-results-page .analysis-draft-detail { min-width: 0; }
 .workflow-inspector .evidence { max-block-size: 13rem; overflow-y: auto; scrollbar-width: thin; }
 .workflow-published { min-width: 0; }
+.agent-result-draft .workflow-diagram-layout { grid-template-columns: minmax(0, 1fr); }

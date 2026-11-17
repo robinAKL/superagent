@@ -15,7 +15,7 @@
 .onto-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--space-md); align-items: stretch; min-width: 0; }
 .onto-canvas { position: relative; min-width: 0; border: 1px solid var(--color-soft-rule); border-radius: var(--radius); overflow: hidden;
   background: radial-gradient(circle at 1px 1px, var(--color-soft-rule) 1px, transparent 0) 0 0 / 22px 22px, var(--color-paper); }
-.onto-canvas svg { display: block; width: 100%; cursor: grab; touch-action: none; user-select: none; }
+.onto-canvas svg { display: block; width: 100%; cursor: grab; touch-action: pan-y; user-select: none; }
 .onto-canvas svg:active { cursor: grabbing; }
 .onto-hint { position: absolute; left: var(--space-sm); bottom: var(--space-xs); margin: 0; font-size: 11px; color: var(--color-subtle); pointer-events: none; }
 

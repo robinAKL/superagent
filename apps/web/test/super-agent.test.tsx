@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { validateSopGraph, type SopGraph } from '@superagent/shared';
 import { SopGraphView } from '../src/components/SopGraphView';
 import { LangProvider } from '../src/i18n';
-import { OntologyList, employeeContext } from '../src/pages/SuperAgentPage';
+import { employeeContext } from '../src/pages/SuperAgentPage';
 
 const graph: SopGraph = {
   nodes: [
@@ -19,7 +19,7 @@ describe('SOP graph view', () => {
     const issues = validateSopGraph(graph, { employees: { 'emp-1': { status: 'active' } }, tools: { 'erp.post': { stage: 'available', effect: 'write' } } });
     expect(issues.map((i) => i.code)).toEqual(['write_without_review']);
     const html = renderToStaticMarkup(<LangProvider initial="zh"><SopGraphView graph={graph} issues={issues} selected="e" /></LangProvider>);
-    expect(html.match(/<button/g)).toHaveLength(3);
+    expect(html.match(/data-node=/g)).toHaveLength(3);
     expect(html).toContain('aria-label="触发点：收到发票"');
     expect(html).toContain('问题：登记付款 会写入外部系统，之前必须经过人工审核');
     expect(html).toMatch(/class="sop-node kind-tool has-issue"/);
@@ -41,29 +41,5 @@ describe('SOP graph view', () => {
       b: { status: 'paused' },
       c: { status: 'offline' },
     });
-  });
-});
-
-describe('ontology list', () => {
-  const ev = [{ locator: 'policy.md#L3', quote: '供应商发票须匹配采购单' }];
-  it('lists objects and relations, each with its evidence', () => {
-    const html = renderToStaticMarkup(
-      <OntologyList
-        items={[
-          { id: '1', key: 'invoice', kind: 'object', name: '发票', description: '供应商开具', evidence: ev },
-          { id: '2', key: 'po', kind: 'object', name: '采购单', description: '内部审批', evidence: ev },
-          { id: '3', key: 'invoice-po', kind: 'relation', name: '匹配', description: '', evidence: ev, relation: { from: 'invoice', to: 'po', label: '须匹配' } },
-        ]}
-      />,
-    );
-    expect(html).toContain('data-object="invoice"');
-    expect(html).toContain('<strong>发票</strong> —须匹配→ <strong>采购单</strong>');
-    expect(html.match(/policy\.md#L3/g)).toHaveLength(3);
-  });
-
-  it('shows an honest empty state instead of inventing objects or relations', () => {
-    expect(renderToStaticMarkup(<OntologyList items={[]} />)).toContain('还没有经确认来源支持的对象');
-    const onlyObjects = renderToStaticMarkup(<OntologyList items={[{ id: '1', key: 'a', kind: 'object', name: 'A', description: '', evidence: ev }]} />);
-    expect(onlyObjects).toContain('分析尚未给出带依据的关系');
   });
 });
