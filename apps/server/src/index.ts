@@ -8,7 +8,7 @@ import { bindSopStore, hydrateSop } from './modules/sop/index.js';
 import { bindGatewayStore, hydrateGateway } from './modules/gateway/index.js';
 import { bindInboxStore, hydrateInbox } from './modules/humanwork/index.js';
 import { bindExecutionStore, hydrateExecutions } from './modules/execution/index.js';
-import { createKnowledgeDeps, knowledgeReady } from './modules/knowledge/runtime.js';
+import { createKnowledgeDeps, knowledgeReady, restoreConfirmedOrganizations } from './modules/knowledge/runtime.js';
 import { tickKnowledge } from './modules/knowledge/worker.js';
 import { createLongWorkDeps } from './modules/longwork/runtime.js';
 import { pgMailSopConsumer } from './modules/longwork/execution-adapter.js';
@@ -71,6 +71,8 @@ if (role === 'web') {
   const app = await buildApp({ ...runtime.app, knowledgeDeps: knowledge, longWorkDeps: longwork,
     readiness: [...runtime.app.readiness, { name: 'knowledge', check: () => knowledgeReady(knowledge) }, { name: 'longwork', check: longwork.ready }, { name: 'room', check: async () => roomHydrated }, { name: 'sop', check: async () => sopHydrated }, { name: 'inbox', check: async () => inboxHydrated }, { name: 'execution', check: async () => executionHydrated }], serveWeb: true, logger: true });
   app.addHook('onClose', async () => { await knowledge.close?.(); await runtime.close(); });
+  // Employees and tool placeholders live in process memory; the confirmed organization in the tenant document brings them back.
+  void restoreConfirmedOrganizations(knowledge).then(n => { if (n) console.log(JSON.stringify({ msg: 'organization restored', restored: n })); }, (e: unknown) => console.log(JSON.stringify({ msg: 'organization restore failed', error: e instanceof Error ? e.message : String(e) })));
   const port = Number(process.env.PORT ?? 8080);
   await app.listen({ host: '0.0.0.0', port });
 } else if (role === 'worker') {

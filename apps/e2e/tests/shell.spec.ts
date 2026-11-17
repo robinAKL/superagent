@@ -46,9 +46,13 @@ test('the language switch fits inside the top bar (desktop and phone width)', as
   expect(product!.x + product!.width, 'product name and switch do not overlap').toBeLessThanOrEqual(sw!.x);
 });
 
-test('unbuilt modules say who owns them instead of showing invented data', async ({ page }) => {
+test('digital employees without an analysed draft say how to start instead of showing invented roles', async ({ page }) => {
   await page.goto('/#employees');
-  await expect(page.locator('main')).toContainText('T-42');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('数字员工');
+  await expect(page.getByRole('heading', { name: '还没有组织草案' })).toBeVisible();
+  await expect(page.getByRole('link', { name: '去企业知识', exact: true })).toHaveAttribute('href', '#knowledge');
+  await expect(page.locator('.org-role')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '确认组织' })).toHaveCount(0);
   await expect(page.locator('main')).not.toContainText(/已完成|已发布/);
 });
 

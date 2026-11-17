@@ -167,7 +167,12 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await expect(draft.locator('blockquote')).toHaveText('角色：退货专员；责任：核对收货记录后登记退款。');
 
   await page.route('**/api/v1/sop', route => route.fulfill({ status: 503, json: {} }));
-  await page.getByRole('link', { name: '在超级智能体中查看结果' }).click();
+  // Analysis ends in one primary action: review the organization draft. Private MCP drafts appear there, marked as such,
+  // and the step strip leads on to Super Agent where the workflow drafts are reviewed.
+  await page.getByRole('link', { name: '审阅组织草案', exact: true }).click();
+  const role = page.getByRole('article', { name: '退货专员' });
+  await expect(role.getByText('来自你的 MCP 来源', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: '3 发布流程', exact: true }).click();
   const privateDrafts = page.getByRole('region', { name: '分析结果' });
   await expect(privateDrafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
   await privateDrafts.getByLabel('草案类型').selectOption('employee');
