@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { useT } from '../i18n';
 
 /**
@@ -102,8 +102,8 @@ export function TeamSizePlanner({ current, busy, planning, onPlan }: { current: 
   const [value, setValue] = useState(String(current));
   const count = Number(value);
   const valid = Number.isInteger(count) && count >= 1 && count <= 20;
-  function submit(event: FormEvent) { event.preventDefault(); if (valid && count !== current) onPlan(count); }
-  return <form className="team-size" onSubmit={submit} aria-labelledby="team-size-title">
+  function submit() { if (valid && count !== current) onPlan(count); }
+  return <div className="team-size" aria-labelledby="team-size-title">
     <div className="team-size-text">
       <h2 id="team-size-title">{t('title')}</h2>
       <p className="helper">{t('current', { n: current })} · {t('hint')}</p>
@@ -117,10 +117,10 @@ export function TeamSizePlanner({ current, busy, planning, onPlan }: { current: 
           <button type="button" aria-label="+" disabled={busy || count >= 20} onClick={() => setValue(String(Math.min(20, (valid ? count : current) + 1)))}>+</button>
         </span>
       </label>
-      <button className="btn primary" disabled={busy || !valid || count === current}>{planning ? t('planning') : t('plan')}</button>
+      <button className="btn primary" type="button" disabled={busy || !valid || count === current} onClick={submit}>{planning ? t('planning') : t('plan')}</button>
     </div>
     {valid && count === current ? <small className="helper">{t('same')}</small> : null}
-  </form>;
+  </div>;
 }
 
 export function planErrorKey(code: string): PlanKey | null {

@@ -4,6 +4,7 @@ import { validateSopGraph, type SopGraph } from '@superagent/shared';
 import { SopGraphView } from '../src/components/SopGraphView';
 import { LangProvider } from '../src/i18n';
 import { employeeContext, SuperAgentPage } from '../src/pages/SuperAgentPage';
+import { orgPublishReady } from '../src/pages/OrganizationPublish';
 
 const graph: SopGraph = {
   nodes: [
@@ -21,12 +22,15 @@ describe('SOP graph view', () => {
     expect(zh).toContain('企业流程');
     expect(zh).toContain('数字岗位与工作量');
     expect(zh).toContain('确认并发布配置，生成数字员工');
-    expect(zh).toContain('启用前请确认这三项');
+    expect(zh).toContain('启用前确认');
+    expect(zh).toContain('企业知识');
+    expect(zh).toContain('业务流程');
+    expect(zh).toContain('数字员工');
     expect(zh).toContain('设定交给数字团队的工作、必须遵守的边界，并生成数字岗位');
-    expect(zh).toContain('企业配置');
-    expect(zh).toContain('团队与流程就绪');
+    expect(zh).toContain('企业信息与工作边界');
     expect(zh).not.toContain('业务目标');
     expect(zh).not.toContain('运行就绪情况');
+    expect(zh).not.toContain('保存配置');
     expect(zh).not.toContain('企业上下文与运行流程');
     expect(zh).toContain('高级：MCP 知识');
     expect(zh).not.toMatch(/role="tab"[^>]*>MCP 知识/);
@@ -53,6 +57,15 @@ describe('SOP graph view', () => {
     const en = renderToStaticMarkup(<SopGraphView graph={{ nodes: [], edges: [] }} />);
     expect(en).toContain('The draft has no nodes yet.');
     expect(en).not.toMatch(/[一-鿿]/);
+  });
+
+  it('does not treat the organization as confirmable until it has loaded and canConfirm', () => {
+    const org = { employees: [], tools: [], sops: [], confirmation: null, changedSinceConfirmation: false, missing: 0, blocked: null, canConfirm: true };
+    expect(orgPublishReady(null, false)).toBe(false);
+    expect(orgPublishReady(null, true)).toBe(false);
+    expect(orgPublishReady({ ...org, canConfirm: false }, true)).toBe(false);
+    expect(orgPublishReady({ ...org, blocked: 'no_employees' }, true)).toBe(false);
+    expect(orgPublishReady(org, true)).toBe(true);
   });
 
   it('maps employee runtime status onto graph availability', () => {

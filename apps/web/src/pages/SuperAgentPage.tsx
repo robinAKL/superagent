@@ -8,7 +8,6 @@ import { graphFromWorkflow, legacyWorkflow, knowledgeImpact, packFromRecommendat
 import { McpKnowledge } from './McpKnowledge';
 import { AnalysisDraftIndex } from './AnalysisDraftIndex';
 import { CompanyContextPanel } from './CompanyContextPanel';
-import { OrganizationPublish } from './OrganizationPublish';
 import { ExecutionsPanel } from './ExecutionsPanel';
 import './SuperAgentPage.css';
 import './EmployeesPage.css';
@@ -215,7 +214,6 @@ export function SuperAgentPage() {
       </div>
       {tab === 'context' ? <>
         <CompanyContextPanel fromOrganization={fromOrganization} />
-        <OrganizationPublish />
         <details className="panel stack agent-mcp-advanced">
           <summary>{t('mcpAdvanced')}</summary>
           {typeof window === 'undefined' ? null : <McpKnowledge />}
