@@ -5,7 +5,12 @@
  * Each test starts from an empty room (test-only reset) and uses its own employee names and user ids.
  */
 import type { APIResponse, Page } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test, expect } from './fixtures.js';
+
+const T21_DIR = resolve(fileURLToPath(new URL('../../../deliverables/v12-compare-t21', import.meta.url)));
 
 let seq = 0;
 const tag = () => `${Date.now().toString(36)}${++seq}`;
@@ -641,5 +646,56 @@ test('qa-outcomes#18 / qa-outcomes#23: a task held for a missing tool resumes th
     status: 'assigned',
     waitingReason: null,
     hold: null,
+  });
+});
+
+test('the conversation pane is wider than the task board at 1440 and 1024; the board stacks below on a phone', async ({ page }) => {
+  await as(page, OWNER);
+  const chat = page.locator('.room-chat');
+  const board = page.locator('.room-tasks');
+  for (const width of [1440, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    const chatBox = await chat.boundingBox();
+    const boardBox = await board.boundingBox();
+    expect(chatBox, `${width} chat`).toBeTruthy();
+    expect(boardBox, `${width} board`).toBeTruthy();
+    expect(chatBox!.width, `${width} conversation vs board`).toBeGreaterThan(boardBox!.width);
+    if (width === 1440) {
+      expect(chatBox!.width / (chatBox!.width + boardBox!.width), '1440 conversation share of the main grid').toBeGreaterThanOrEqual(0.6);
+    }
+    expect(boardBox!.width).toBeGreaterThanOrEqual(320);
+    expect(boardBox!.width).toBeLessThanOrEqual(360);
+    expect(await draft(page).evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(96);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+  await page.setViewportSize({ width: 375, height: 812 });
+  const phoneChat = await chat.boundingBox();
+  const phoneBoard = await board.boundingBox();
+  expect(phoneBoard!.y).toBeGreaterThan((phoneChat!.y + phoneChat!.height) - 8);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+});
+
+test.describe('T-21 screenshots', () => {
+  test.skip(!process.env.T21_SHOTS, 'set T21_SHOTS=1 to capture command-room layout screenshots');
+
+  async function shoot(page: Page, lang: 'zh' | 'en') {
+    mkdirSync(T21_DIR, { recursive: true });
+    await as(page, OWNER);
+    for (const [width, height, tag] of [[1440, 900, '1440'], [1024, 768, '1024'], [375, 812, '375']] as const) {
+      await page.setViewportSize({ width, height });
+      await expect(page.locator('.room-chat')).toBeVisible();
+      await page.screenshot({ path: resolve(T21_DIR, `t21-room-${tag}-${lang}.png`), fullPage: true });
+    }
+  }
+
+  test('zh 1440, 1024 and 375', async ({ page }) => {
+    await shoot(page, 'zh');
+  });
+
+  test.describe('en', () => {
+    test.use({ lang: 'en' });
+    test('en 1440, 1024 and 375', async ({ page }) => {
+      await shoot(page, 'en');
+    });
   });
 });
