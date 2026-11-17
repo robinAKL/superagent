@@ -9,7 +9,7 @@ export function auditSnapshot(state: KnowledgeState): AuditSnapshot {
   for (const c of state.source.connections) add(`connection:${c.id}`, 'connection_changed', [c.status,c.scope,c.confirmedBy], null, { status:c.status,pluginId:c.pluginId });
   for (const [sourceId,c] of Object.entries(state.confirmations)) add(`confirmation:${sourceId}`, 'version_confirmation_changed', c, hash(c.version), { confirmed:true });
   for (const i of state.source.items.filter(i=>i.current)) add(`source:${i.id}`, 'source_changed', [i.status,i.version,i.contentHash,i.acl], hash(i.version), { status:i.status });
-  for (const r of state.analyses) add(`analysis:${r.id}`, 'analysis_changed', [r.status,r.stage,r.error], null, { status:r.status,stage:r.stage });
+  for (const r of state.analyses) add(`analysis:${r.id}`, 'analysis_changed', [r.status,r.stage,r.error], null, { status:r.status,stage:r.stage, ...(r.error && { error:r.error }) });
   for (const j of state.parseJobs) add(`parse:${j.id}`, 'parse_changed', [j.status,j.error], hash(j.version), { status:j.status });
   for (const r of state.recommendations) add(`recommendation:${r.id}`, 'recommendation_changed', [r.name,r.description,r.evidence,r.humanLocked,r.deleted,r.proposedChange], null, { kind:r.kind,humanLocked:r.humanLocked,deleted:r.deleted });
   for (const t of state.queryTemplates) add(`template:${t.id}`, 'query_template_approved', t, hash(t.schemaVersion), { connectionId:t.connectionId });
