@@ -1,10 +1,7 @@
 .knowledge-page { max-width: 1280px; margin: 0 auto; }
 .knowledge-page, .knowledge-page * { box-sizing: border-box; }
 .knowledge-page [hidden] { display: none !important; }
-.knowledge-workspace-nav { display: flex; gap: var(--space-md); margin: var(--space-sm) 0 var(--space-md); border-bottom: 1px solid var(--color-rule); }
-.knowledge-workspace-nav button { min-height: var(--control); padding: 0 var(--space-xs); border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--color-muted); font: inherit; cursor: pointer; }
-.knowledge-workspace-nav button:hover { color: var(--color-ink); }
-.knowledge-workspace-nav button[aria-current="page"] { color: var(--color-accent); border-bottom-color: var(--color-accent); }
+.knowledge-workspace-nav { margin: var(--space-sm) 0 var(--space-md); }
 .knowledge-head .knowledge-quiet { border-color: transparent; background: transparent; color: var(--color-muted); }
 .knowledge-client-config { overflow-wrap: anywhere; }
 .knowledge-client-config summary, .knowledge-run-history summary { width: fit-content; cursor: pointer; color: var(--color-muted); }

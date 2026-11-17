@@ -1152,14 +1152,14 @@ export function KnowledgePage() {
         <p className="knowledge-subtitle">{t(view === 'materials' || view === 'search' || view === 'sources' ? 'subtitleLibrary' : view === 'sop' ? 'subtitleSop' : 'subtitleKnowledge')}</p>
         {overview?.spaceName && overview.spaceName !== DEFAULT_SPACE_NAME ? <p className="knowledge-space-name">{overview.spaceName}</p> : null}
       </div>
-      <div className="knowledge-actions">
+      <div className="page-head-actions knowledge-actions">
         <a className="btn knowledge-quiet" href="#brain">{t('viewAgentContext')}</a>
         <button className="btn knowledge-quiet" type="button" onClick={() => { setAnalysisFeedback(null); void load(); }} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
         <button className="btn" type="button" onClick={() => openView(view === 'sources' ? 'materials' : 'sources')}
           aria-expanded={view === 'sources'} aria-controls="knowledge-sources">{t(view === 'sources' ? 'closeSources' : 'manageSources')}</button>
       </div>
     </header>
-    {overview ? <nav className="knowledge-workspace-nav" aria-label={t('workspaceNav')}>
+    {overview ? <nav className="page-tabs knowledge-workspace-nav" aria-label={t('workspaceNav')}>
       {WORKSPACE_TABS.map(entry => <button key={entry} type="button" aria-current={view === entry || (entry === 'materials' && view === 'search') ? 'page' : undefined}
         onClick={() => openView(entry)}>{t(VIEW_LABELS[entry])}</button>)}
     </nav> : null}

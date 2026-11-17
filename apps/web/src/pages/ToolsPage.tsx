@@ -355,10 +355,10 @@ export function ToolsPage() {
 
   return (
     <>
-      <div className="page-head">
+      <header className="page-head">
         <h1>{t('page.title')}</h1>
         <p>{t('page.subtitle')}</p>
-      </div>
+      </header>
 
       <section className="tool-store-section" aria-label={t('store.title')}>
         <div className="tool-store-head">

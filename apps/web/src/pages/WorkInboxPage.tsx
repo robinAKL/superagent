@@ -225,10 +225,10 @@ export function WorkInboxPage() {
   const groupLabel = (id: Group) => t(id === 'action' ? 'group_action' : id === 'waiting' ? 'group_waiting' : 'group_internal');
   return (
     <section className="exec-inbox" aria-label={t('pageAria')}>
-      <div className="page-head">
+      <header className="page-head">
         <h1 id="page-title">{t('title')}</h1>
         <p>{t('subtitle')}</p>
-      </div>
+      </header>
       <div className="exec-toolbar">
         <label>
           {t('status')}
