@@ -88,7 +88,7 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
 
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (state === 'saving' || state === 'conflict' || !orgGate.loaded || !orgGate.ready || orgGate.busy) return;
+    if (state === 'saving' || state === 'conflict' || !orgGate.loaded || orgGate.busy) return;
     setState('saving');
     setPublished(false);
     try {
@@ -100,8 +100,10 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
       const next = response.body.context;
       setContext(next);
       setFields({ name: next.name, goal: next.goal, boundaries: next.boundaries });
-      const confirmed = await confirmRef.current?.() ?? false;
-      if (!confirmed) { setState('saveError'); return; }
+      if (orgGate.ready) {
+        const confirmed = await confirmRef.current?.() ?? false;
+        if (!confirmed) { setState('saveError'); return; }
+      }
       setPublished(true);
       setState('ready');
     } catch {
@@ -128,7 +130,7 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
           <p className="helper" id="company-context-boundary-hint">{t('boundaryHint')}</p>
           <OrganizationPublish embedded confirmRef={confirmRef} onGate={setOrgGate} />
           {state === 'conflict' || state === 'saveError' ? <p className="warn" role="alert">{t(state)}</p> : null}
-          <button className="btn primary" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !orgGate.loaded || !orgGate.ready || orgGate.busy || !fields.name.trim() || !fields.goal.trim()}>
+          <button className="btn primary" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !orgGate.loaded || orgGate.busy || !fields.name.trim() || !fields.goal.trim()}>
             {state === 'saving' ? t('saving') : t('save')}
           </button>
           {state === 'ready' && published && context && !dirty ? <p className="helper" role="status">{t('saved', { version: context.version })}</p> : null}
