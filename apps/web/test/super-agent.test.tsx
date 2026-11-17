@@ -21,6 +21,7 @@ describe('SOP graph view', () => {
     expect(zh).toContain('企业配置与数字组织');
     expect(zh).toContain('企业流程');
     expect(zh).toContain('数字岗位与工作量');
+    expect(zh).toContain('保存配置');
     expect(zh).toContain('确认并发布配置，生成数字员工');
     expect(zh).toContain('启用前确认');
     expect(zh).toContain('企业知识');
@@ -30,7 +31,6 @@ describe('SOP graph view', () => {
     expect(zh).toContain('企业信息与工作边界');
     expect(zh).not.toContain('业务目标');
     expect(zh).not.toContain('运行就绪情况');
-    expect(zh).not.toContain('保存配置');
     expect(zh).not.toContain('企业上下文与运行流程');
     expect(zh).toContain('高级：MCP 知识');
     expect(zh).not.toMatch(/role="tab"[^>]*>MCP 知识/);
