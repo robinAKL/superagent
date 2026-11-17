@@ -17,7 +17,7 @@ import { publicMcpEndpoint } from './plugins/mcp-public-http.js';
 import { liveMcpSelection, type LiveMcpKnowledge } from './live-mcp.js';
 import { MAX_MCP_ANALYSIS_SOURCES, mcpEvidenceValid, mcpSelectionsCurrent } from './mcp-analysis.js';
 import type { AnalysisGateway } from '../analysis/gateway-model.js';
-import type { OrganizationSink } from '../employees/organization.js';
+import { orgEmployeeId, type OrganizationSink } from '../employees/organization.js';
 import { mergeByOverlap, TEAM_SIZE_MAX, TeamPlanError, validateTeamPlan, type PlanRole, type PlanSourceRole, type TeamPlan } from './team-plan.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
@@ -619,6 +619,7 @@ export class KnowledgeService {
         const result = sink.ensureEmployee({ recId: e.id, name: e.name, duty: e.duty, prompt: e.prompt, owner: ctx.userId, manual: e.origin === 'manual' });
         if (result.created && !org.employees[e.id]) createdEmployees++;
         org.employees[e.id] = { employeeId: result.employeeId, name: e.name, duty: e.duty, prompt: e.prompt };
+        (org.created ??= {})[result.employeeId] = e.name;
       }
       // Roles that left the draft (merged, deleted, replaced by a team plan) leave the confirmed team too. That also
       // covers employees an earlier confirmation created that no record points at any more (e.g. from before roles
@@ -630,11 +631,15 @@ export class KnowledgeService {
         if (sink.retireEmployee?.(done.employeeId) ?? true) { delete org.employees[recId]; retiredEmployees++; }
         else busyEmployees.push(done.name);
       }
+      // Only this tenant's own employees are candidates: those its confirmations recorded, and the ids its own
+      // role drafts map to (covers confirmations from before the record existed). The registry itself is shared.
       const current = new Set(Object.values(org.employees).map(e => e.employeeId));
-      for (const leftover of sink.organizationEmployees?.() ?? []) {
-        if (current.has(leftover.id)) continue;
-        if (sink.retireEmployee?.(leftover.id) ?? false) retiredEmployees++;
-        else busyEmployees.push(leftover.name);
+      const mine = new Map<string, string>(Object.entries(org.created ?? {}));
+      for (const r of s.recommendations) if (r.kind === 'employee') { const id = orgEmployeeId(r.id); if (!mine.has(id)) mine.set(id, r.name); }
+      for (const [id, name] of mine) {
+        if (current.has(id) || !sink.present('employee', id)) { if (!current.has(id)) delete org.created?.[id]; continue; }
+        if (sink.retireEmployee?.(id) ?? false) { retiredEmployees++; delete org.created?.[id]; }
+        else busyEmployees.push(name);
       }
       for (const t of draft.tools) {
         const known = org.tools[t.id];

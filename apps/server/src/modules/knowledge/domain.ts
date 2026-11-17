@@ -40,6 +40,8 @@ export interface Recommendation {
 export interface OrganizationRecord {
   confirmedAt: string; confirmedBy: string; revision: number;
   employees: Record<string, { employeeId: string; name: string; duty: string; prompt: string }>;
+  /** Every employee this tenant's confirmations created, so cleanup only ever touches this tenant's employees. */
+  created?: Record<string, string>;
   tools: Record<string, { toolId: string; name: string; match: 'existing' | 'placeholder'; purpose?: string; consumers?: string[] }>;
 }
 export interface AnalysisRun {
