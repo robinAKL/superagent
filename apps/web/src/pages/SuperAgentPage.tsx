@@ -292,6 +292,8 @@ export function AnalysisResults({ knowledge, retryKnowledge, initialKind, fromOr
       <div className="workflow-actions">
         {route === 'brain' && !initialKind && knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.length
           ? <a href={`#brain?tab=results&type=all${fromOrganization ? '&org=1' : ''}`}>{t('allDrafts')}</a> : null}
+        {knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.some(draft => draft.kind === 'sop')
+          ? <a href={route === 'knowledge' ? '#knowledge?view=sop&sub=candidates' : `#brain?type=sop${fromOrganization ? '&org=1' : ''}`}>{t('viewPrivateWorkflows')}</a> : null}
         {route === 'brain' ? <a href="#knowledge?view=analysis">{t('reviewDrafts')}</a> : null}
       </div>
     </div>

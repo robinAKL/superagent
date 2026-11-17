@@ -25,6 +25,14 @@ const rule = {
 };
 
 async function mockLibrary(page: Page) {
+  await page.route('**/api/v1/sop', async route => {
+    const path = new URL(route.request().url()).pathname.replace(/\/$/, '');
+    if (route.request().method() === 'GET' && path.endsWith('/api/v1/sop')) {
+      await route.fulfill({ json: { sops: [] } });
+      return;
+    }
+    await route.continue();
+  });
   await page.route('**/api/v1/knowledge/recommendations**', async route => {
     if (route.request().method() !== 'GET') return route.continue();
     await route.fulfill({
