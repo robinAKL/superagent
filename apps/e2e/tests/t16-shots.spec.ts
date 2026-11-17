@@ -22,6 +22,7 @@ async function shot(page: Page, name: string, lang: 'zh' | 'en') {
 
 async function fillCompany(page: Page, lang: 'zh' | 'en') {
   await page.goto('/#brain');
+  await expect(page.getByLabel(lang === 'zh' ? '企业名称' : 'Company name')).toBeEnabled();
   if (lang === 'zh') {
     await page.getByLabel('企业名称').fill('测试财务部');
     await page.getByLabel('希望交给数字团队的工作').fill('核对供应商发票并完成付款登记');
@@ -82,11 +83,12 @@ test.describe('T-08 company setup shots', () => {
   });
 });
 
-const ROLE_FILE = [
-  '角色：采购专员；责任：核对采购申请并跟踪供应商。',
-  '角色：财务专员；责任：核对付款金额与票据。',
-  '工具：只读单据查询；职责：按编号查证业务记录。',
-].join('\n');
+const GRAPH_EVIDENCE = [{ sourceId: 's', version: 'v1', start: 0, end: 8, locator: 'policy.md#L4', quote: '审批阈值自 2026-08-01 起生效，2026-10-31 截止。' }];
+const GRAPH_DRAFTS = [
+  { id: 'o1', key: 'order', kind: 'object', name: '订单', description: '客户提交的订单', humanLocked: false, deleted: false, recordedAt: '2026-11-03T00:00:00.000Z', effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31', evidence: GRAPH_EVIDENCE },
+  { id: 'o2', key: 'approval', kind: 'object', name: '主管审批', description: '主管复核', humanLocked: false, deleted: false, recordedAt: '2026-11-03T00:00:00.000Z', effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31', evidence: GRAPH_EVIDENCE },
+  { id: 'r1', key: 'threshold', kind: 'relation', name: '审批阈值', description: '审批阈值自 2026-08-01 起生效。', humanLocked: false, deleted: false, recordedAt: '2026-11-03T00:00:00.000Z', effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31', relation: { from: 'order', to: 'approval', label: '超阈值需' }, evidence: GRAPH_EVIDENCE },
+];
 
 async function seedCompanyGraph(page: Page) {
   await page.request.post('/__test/knowledge/reset', { data: {} });
@@ -96,24 +98,30 @@ async function seedCompanyGraph(page: Page) {
     data: { name: 'ISWELL', goal: '核对供应商发票并完成付款登记', boundaries: '审批人确认后才能登记付款', expectedVersion: version },
   });
   expect(saved.ok(), await saved.text()).toBeTruthy();
-  await page.goto('/#knowledge');
-  await page.getByLabel(/选择文件|Choose files/).setInputFiles({
-    name: '实际上传职责.md', mimeType: 'text/markdown', buffer: Buffer.from(ROLE_FILE),
+  await page.route('**/api/v1/knowledge/overview', async route => {
+    const response = await route.fetch();
+    const json = await response.json() as { recommendations?: unknown[]; analyses?: unknown[] };
+    json.recommendations = GRAPH_DRAFTS;
+    json.analyses = [{ id: 'a1', status: 'completed', createdAt: '2026-11-03T00:00:00.000Z' }];
+    await route.fulfill({ json });
   });
-  await expect(page.getByText('可搜索', { exact: true }).or(page.getByText('Searchable', { exact: true }))).toBeVisible();
-  const started = await page.request.post('/api/v1/knowledge/analyses', { data: {} });
-  expect(started.ok()).toBeTruthy();
-  await page.request.post('/__test/knowledge/advance', { data: {} });
 }
 
 async function openCompanyGraph(page: Page, lang: 'zh' | 'en') {
-  await page.goto('/#knowledge?view=graph&at=2026-11-18&known=2026-11-18');
+  await page.goto('/#knowledge?view=graph&at=2026-09-15&known=2026-11-08');
   const ontology = page.locator('section.onto');
   await expect(ontology).toBeVisible();
-  await ontology.locator('.onto-panel').getByRole('button', { name: /ISWELL/ }).click();
-  await expect(ontology.locator('.onto-panel')).toContainText(lang === 'zh' ? '企业' : 'Enterprise');
-  await expect(ontology.locator('.onto-panel')).toContainText(lang === 'zh' ? '知识截至' : 'Known to the platform by');
-  await expect(ontology.locator('.onto-panel')).toContainText('2026-11-18');
+  await expect(ontology).toContainText('ISWELL');
+  await ontology.locator('.onto-panel').getByRole('button', { name: '订单', exact: true }).or(ontology.locator('.onto-panel').getByRole('button', { name: '订单' })).click();
+  const panel = ontology.locator('.onto-panel');
+  await expect(panel).toContainText(lang === 'zh' ? '业务时间' : 'Business date');
+  await expect(panel).toContainText('2026-08-01');
+  await expect(panel).toContainText('2026-11-03');
+  await expect(panel).toContainText('policy.md#L4');
+  await expect(panel).toContainText('超阈值需');
+  await expect(panel).toContainText('主管审批');
+  await expect(panel).toContainText(lang === 'zh' ? '知识截至' : 'Known to the platform by');
+  await expect(panel).toContainText('2026-11-08');
 }
 
 test.describe('T-09 ontology shots', () => {

@@ -42,6 +42,7 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
 
   await test.step('company context is saved and reloaded from the Super Agent entry point', async () => {
     await page.goto('/#brain');
+    await expect(page.getByLabel('企业名称')).toBeEnabled();
     await page.getByLabel('企业名称').fill('测试财务部');
     await page.getByLabel('希望交给数字团队的工作').fill('核对供应商发票并完成付款登记');
     await page.getByLabel('必须遵守的边界').fill('审批人确认后才能登记付款');
