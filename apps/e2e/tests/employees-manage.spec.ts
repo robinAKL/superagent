@@ -25,7 +25,8 @@ test('the card wall manage button opens a drawer that pauses on the employees AP
   await page.goto('/#employees');
   await expect(page.getByRole('region', { name: '数字员工' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /员工反馈与能力申请/ })).toBeVisible();
-  await page.getByRole('button', { name: '管理', exact: true }).click();
+  const card = page.locator('.emp-card').filter({ hasText: '订单审核员' }).filter({ hasText: '核对信用额度' });
+  await card.getByRole('button', { name: '管理', exact: true }).click();
   const drawer = page.getByRole('dialog', { name: '管理 订单审核员' });
   await expect(drawer).toBeVisible();
   await expect(drawer.getByText('核对信用额度')).toBeVisible();
