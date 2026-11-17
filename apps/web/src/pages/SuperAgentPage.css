@@ -39,10 +39,23 @@ textarea { border-radius: var(--radius-sm); border: 1px solid var(--color-rule);
 .agent-mcp-advanced { margin-top: var(--space-md); }
 .agent-mcp-advanced summary { cursor: pointer; font-weight: 600; }
 .org-publish { margin-top: var(--space-md); }
+.ux-company-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem); gap: var(--space-xl); align-items: start; }
+.ux-setup-guide { padding: 6px 0; min-width: 0; }
+.ux-setup-guide > h2 { font-size: 1.05rem; margin: 0 0 var(--space-sm); }
+.ux-setup-guide > a { display: flex; gap: var(--space-sm); align-items: flex-start; padding: var(--space-md) 0; border-bottom: 1px solid var(--color-soft-rule); color: var(--color-ink); text-decoration: none; }
+.ux-setup-guide strong { display: block; font-size: 14px; font-weight: 500; }
+.ux-setup-guide small { display: block; font-size: 13px; color: var(--color-muted); line-height: 1.75; margin-top: 5px; }
+.ux-setup-guide > p { font-size: 13px; color: var(--color-muted); line-height: 1.85; margin-top: var(--space-md); }
+.ux-role-options { border: 1px solid var(--color-soft-rule); border-radius: var(--radius-sm); padding: var(--space-sm); }
+.ux-role-options summary { cursor: pointer; font-weight: 600; display: flex; flex-wrap: wrap; gap: var(--space-xs); align-items: baseline; }
+.ux-role-options summary span { font-weight: 400; color: var(--color-muted); font-size: 13px; }
 .company-setup { min-width: 0; }
 .company-setup .btn { justify-self: start; }
 .company-setup h3 { margin: 0; font-size: 1rem; }
 .company-setup-ready { display: grid; gap: var(--space-sm); padding-top: var(--space-md); border-top: 1px solid var(--color-soft-rule); }
+@media (max-width: 1050px) {
+  .ux-company-layout { grid-template-columns: minmax(0, 1fr); }
+}
 .agent-readiness { margin: 0; display: grid; gap: var(--space-xs); }
 .agent-readiness > div, .agent-workflow-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2xs) var(--space-sm); }
 .agent-readiness dd { margin: 0; color: var(--color-muted); }

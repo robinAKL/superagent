@@ -23,6 +23,7 @@ const TEXT = {
   en: {
     title: 'Digital roles and workload',
     hint: 'Choose how many digital employees Super Agent should plan, then confirm. Generated roles are not connected until you bind an agent.',
+    adjust: 'Adjust before publish',
     checklist: 'Confirm before enabling',
     checkContext: 'Company context (name and goal) is already saved.',
     checkRoles: 'Role count matches the work we need.',
@@ -38,6 +39,7 @@ const TEXT = {
   zh: {
     title: '数字岗位与工作量',
     hint: '先按人数让超级智能体规划岗位，再确认发布。生成的岗位未绑定 agent，不会显示为在线。',
+    adjust: '发布前可调整',
     checklist: '启用前请确认这三项',
     checkContext: '已保存企业上下文（名称和目标）。',
     checkRoles: '岗位人数与当前工作量匹配。',
@@ -60,7 +62,10 @@ async function call<R>(path: string, init?: RequestInit): Promise<R> {
   return body;
 }
 
-export function OrganizationPublish() {
+export function OrganizationPublish({ embedded, confirmRef }: {
+  embedded?: boolean;
+  confirmRef?: { current: (() => Promise<boolean>) | null };
+}) {
   const t = useT(TEXT);
   const planT = useT(PLAN_TEXT);
   const [org, setOrg] = useState<Organization | null>(null);
@@ -69,7 +74,6 @@ export function OrganizationPublish() {
   const [fallback, setFallback] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [checks, setChecks] = useState({ context: false, roles: false, bind: false });
 
   const load = useCallback(async () => {
     try { setOrg(await call<Organization>('/organization')); }
@@ -90,21 +94,20 @@ export function OrganizationPublish() {
   }
 
   async function confirm() {
-    if (!org || Object.values(checks).some(v => !v)) return;
+    if (!org || !org.canConfirm || org.blocked) return false;
     setBusy(true); setError(null);
     try {
       const result = await call<{ createdEmployees: number; createdTools: number }>('/organization/confirm', { method: 'POST', body: '{}' });
       setNotice(t('published', { e: result.createdEmployees, t: result.createdTools }));
       await load();
-    } catch { setError(t('error_generic')); }
+      return true;
+    } catch { setError(t('error_generic')); return false; }
     finally { setBusy(false); }
   }
+  if (confirmRef) confirmRef.current = () => confirm();
 
   const ready = !!org && org.canConfirm && !org.blocked;
-  const allChecked = checks.context && checks.roles && checks.bind;
-
-  return <section className="panel stack org-publish" aria-labelledby="org-publish-title">
-    <h2 className="h2" id="org-publish-title">{t('title')}</h2>
+  const body = <>
     <p className="helper">{t('hint')}</p>
     {error ? <p className="warn" role="alert">{error}</p> : null}
     {notice ? <p role="status">{notice}</p> : null}
@@ -116,12 +119,19 @@ export function OrganizationPublish() {
         onAdopt={() => void call('/organization/plan/adopt', { method: 'POST', body: JSON.stringify({ planId: org.teamPlan!.id }) }).then(load)}
         onDiscard={() => void call('/organization/plan/discard', { method: 'POST', body: '{}' }).then(() => { setFallback(false); return load(); })} /> : null}
     </> : <a href="#employees">{t('goEmployees')}</a>}
-    <fieldset className="org-picks">
-      <legend>{t('checklist')}</legend>
-      {([['context', 'checkContext'], ['roles', 'checkRoles'], ['bind', 'checkBind']] as const).map(([id, key]) =>
-        <label key={id}><input type="checkbox" checked={checks[id]} onChange={e => setChecks({ ...checks, [id]: e.target.checked })} />{t(key)}</label>)}
-    </fieldset>
-    <button className="btn primary" type="button" disabled={!ready || busy || !allChecked} onClick={() => void confirm()}>
+  </>;
+
+  if (embedded) {
+    return <details className="ux-role-options" open>
+      <summary>{t('title')}<span>{t('adjust')}</span></summary>
+      {body}
+    </details>;
+  }
+
+  return <section className="panel stack org-publish" aria-labelledby="org-publish-title">
+    <h2 className="h2" id="org-publish-title">{t('title')}</h2>
+    {body}
+    <button className="btn primary" type="button" disabled={!ready || busy} onClick={() => void confirm()}>
       {busy ? t('publishing') : t('publish')}
     </button>
   </section>;

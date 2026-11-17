@@ -45,7 +45,7 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
     await page.getByLabel('企业名称').fill('测试财务部');
     await page.getByLabel('希望交给数字团队的工作').fill('核对供应商发票并完成付款登记');
     await page.getByLabel('必须遵守的边界').fill('审批人确认后才能登记付款');
-    await page.getByRole('button', { name: '保存配置' }).click();
+    await page.getByRole('button', { name: '确认并发布配置，生成数字员工' }).click();
     await expect(page.getByRole('status').filter({ hasText: '已保存配置' })).toBeVisible();
     await page.reload();
     await expect(page.getByLabel('希望交给数字团队的工作')).toHaveValue('核对供应商发票并完成付款登记');

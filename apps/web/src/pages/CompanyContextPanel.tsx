@@ -1,6 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useT } from '../i18n';
+import { OrganizationPublish } from './OrganizationPublish';
 
 export interface PublishedWorkflow {
   id: string;
@@ -21,43 +22,44 @@ interface CompanyContext {
 
 const TEXT = {
   en: {
-    title: 'Company setup', name: 'Company name', goal: 'Work to hand to the digital team',
+    title: 'Company information and work boundaries', name: 'Company name', goal: 'Work to hand to the digital team',
     boundaries: 'Boundaries that must be followed', boundaryHint: 'Name the decisions that still need a person, and the limits the digital team must not cross.',
-    save: 'Save configuration', saving: 'Saving…', saved: 'Saved configuration v{version}.',
+    save: 'Confirm and publish configuration, generate digital employees', saving: 'Saving…', saved: 'Saved configuration v{version}.',
     loading: 'Loading company setup…', loadError: 'Could not load the company setup.',
     conflict: 'The configuration changed while you were editing. Reload to see the latest version.',
     saveError: 'Could not save the configuration. Try again.', reload: 'Reload',
-    ready: 'Team and workflow readiness', employees: 'Digital employees', tools: 'Tools',
-    employeeCount: '{ready} online of {total}', toolCount: '{ready} available of {total}',
-    unavailable: 'Unavailable', checking: 'Checking…', published: 'Active workflows',
-    noWorkflows: 'Publish a workflow to make it available in the command room.',
-    configure: 'Open workflow editor', review: 'Review workflow candidates', openRoom: 'Open command room',
+    enable: 'Confirm before enabling', knowledge: 'Enterprise knowledge', knowledgeHint: '{n} confirmed sources; rules stay evidence-backed',
+    knowledgeEmpty: 'Confirm sources so rules have evidence.',
+    flow: 'Business workflows', flowHint: '{name} / v{version}', flowEmpty: 'Publish a company workflow.',
+    employees: 'Digital employees', employeeHint: 'Roles, owners, connections and tools are confirmed separately.',
+    enableNote: 'Publishing generates role drafts. New roles still need a bound agent and tools before they can work.',
+    review: 'Review workflow candidates',
   },
   zh: {
-    title: '企业配置', name: '企业名称', goal: '希望交给数字团队的工作',
+    title: '企业信息与工作边界', name: '企业名称', goal: '希望交给数字团队的工作',
     boundaries: '必须遵守的边界', boundaryHint: '写清哪些事需要人决定，以及数字团队不得越过的限制。',
-    save: '保存配置', saving: '保存中…', saved: '已保存配置 v{version}。',
+    save: '确认并发布配置，生成数字员工', saving: '保存中…', saved: '已保存配置 v{version}。',
     loading: '正在读取企业配置…', loadError: '无法读取企业配置。',
     conflict: '编辑期间配置已更新，请重新读取最新版本。',
     saveError: '无法保存配置，请重试。', reload: '重新读取',
-    ready: '团队与流程就绪', employees: '数字员工', tools: '工具',
-    employeeCount: '在线 {ready} / 共 {total}', toolCount: '可用 {ready} / 共 {total}',
-    unavailable: '暂不可用', checking: '正在核对…', published: '生效流程',
-    noWorkflows: '流程发布生效后，指挥室即可启动。',
-    configure: '打开流程编辑器', review: '审阅候选流程', openRoom: '进入指挥室',
+    enable: '启用前确认', knowledge: '企业知识', knowledgeHint: '{n}个来源已确认，规则有据可查',
+    knowledgeEmpty: '先确认资料来源，规则才有依据。',
+    flow: '业务流程', flowHint: '{name} / v{version}', flowEmpty: '先发布一条企业流程。',
+    employees: '数字员工', employeeHint: '岗位、负责人、连接和工具分别确认',
+    enableNote: '发布企业配置会生成岗位建议。新岗位仍需人工绑定 Agent、配置工具，才能开始工作。',
+    review: '审阅候选流程',
   },
 };
 const EMPTY = { name: '', goal: '', boundaries: '' };
 const TIMEOUT = 12_000;
-type Readiness = { ready: number; total: number } | null;
 
 export function CompanyContextPanel({ fromOrganization }: { fromOrganization: boolean }) {
   const t = useT(TEXT);
+  const confirmRef = useRef<(() => Promise<boolean>) | null>(null);
   const [context, setContext] = useState<CompanyContext | null>();
   const [fields, setFields] = useState(EMPTY);
   const [workflows, setWorkflows] = useState<PublishedWorkflow[] | null>();
-  const [team, setTeam] = useState<Readiness>();
-  const [tools, setTools] = useState<Readiness>();
+  const [knowledgeCount, setKnowledgeCount] = useState<number | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<'loading' | 'ready' | 'error' | 'saving' | 'conflict' | 'saveError'>('loading');
 
@@ -75,14 +77,10 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
     void api<{ workflows: PublishedWorkflow[] }>('/api/v1/sop/published', { signal }).then(({ status, body }) => {
       if (!controller.signal.aborted) setWorkflows(status === 200 && Array.isArray(body.workflows) ? body.workflows : null);
     }).catch(() => { if (!controller.signal.aborted) setWorkflows(null); });
-    void api<{ status: string }[]>('/api/v1/employees/', { signal }).then(({ status, body }) => {
-      if (!controller.signal.aborted) setTeam(status === 200 && Array.isArray(body)
-        ? { total: body.length, ready: body.filter(row => row.status === 'online' || row.status === 'busy').length } : null);
-    }).catch(() => { if (!controller.signal.aborted) setTeam(null); });
-    void api<{ stage: string; state: string }[]>('/api/v1/tools/', { signal }).then(({ status, body }) => {
-      if (!controller.signal.aborted) setTools(status === 200 && Array.isArray(body)
-        ? { total: body.length, ready: body.filter(row => row.stage === 'available' && row.state === 'active').length } : null);
-    }).catch(() => { if (!controller.signal.aborted) setTools(null); });
+    void api<{ items: { confirmed: boolean }[] }>('/api/v1/knowledge/overview', { signal }).then(({ status, body }) => {
+      if (!controller.signal.aborted) setKnowledgeCount(status === 200 && Array.isArray(body.items)
+        ? body.items.filter(item => item.confirmed).length : null);
+    }).catch(() => { if (!controller.signal.aborted) setKnowledgeCount(null); });
     return () => controller.abort();
   }, [attempt]);
 
@@ -100,6 +98,7 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
       setContext(next);
       setFields({ name: next.name, goal: next.goal, boundaries: next.boundaries });
       setState('ready');
+      await confirmRef.current?.();
     } catch {
       setState('saveError');
     }
@@ -109,38 +108,35 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
     const field = key as keyof typeof EMPTY;
     return fields[field] !== (context?.[field] ?? '');
   });
-  return <section className="panel stack company-setup" aria-labelledby="company-context-heading">
-    <h2 className="h2" id="company-context-heading">{t('title')}</h2>
-    {state === 'loading' ? <p className="helper" role="status">{t('loading')}</p> : state === 'error' ?
-      <p className="warn" role="alert">{t('loadError')}</p> : <form className="stack" onSubmit={save}>
-        <label className="field"><span>{t('name')}</span><input required maxLength={160} disabled={state === 'saving'} value={fields.name}
-          onChange={event => setFields({ ...fields, name: event.target.value })} /></label>
-        <label className="field"><span>{t('goal')}</span><textarea required maxLength={4000} rows={3} disabled={state === 'saving'} value={fields.goal}
-          onChange={event => setFields({ ...fields, goal: event.target.value })} /></label>
-        <label className="field"><span>{t('boundaries')}</span><textarea maxLength={4000} rows={3} disabled={state === 'saving'} value={fields.boundaries}
-          aria-describedby="company-context-boundary-hint" onChange={event => setFields({ ...fields, boundaries: event.target.value })} /></label>
-        <p className="helper" id="company-context-boundary-hint">{t('boundaryHint')}</p>
-        {state === 'conflict' || state === 'saveError' ? <p className="warn" role="alert">{t(state)}</p> : null}
-        <button className="btn primary" disabled={!dirty || state === 'saving' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()}>
-          {state === 'saving' ? t('saving') : t('save')}
-        </button>
-        {state === 'ready' && context && !dirty ? <p className="helper" role="status">{t('saved', { version: context.version })}</p> : null}
-      </form>}
-    {state === 'error' || state === 'conflict' ? <button type="button" className="btn" onClick={() => setAttempt(value => value + 1)}>{t('reload')}</button> : null}
-    <div className="company-setup-ready">
-      <h3 id="workflow-readiness-heading">{t('ready')}</h3>
-      <dl className="agent-readiness">
-        <div><dt><a href="#employees">{t('employees')}</a></dt><dd>{team ? t('employeeCount', team) : t(team === null ? 'unavailable' : 'checking')}</dd></div>
-        <div><dt><a href="#tools">{t('tools')}</a></dt><dd>{tools ? t('toolCount', tools) : t(tools === null ? 'unavailable' : 'checking')}</dd></div>
-      </dl>
-      <h3>{t('published')}</h3>
-      {workflows?.length ? <ul className="agent-workflow-list">
-        {workflows.map(workflow => <li key={workflow.id}>
-          <a href={`#brain?tab=sop&sop=${encodeURIComponent(workflow.sopId)}`}>{workflow.title}</a><span>v{workflow.version}</span>
-        </li>)}
-      </ul> : <p className="helper">{t(workflows === undefined ? 'checking' : workflows === null ? 'unavailable' : 'noWorkflows')}</p>}
+  const flow = workflows?.[0];
+  return <div className="ux-company-layout">
+    <section className="panel stack company-setup" aria-labelledby="company-context-heading">
+      <h2 className="h2" id="company-context-heading">{t('title')}</h2>
+      {state === 'error' ? <p className="warn" role="alert">{t('loadError')}</p> : <form className="stack" onSubmit={save}>
+          {state === 'loading' ? <p className="helper" role="status">{t('loading')}</p> : null}
+          <label className="field"><span>{t('name')}</span><input required maxLength={160} disabled={state === 'saving' || state === 'loading'} value={fields.name}
+            onChange={event => setFields({ ...fields, name: event.target.value })} /></label>
+          <label className="field"><span>{t('goal')}</span><textarea required maxLength={4000} rows={3} disabled={state === 'saving' || state === 'loading'} value={fields.goal}
+            onChange={event => setFields({ ...fields, goal: event.target.value })} /></label>
+          <label className="field"><span>{t('boundaries')}</span><textarea maxLength={4000} rows={3} disabled={state === 'saving' || state === 'loading'} value={fields.boundaries}
+            aria-describedby="company-context-boundary-hint" onChange={event => setFields({ ...fields, boundaries: event.target.value })} /></label>
+          <p className="helper" id="company-context-boundary-hint">{t('boundaryHint')}</p>
+          <OrganizationPublish embedded confirmRef={confirmRef} />
+          {state === 'conflict' || state === 'saveError' ? <p className="warn" role="alert">{t(state)}</p> : null}
+          <button className="btn primary" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()}>
+            {state === 'saving' ? t('saving') : t('save')}
+          </button>
+          {state === 'ready' && context && !dirty ? <p className="helper" role="status">{t('saved', { version: context.version })}</p> : null}
+        </form>}
+      {state === 'error' || state === 'conflict' ? <button type="button" className="btn" onClick={() => setAttempt(value => value + 1)}>{t('reload')}</button> : null}
       {fromOrganization ? <a className="btn" href="#brain?tab=results&org=1">{t('review')}</a> : null}
-      <a href={workflows?.length ? '#room' : '#brain?tab=sop'}>{t(workflows?.length ? 'openRoom' : 'configure')}</a>
-    </div>
-  </section>;
+    </section>
+    <aside className="ux-setup-guide">
+      <h2>{t('enable')}</h2>
+      <a href="#knowledge"><span><strong>{t('knowledge')}</strong><small>{knowledgeCount ? t('knowledgeHint', { n: knowledgeCount }) : t('knowledgeEmpty')}</small></span></a>
+      <a href="#brain?tab=sop"><span><strong>{t('flow')}</strong><small>{flow ? t('flowHint', { name: flow.title, version: flow.version }) : t('flowEmpty')}</small></span></a>
+      <a href="#employees"><span><strong>{t('employees')}</strong><small>{t('employeeHint')}</small></span></a>
+      <p>{t('enableNote')}</p>
+    </aside>
+  </div>;
 }
