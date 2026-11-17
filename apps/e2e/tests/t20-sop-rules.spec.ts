@@ -7,15 +7,19 @@ import { fileURLToPath } from 'node:url';
 const DIR = resolve(fileURLToPath(new URL('../../../deliverables/v12-compare-t20', import.meta.url)));
 mkdirSync(DIR, { recursive: true });
 
-const evidence = [{ sourceId: 's1', version: 'v1', start: 0, end: 8, locator: 'a.md#L1', quote: '客户下单后审核并结算。' }];
+const evidence = [
+  { sourceId: 's1', version: 'v1', start: 0, end: 8, locator: 'order.md#L1', quote: '客户提交订单后进入审核。' },
+  { sourceId: 's2', version: 'v1', start: 0, end: 8, locator: 'credit.md#L1', quote: '审核额度后再登记结算。' },
+  { sourceId: 's3', version: 'v1', start: 0, end: 8, locator: 'settle.md#L1', quote: '登记结算完成该笔订单。' },
+];
 const sop = {
   id: 'sop1', key: 'order-settle', kind: 'sop', name: '订单到结算', description: '从三份资料合成的端到端流程。',
   humanLocked: false, deleted: false, recordedAt: '2026-11-18T00:00:00.000Z', evidence,
   workflow: {
     steps: [
       { key: 't', kind: 'trigger', label: '客户提交订单', after: [], citations: [1] },
-      { key: 'a', kind: 'employee', label: '审核额度', after: ['t'], citations: [1] },
-      { key: 'b', kind: 'tool', label: '登记结算', after: ['a'], citations: [1] },
+      { key: 'a', kind: 'employee', label: '审核额度', after: ['t'], citations: [2] },
+      { key: 'b', kind: 'tool', label: '登记结算', after: ['a'], citations: [3] },
     ],
   },
 };
