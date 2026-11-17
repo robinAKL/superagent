@@ -24,10 +24,13 @@ const TEXT = {
   en: {
     title: 'Company information and work boundaries', name: 'Company name', goal: 'Work to hand to the digital team',
     boundaries: 'Boundaries that must be followed', boundaryHint: 'Name the decisions that still need a person, and the limits the digital team must not cross.',
-    save: 'Confirm and publish configuration, generate digital employees', saving: 'Saving…', saved: 'Saved configuration v{version}.',
+    saveDraft: 'Save configuration', save: 'Confirm and publish configuration, generate digital employees',
+    saving: 'Saving…', publishing: 'Publishing…', saved: 'Saved configuration v{version}.',
     loading: 'Loading company setup…', loadError: 'Could not load the company setup.',
     conflict: 'The configuration changed while you were editing. Reload to see the latest version.',
-    saveError: 'Could not save the configuration. Try again.', reload: 'Reload',
+    saveError: 'Could not save the configuration. Try again.',
+    publishError: 'Could not generate digital employees. This action is not shown as saved.',
+    reload: 'Reload',
     enable: 'Confirm before enabling', knowledge: 'Enterprise knowledge', knowledgeHint: '{n} confirmed sources; rules stay evidence-backed',
     knowledgeEmpty: 'Confirm sources so rules have evidence.',
     flow: 'Business workflows', flowHint: '{name} / v{version}', flowEmpty: 'Publish a company workflow.',
@@ -38,10 +41,13 @@ const TEXT = {
   zh: {
     title: '企业信息与工作边界', name: '企业名称', goal: '希望交给数字团队的工作',
     boundaries: '必须遵守的边界', boundaryHint: '写清哪些事需要人决定，以及数字团队不得越过的限制。',
-    save: '确认并发布配置，生成数字员工', saving: '保存中…', saved: '已保存配置 v{version}。',
+    saveDraft: '保存配置', save: '确认并发布配置，生成数字员工',
+    saving: '保存中…', publishing: '正在发布…', saved: '已保存配置 v{version}。',
     loading: '正在读取企业配置…', loadError: '无法读取企业配置。',
     conflict: '编辑期间配置已更新，请重新读取最新版本。',
-    saveError: '无法保存配置，请重试。', reload: '重新读取',
+    saveError: '无法保存配置，请重试。',
+    publishError: '无法生成数字员工。这次操作不会显示为已保存配置。',
+    reload: '重新读取',
     enable: '启用前确认', knowledge: '企业知识', knowledgeHint: '{n}个来源已确认，规则有据可查',
     knowledgeEmpty: '先确认资料来源，规则才有依据。',
     flow: '业务流程', flowHint: '{name} / v{version}', flowEmpty: '先发布一条企业流程。',
@@ -63,7 +69,8 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
   const [workflows, setWorkflows] = useState<PublishedWorkflow[] | null>();
   const [knowledgeCount, setKnowledgeCount] = useState<number | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [state, setState] = useState<'loading' | 'ready' | 'error' | 'saving' | 'conflict' | 'saveError'>('loading');
+  const [state, setState] = useState<'loading' | 'ready' | 'error' | 'saving' | 'conflict' | 'saveError' | 'publishError'>('loading');
+  const [savingKind, setSavingKind] = useState<'draft' | 'publish' | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -86,28 +93,50 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
     return () => controller.abort();
   }, [attempt]);
 
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    if (state === 'saving' || state === 'conflict' || !orgGate.loaded || orgGate.busy) return;
+  async function persistContext(): Promise<CompanyContext | null> {
+    const response = await api<{ context: CompanyContext }>('/api/v1/sop/company-context', {
+      method: 'PUT', body: JSON.stringify({ ...fields, expectedVersion: context?.version ?? 0 }),
+    });
+    if (response.status === 409) { setState('conflict'); return null; }
+    if (response.status !== 200 || !response.body.context) { setState('saveError'); return null; }
+    const next = response.body.context;
+    setContext(next);
+    setFields({ name: next.name, goal: next.goal, boundaries: next.boundaries });
+    return next;
+  }
+
+  async function saveDraft() {
+    if (state === 'saving' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()) return;
+    setSavingKind('draft');
     setState('saving');
     setPublished(false);
     try {
-      const response = await api<{ context: CompanyContext }>('/api/v1/sop/company-context', {
-        method: 'PUT', body: JSON.stringify({ ...fields, expectedVersion: context?.version ?? 0 }),
-      });
-      if (response.status === 409) { setState('conflict'); return; }
-      if (response.status !== 200 || !response.body.context) { setState('saveError'); return; }
-      const next = response.body.context;
-      setContext(next);
-      setFields({ name: next.name, goal: next.goal, boundaries: next.boundaries });
-      if (orgGate.ready) {
-        const confirmed = await confirmRef.current?.() ?? false;
-        if (!confirmed) { setState('saveError'); return; }
-      }
+      if (!(await persistContext())) return;
       setPublished(true);
       setState('ready');
     } catch {
       setState('saveError');
+    } finally {
+      setSavingKind(null);
+    }
+  }
+
+  async function publish(event: FormEvent) {
+    event.preventDefault();
+    if (state === 'saving' || state === 'conflict' || !orgGate.loaded || orgGate.busy || !orgGate.ready) return;
+    setSavingKind('publish');
+    setState('saving');
+    setPublished(false);
+    try {
+      if (!(await persistContext())) return;
+      const confirmed = await confirmRef.current?.() ?? false;
+      if (!confirmed) { setState('publishError'); return; }
+      setPublished(true);
+      setState('ready');
+    } catch {
+      setState('saveError');
+    } finally {
+      setSavingKind(null);
     }
   }
 
@@ -119,7 +148,7 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
   return <div className="ux-company-layout">
     <section className="panel stack company-setup" aria-labelledby="company-context-heading">
       <h2 className="h2" id="company-context-heading">{t('title')}</h2>
-      {state === 'error' ? <p className="warn" role="alert">{t('loadError')}</p> : <form className="stack" onSubmit={save}>
+      {state === 'error' ? <p className="warn" role="alert">{t('loadError')}</p> : <form className="stack" onSubmit={event => void publish(event)}>
           {state === 'loading' ? <p className="helper" role="status">{t('loading')}</p> : null}
           <label className="field"><span>{t('name')}</span><input required maxLength={160} disabled={state === 'saving' || state === 'loading'} value={fields.name}
             onChange={event => setFields({ ...fields, name: event.target.value })} /></label>
@@ -129,10 +158,16 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
             aria-describedby="company-context-boundary-hint" onChange={event => setFields({ ...fields, boundaries: event.target.value })} /></label>
           <p className="helper" id="company-context-boundary-hint">{t('boundaryHint')}</p>
           <OrganizationPublish embedded confirmRef={confirmRef} onGate={setOrgGate} />
-          {state === 'conflict' || state === 'saveError' ? <p className="warn" role="alert">{t(state)}</p> : null}
-          <button className="btn primary" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !orgGate.loaded || orgGate.busy || !fields.name.trim() || !fields.goal.trim()}>
-            {state === 'saving' ? t('saving') : t('save')}
-          </button>
+          {state === 'conflict' || state === 'saveError' || state === 'publishError' ? <p className="warn" role="alert">{t(state)}</p> : null}
+          <div className="org-row">
+            <button type="button" className="btn" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()}
+              onClick={() => void saveDraft()}>
+              {savingKind === 'draft' ? t('saving') : t('saveDraft')}
+            </button>
+            <button className="btn primary" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !orgGate.loaded || orgGate.busy || !orgGate.ready || !fields.name.trim() || !fields.goal.trim()}>
+              {savingKind === 'publish' ? t('publishing') : t('save')}
+            </button>
+          </div>
           {state === 'ready' && published && context && !dirty ? <p className="helper" role="status">{t('saved', { version: context.version })}</p> : null}
         </form>}
       {state === 'error' || state === 'conflict' ? <button type="button" className="btn" onClick={() => setAttempt(value => value + 1)}>{t('reload')}</button> : null}
