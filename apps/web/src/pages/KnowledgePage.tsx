@@ -1359,7 +1359,8 @@ export function KnowledgePage() {
 
       {view === 'graph' ? <section className="panel knowledge-section knowledge-graph-tab" aria-labelledby="knowledge-graph-heading">
         <div className="knowledge-section-head"><div><h2 id="knowledge-graph-heading">{t('workspaceGraph')}</h2><p className="helper">{t('graphIntro')}</p></div></div>
-        <OntologyGraphView time={time} shared={timedDrafts.filter(draft => !('privateMcp' in draft) && !draft.stale && draft.evidence.length > 0)}
+        <OntologyGraphView time={time} companyName={overview?.spaceName && overview.spaceName !== DEFAULT_SPACE_NAME ? overview.spaceName : undefined}
+          shared={timedDrafts.filter(draft => !('privateMcp' in draft) && !draft.stale && draft.evidence.length > 0)}
           personal={timedDrafts.filter(draft => 'privateMcp' in draft && !draft.stale && draft.evidence.length > 0)} />
       </section> : null}
 

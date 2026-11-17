@@ -45,6 +45,21 @@ describe('ontology graph model', () => {
   it('labels a rule-like object as a rule node', () => {
     expect(nodeTypeOf({ id: 'p', key: 'p', kind: 'object', name: '审批阈值', description: '超过 5 万必须审批', evidence: [] })).toBe('rule');
   });
+
+  it('places a real company node from the knowledge space name, not an invented type', () => {
+    const { nodes } = buildOntologyGraph(drafts, 'ISWELL');
+    const company = nodes.find(n => n.type === 'company');
+    expect(company?.name).toBe('ISWELL');
+    expect(nodeTypeOf({ id: 'c', key: 'company', kind: 'company', name: 'ISWELL', description: '', evidence: [] })).toBe('company');
+  });
+
+  it('keeps assertion recordedAt and effective dates on the node instead of evidence retrievedAt', () => {
+    const d = { ...object('order', '订单'), recordedAt: '2026-11-01T12:00:00Z', effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31' };
+    const node = buildOntologyGraph([d]).nodes.find(n => n.key === 'order')!;
+    expect(node.draft.recordedAt).toBe('2026-11-01T12:00:00Z');
+    expect(node.draft.effectiveFrom).toBe('2026-08-01');
+    expect(node.draft.effectiveTo).toBe('2026-10-31');
+  });
 });
 
 describe('ontology graph view', () => {
