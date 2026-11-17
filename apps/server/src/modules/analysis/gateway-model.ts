@@ -39,7 +39,11 @@ export function keepEndToEndSops(drafts: unknown): unknown {
     return Array.isArray(workflow?.steps) ? workflow.steps.length : 0;
   };
   const keep = records
-    .filter(d => d.kind === 'sop' && stepCount(d) >= 3)
+    .filter(d => {
+      if (d.kind !== 'sop' || stepCount(d) < 3) return false;
+      const first = (d.workflow as { steps: { kind?: string }[] }).steps[0];
+      return first?.kind === 'trigger';
+    })
     .sort((a, b) => stepCount(b) - stepCount(a))
     .slice(0, MAX_SOP_DRAFTS);
   const keepSet = new Set(keep);
@@ -47,7 +51,7 @@ export function keepEndToEndSops(drafts: unknown): unknown {
   return records.map(d => {
     if (d.kind === 'sop' && !keepSet.has(d)) {
       const { workflow: _workflow, ...rest } = d;
-      return { ...rest, kind: 'object' };
+      return { ...rest, kind: 'object', ruleLike: true };
     }
     if (d.kind === 'employee' && Array.isArray(d.sops)) {
       return { ...d, sops: d.sops.filter(key => typeof key === 'string' && sopKeys.has(key)) };

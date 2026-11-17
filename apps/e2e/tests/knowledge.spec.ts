@@ -190,8 +190,8 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await privateDrafts.getByText('查看来源依据', { exact: true }).last().click();
   await expect(privateDrafts.getByText('退货手册 MCP / handbook://procedures/returns', { exact: true }).last()).toBeVisible();
   await page.getByRole('tab', { name: '企业流程', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('无法读取流程列表');
-  await expect(page.getByRole('region', { name: '流程包' }).getByText('退货审核流程')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
+  await expect(page.getByRole('group', { name: '流程图', exact: true })).toBeVisible();
   await page.getByRole('link', { name: '查看我的 MCP 流程草案', exact: true }).click();
   await expect(privateDrafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
   await page.goto('/#brain?tab=ontology');
@@ -406,6 +406,7 @@ test('[qa-database-knowledge#38] No browser errors or real SQL execution', async
 });
 
 test('shrinking a team of 8 to 2 and confirming leaves exactly 2 employees on the wall and in the command room; an unadopted plan is called out first', async ({ page }) => {
+  await response(page.request.post('/__test/knowledge/reset', { data: {} }));
   const EIGHT = ['采购专员', '财务专员', '仓储专员', '业务主管', '客服专员', '质检专员', '物流专员', '合同专员']
     .map((name, i) => `角色：${name}；责任：负责第${i + 1}类业务的核对与登记。`).concat('工具：只读单据查询；职责：按编号查证业务记录。').join(String.fromCharCode(10));
   await localFile(page, true, EIGHT); await analyse(page);
@@ -439,6 +440,7 @@ test('shrinking a team of 8 to 2 and confirming leaves exactly 2 employees on th
 });
 
 test('shrinking a confirmed team of 12 to 1 on adopt leaves one employee on the wall, registry and command room', async ({ page }) => {
+  await response(page.request.post('/__test/knowledge/reset', { data: {} }));
   const TWELVE = ['采购专员', '财务专员', '仓储专员', '业务主管', '客服专员', '质检专员', '物流专员', '合同专员', '订单专员', '信用专员', '出纳专员', '复核专员']
     .map((name, i) => `角色：${name}；责任：负责第${i + 1}类业务的核对与登记。`).concat('工具：只读单据查询；职责：按编号查证业务记录。').join(String.fromCharCode(10));
   await localFile(page, true, TWELVE); await analyse(page);

@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import type { UserContext } from '@superagent/shared';
+import { emptyState, mergeRecommendations, type Evidence } from '../src/modules/knowledge/domain.js';
 import { keepEndToEndSops, recommendDraftSystemPrompt } from '../src/modules/analysis/gateway-model.js';
 
 const steps = (n: number) => Array.from({ length: n }, (_, i) => ({ key: `s${i}`, kind: i ? 'employee' : 'trigger', label: `step ${i}` }));
@@ -29,5 +31,27 @@ describe('end-to-end SOP drafts vs knowledge rules', () => {
     expect(objects.map(d => d.key).sort()).toEqual(['doc', 'e2e-d', 'rule']);
     expect(objects.every(d => d.workflow === undefined)).toBe(true);
     expect(out.find(d => d.key === 'role')).toMatchObject({ sops: ['e2e'] });
+    expect(objects.every(d => d.ruleLike === true)).toBe(true);
+  });
+
+  it('does not keep a long SOP whose first step is not a trigger', () => {
+    const drafts = [{
+      key: 'no-trigger', kind: 'sop', name: '很长但没有触发', description: '规则堆砌', evidence: [1],
+      workflow: { steps: Array.from({ length: 5 }, (_, i) => ({ key: `s${i}`, kind: 'employee', label: `step ${i}` })) },
+    }];
+    const out = keepEndToEndSops(drafts) as Record<string, unknown>[];
+    expect(out).toEqual([expect.objectContaining({ key: 'no-trigger', kind: 'object', ruleLike: true })]);
+  });
+
+  it('marks inferred fragment SOPs deleted when a later analysis no longer proposes them', () => {
+    const owner: UserContext = { tenantId: 't', userId: 'alice', roles: ['owner'], projectScopes: ['p'] };
+    const e: Evidence = { sourceId: 's', version: 'v1', start: 0, end: 4, locator: 'a.md#L1', quote: 'quote' };
+    const pass = { mcpScope: 'test', mcpRunId: 'run', validEvidence: () => true };
+    const s = emptyState();
+    mergeRecommendations(s, owner, [{ key: 'frag', kind: 'sop', name: 'CRM操作指南', description: '单文档', evidence: [e] }], pass);
+    expect(s.recommendations.filter(r => r.kind === 'sop' && !r.deleted)).toHaveLength(1);
+    mergeRecommendations(s, owner, [{ key: 'e2e', kind: 'sop', name: '订单到结算', description: '跨文档', evidence: [e] }], pass);
+    expect(s.recommendations.find(r => r.key === 'frag')?.deleted).toBe(true);
+    expect(s.recommendations.find(r => r.key === 'e2e' && r.kind === 'sop' && !r.deleted)).toBeTruthy();
   });
 });

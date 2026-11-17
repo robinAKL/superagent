@@ -150,6 +150,7 @@ export function createKnowledgeFixture(): { deps: KnowledgeDeps; attach(app: Fas
       { id: MAIL_RESOURCE_ID, name: '财务收件箱（合成测试）', pluginId: 'email', scope: { mailbox: 'finance@synthetic.invalid', folder: 'Inbox', receivedSince: '2026-01-01T00:00:00Z' }, audience: [KNOWLEDGE_OWNER], projectIds: ['P-1'] },
       { id: SHAREPOINT_RESOURCE_ID, name: '批准的职责资料库（合成测试）', pluginId: 'sharepoint', scope: { driveId: 'synthetic-approved-drive', folderPath: '/approved' }, audience: [KNOWLEDGE_OWNER], projectIds: ['P-1'] },
     ];
+    for (const employee of employeesState.current.list().filter(row => row.id.startsWith('emp-org-'))) employeesState.current.remove(employee.id);
   }
   reset();
   return { deps, async attach(app) {

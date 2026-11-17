@@ -21,6 +21,7 @@ describe('knowledge lenses', () => {
     // A role is a role, even when its duty says "must".
     expect(dimensionsOf(role)).toEqual(['role']);
     expect(dimensionsOf({ kind: 'sop', name: '订单审核流程', description: '收到订单后核对' })).toEqual(['condition', 'process']);
+    expect(dimensionsOf({ kind: 'object', name: '超额需审批', description: '金额超过 5 万必须主管审批', ruleLike: true })).toEqual(['fact', 'rule', 'term']);
   });
 
   it('reads both dates from the URL and falls back to today', () => {

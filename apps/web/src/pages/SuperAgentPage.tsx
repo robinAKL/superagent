@@ -219,7 +219,9 @@ export function SuperAgentPage() {
           {typeof window === 'undefined' ? null : <McpKnowledge />}
         </details>
       </> :
-        tab === 'sop' ? <SopWorkspace key={`${workflowId}|${candidate}`} initialSop={workflowId} candidate={candidate} knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
+        tab === 'sop' ? (!workflowId && !candidate
+          ? <AnalysisResults knowledge={knowledge} retryKnowledge={retryKnowledge} initialKind="" fromOrganization={fromOrganization} />
+          : <SopWorkspace key={`${workflowId}|${candidate}`} initialSop={workflowId} candidate={candidate} knowledge={knowledge} retryKnowledge={retryKnowledge} />) :
         tab === 'ontology' ? <OntologyView knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
         tab === 'results' ? <AnalysisResults key={draftType} knowledge={knowledge} retryKnowledge={retryKnowledge} initialKind={draftType} fromOrganization={fromOrganization} /> : <McpKnowledge />}
     </>
