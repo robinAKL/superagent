@@ -9,7 +9,7 @@ describe('sopTabView', () => {
   it('waits until both counts are known instead of opening an empty editor', () => {
     expect(sopTabView(loading, loading, 'auto')).toEqual({ waiting: true, empty: false, sub: 'auto' });
     expect(sopTabView(n(0), loading, 'auto')).toEqual({ waiting: true, empty: false, sub: 'auto' });
-    expect(sopTabView(loading, n(1), 'auto')).toEqual({ waiting: false, empty: false, sub: 'candidates' });
+    expect(sopTabView(loading, n(1), 'auto')).toEqual({ waiting: true, empty: false, sub: 'auto' });
   });
 
   it('opens extracted SOP candidates when nothing is saved yet', () => {
