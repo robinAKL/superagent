@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { expect, it } from 'vitest';
-import { claimSopEvent, loadPublishedVersion, loadSopSnapshot, saveSopSnapshot } from './pg-sop.js';
-import { SopRuntime, type SopDefinition } from './sop.js';
+import { claimSopEvent, countRunningSopInstances, loadPublishedVersion, loadSopSnapshot, saveSopSnapshot } from './pg-sop.js';
+import { SopRuntime, sopEventKey, type SopDefinition } from './sop.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 const live = databaseUrl ? it : it.skip;
@@ -91,6 +91,20 @@ live('a second process reads the published SOP and cannot claim the same event',
     expect(await claimSopEvent(reader, { tenantId: 'tenant-a', source: 'manual', eventId: 'mail-1', sopId: 'inquiry' })).toBe(false);
     expect(await claimSopEvent(reader, { tenantId: 'tenant-a', source: 'mail', eventId: 'mail-2', sopId: 'inquiry' })).toBe(true);
     expect(await claimSopEvent(reader, { tenantId: 'tenant-a', source: 'mail', eventId: 'mail-2', sopId: 'inquiry' })).toBe(false);
+
+    const command = { tenantId: 'tenant-a', source: 'command', eventId: 'request-3', sopId: 'inquiry' };
+    expect(await claimSopEvent(writer, command)).toBe(true);
+    await writer.query(`
+      INSERT INTO sop_instances (id, tenant_id, sop_id, sop_version_id, version_number, event_key, status)
+      VALUES ('cmd_3', $1, $2, $3, $4, $5, 'running')
+    `, [command.tenantId, command.sopId, version.id, version.number,
+      sopEventKey(command.tenantId, command.source, command.eventId, command.sopId)]);
+    const cachedSnapshot = await loadSopSnapshot(reader);
+    expect((await countRunningSopInstances(reader, 'inquiry', 'tenant-a')).get(version.id)).toBe(2);
+    expect((await countRunningSopInstances(reader, 'inquiry', 'tenant-b')).size).toBe(0);
+    await writer.query("UPDATE sop_instances SET status = 'completed' WHERE id = 'cmd_3'", []);
+    await saveSopSnapshot(reader, cachedSnapshot);
+    expect((await countRunningSopInstances(reader, 'inquiry', 'tenant-a')).get(version.id)).toBe(1);
   } finally {
     await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     admin.release();

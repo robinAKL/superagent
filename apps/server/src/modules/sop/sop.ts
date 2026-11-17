@@ -84,6 +84,7 @@ export interface SopDefinition {
   requiredFields: string[];
   threshold?: { field: string; max: number };
   employeeStatus: 'active' | 'paused' | 'offline';
+  workflow?: { title: string; completion: string };
   /** Optional picture of the flow. Publish gates do not walk it yet. */
   graph?: SopGraph;
 }
@@ -292,6 +293,12 @@ export class SopRuntime {
       .map((version) => ({ ...version, runningInstances: this.runningInstances(version.id) }));
   }
 
+  activePublished(sopId: string, at = Date.now()): SopVersion | undefined {
+    const active = this.versions.filter(version => version.sopId === sopId && version.status === 'published' &&
+      (!version.effectiveAt || Date.parse(version.effectiveAt) <= at)).sort((a, b) => b.number - a.number)[0];
+    return active && cloneVersion(active);
+  }
+
   get(versionId: string): SopVersion {
     return this.version(versionId);
   }
@@ -316,12 +323,14 @@ export class SopRuntime {
     return [...this.versions].reverse().find((version) => version.sopId === sopId && version.status === 'published');
   }
 
-  /** Install one stored version. An id that is already here is left as it is, including a newer published copy. */
+  /** Install a stored version and replace any earlier local draft of that published revision. */
   pin(version: SopVersion): SopVersion {
-    const existing = this.versions.find((item) => item.id === version.id);
-    if (existing) return existing;
+    const position = this.versions.findIndex(item => item.id === version.id);
+    const existing = this.versions[position];
+    if (existing && (existing.status === 'published' || version.status !== 'published')) return existing;
     const copy = cloneVersion(version);
-    this.versions.push(copy);
+    if (position >= 0) this.versions[position] = copy;
+    else this.versions.push(copy);
     const n = Number(/^sopv_(\d+)$/.exec(copy.id)?.[1] ?? 0);
     if (n > this.seq) this.seq = n;
     return copy;
@@ -372,6 +381,7 @@ function copyDefinition(definition: SopDefinition): SopDefinition {
   return {
     ...definition,
     requiredFields: [...definition.requiredFields],
+    ...(definition.workflow && { workflow: { ...definition.workflow } }),
     graph: definition.graph ? structuredClone(definition.graph) : undefined,
   };
 }

@@ -27,7 +27,7 @@ export interface Recommendation {
 export interface OrganizationRecord {
   confirmedAt: string; confirmedBy: string; revision: number;
   employees: Record<string, { employeeId: string; name: string; duty: string; prompt: string }>;
-  tools: Record<string, { toolId: string; name: string; match: 'existing' | 'placeholder' }>;
+  tools: Record<string, { toolId: string; name: string; match: 'existing' | 'placeholder'; purpose?: string; consumers?: string[] }>;
 }
 export interface AnalysisRun {
   id: string; actor: UserContext; status: 'queued' | 'running' | 'completed' | 'failed' | 'stale' | 'outcome_unknown';

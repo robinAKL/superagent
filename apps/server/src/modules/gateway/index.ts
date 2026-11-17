@@ -11,15 +11,19 @@ export function bindGatewayStore(db: Queryable | null): void {
   gatewayStore = db;
 }
 
-export async function flushGateway(): Promise<void> {
-  if (gatewayStore) await saveGatewaySnapshot(gatewayStore, gatewayState.current.snapshot());
+export async function flushGateway(instanceId?: string): Promise<void> {
+  if (!gatewayStore) return;
+  const { actions } = gatewayState.current.snapshot();
+  await saveGatewaySnapshot(gatewayStore, {
+    actions: actions.filter(action => instanceId ? action.instanceId === instanceId : !action.instanceId.startsWith('cmd_')),
+  });
 }
 
-export async function hydrateGateway(): Promise<void> {
+export async function hydrateGateway(instanceId?: string): Promise<void> {
   if (!gatewayStore) return;
-  const saved = await loadGatewaySnapshot(gatewayStore);
+  const saved = await loadGatewaySnapshot(gatewayStore, instanceId);
   if (saved.actions.length === 0) return;
-  gatewayState.current.load(saved);
+  gatewayState.current.load(saved, instanceId !== undefined);
 }
 
 export const gatewayModule: FastifyPluginAsync = async (app) => {

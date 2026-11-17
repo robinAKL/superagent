@@ -3,6 +3,7 @@ import './execution.css';
 import { authHeaders } from '../api';
 import { useLang, type Lang } from '../i18n';
 import { roomMessage, roomText } from './command-room-copy';
+import { CommandWorkflowPanel } from './CommandWorkflowPanel';
 import { WorkerApprovals } from './WorkerApprovals';
 
 /**
@@ -578,7 +579,10 @@ export function CommandRoomPage() {
         </p>
         {viewer?.owner ? <a className="exec-action" href="#brain">{t('配置超级智能体')}</a> : null}
       </div>
-      {viewer?.owner ? <WorkerApprovals key={viewer.userId} /> : null}
+      {viewer?.owner ? <>
+        <CommandWorkflowPanel />
+        <WorkerApprovals key={viewer.userId} />
+      </> : null}
       <div className="exec-grid">
         <section className="panel exec-pane" aria-label={t('共享协作记录')}>
           <div className="exec-pane-head">

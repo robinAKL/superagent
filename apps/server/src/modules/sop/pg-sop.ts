@@ -92,6 +92,8 @@ export async function saveSopSnapshot(db: Queryable, snapshot: SopSnapshot): Pro
     ]);
   }
   for (const instance of snapshot.instances) {
+    // Command room instances have their own durable lifecycle; a cached snapshot can be older.
+    if (instance.id.startsWith('cmd_')) continue;
     await db.query(UPSERT_INSTANCE_SQL, [
       instance.id,
       instance.tenantId,
@@ -106,6 +108,7 @@ export async function saveSopSnapshot(db: Queryable, snapshot: SopSnapshot): Pro
   const skipped = new Set(snapshot.skipped);
   for (const key of snapshot.eventKeys) {
     const parts = parseSopEventKey(key);
+    if (parts.source === 'command') continue;
     const disposition = missed.has(key) ? 'missed' : skipped.has(key) ? 'skipped' : 'open';
     await db.query(UPSERT_EVENT_SQL, [parts.tenantId, parts.source, parts.eventId, parts.sopId, key, disposition]);
   }
@@ -167,4 +170,25 @@ export async function claimSopEvent(
     key,
   ]);
   return result.rows.length === 1;
+}
+
+/** Active versions from the shared store, independently of any process's editor cache. */
+export async function loadActiveWorkflows(db: Queryable, sopId?: string): Promise<SopVersion[]> {
+  const result = await db.query<VersionRow>(`
+    SELECT DISTINCT ON (sop_id) id, sop_id, number, definition, status, report, revision, validated_revision, effective_at
+    FROM sop_versions
+    WHERE status = 'published' AND ($1::text IS NULL OR sop_id = $1)
+      AND (effective_at IS NULL OR effective_at::timestamptz <= now())
+    ORDER BY sop_id, number DESC
+  `, [sopId ?? null]);
+  return result.rows.map(fromVersionRow);
+}
+
+export async function countRunningSopInstances(db: Queryable, sopId: string, tenantId?: string): Promise<Map<string, number>> {
+  const { rows } = await db.query<{ sop_version_id: string; count: string | number }>(`
+    SELECT sop_version_id, count(*) FROM sop_instances
+    WHERE sop_id = $1 AND status = 'running' AND ($2::text IS NULL OR tenant_id = $2)
+    GROUP BY sop_version_id
+  `, [sopId, tenantId ?? null]);
+  return new Map(rows.map(row => [row.sop_version_id, Number(row.count)]));
 }
