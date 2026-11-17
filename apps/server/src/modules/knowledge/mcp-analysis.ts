@@ -6,6 +6,8 @@ import { liveMcpSelection, type LiveMcpKnowledge } from './live-mcp.js';
 export const MAX_MCP_ANALYSIS_SOURCES = 5;
 const MAX_READS = 3;
 const EXCERPT_LENGTH = 1200;
+/** Enough for a full operating guide or pricing policy; it is split into excerpts the model can cite. */
+export const MAX_READ_CHARS = 12_000;
 
 export function mcpSelectionsCurrent(state: KnowledgeState, ctx: UserContext, run: AnalysisRun) {
   return run.actor.userId === ctx.userId && (run.mcpSources ?? []).every(source => liveMcpSelection(state, ctx, source.id)?.revision === source.revision);
@@ -108,7 +110,7 @@ async function readSource(ctx: UserContext, runId: string, index: number, mcp: L
         : await mcp.call(ctx, source.id, read.name, read.args, source.revision).then(value => ({
           locator: value.tool, retrievedAt: value.retrievedAt, text: toolText(value.result),
         }));
-      const text = item.text.replaceAll('\0', '').trim().slice(0, 2 * EXCERPT_LENGTH).replace(/[\uD800-\uDFFF]/gu, '\uFFFD');
+      const text = item.text.replaceAll('\0', '').trim().slice(0, MAX_READ_CHARS).replace(/[\uD800-\uDFFF]/gu, '\uFFFD');
       if (!text) continue;
       const version = hash(text);
       const sourceId = `mcp:${runId}:${index}:${evidence.length}`;
