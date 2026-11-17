@@ -5,6 +5,7 @@ import { useT } from '../i18n';
 import { KIND_LABEL, SopGraphView } from '../components/SopGraphView';
 import { graphFromPack, knowledgeImpact, packFromRecommendation, unconfirmedItems, validationState, type KnowledgeEvidence, type SopPack } from './sop-workflow';
 import { McpKnowledge } from './McpKnowledge';
+import { AnalysisDraftIndex } from './AnalysisDraftIndex';
 import { ExecutionsPanel } from './ExecutionsPanel';
 import './SuperAgentPage.css';
 
@@ -65,23 +66,35 @@ const READ_TIMEOUT_MS = 15_000;
 const TEXT = {
   en: {
     title: 'Super Agent', subtitle: 'Workflows (SOP) and business ontology',
-    sop: 'Workflows', ontology: 'Ontology', mcp: 'MCP knowledge', mcpDrafts: 'MCP drafts',
+    results: 'Analysis results', sop: 'Workflows', ontology: 'Ontology', mcp: 'MCP knowledge',
     loadingDrafts: 'Loading analysis drafts…', draftError: 'Could not load analysis drafts.',
     retry: 'Try again', loadingSops: 'Loading workflows…', sopError: 'Could not load workflows.',
-    privateDrafts: 'Drafts from your MCP analysis are visible only to you.',
-    noPrivateDrafts: 'No MCP drafts are currently available. Run an analysis with a connected MCP source.',
-    reviewDrafts: 'Open Company knowledge', evidence: 'View source evidence',
+    privateDraft: 'Private MCP draft',
+    noDrafts: 'Analysis results will appear here after you analyze a source.',
+    reviewDrafts: 'Open knowledge analysis', evidence: 'View source evidence',
+    chooseWorkflow: 'Select workflow', workflowPlaceholder: 'Choose a workflow',
+    workflowKey: 'ID for a new workflow', workflowKeyPlaceholder: 'e.g. sop.invoice-intake',
+    workflowPacks: 'Workflow packs', workflowPackTitle: 'Workflow packs from knowledge analysis',
+    noWorkflowPacks: 'No shared workflow packs are available.',
+    applyPack: 'Apply to draft', confirmAllPack: 'Confirm all items',
+    viewPrivateWorkflows: 'View my MCP workflow drafts',
     sopDraft: 'Workflow', objectDraft: 'Business object', relationDraft: 'Relationship',
     employeeDraft: 'Role', toolDraft: 'Tool',
   },
   zh: {
     title: '超级智能体', subtitle: '流程（SOP）与企业本体',
-    sop: '流程', ontology: '本体关系', mcp: 'MCP 知识', mcpDrafts: 'MCP 草案',
+    results: '分析结果', sop: '流程', ontology: '本体关系', mcp: 'MCP 知识',
     loadingDrafts: '正在读取分析草案…', draftError: '无法读取分析草案。',
     retry: '重试', loadingSops: '正在读取流程…', sopError: '无法读取流程列表。',
-    privateDrafts: '这些 MCP 分析草案仅你可见。',
-    noPrivateDrafts: '暂无可查看的 MCP 草案。请在企业知识中选择已连接的 MCP 来源进行分析。',
-    reviewDrafts: '打开企业知识', evidence: '查看来源依据',
+    privateDraft: '仅自己可见的 MCP 草案',
+    noDrafts: '分析来源后，结果会出现在这里。',
+    reviewDrafts: '打开知识分析', evidence: '查看来源依据',
+    chooseWorkflow: '选择流程', workflowPlaceholder: '请选择',
+    workflowKey: '新流程编号（从流程包新建时使用）', workflowKeyPlaceholder: '例如 sop.invoice-intake',
+    workflowPacks: '流程包', workflowPackTitle: '流程包（来自企业知识分析）',
+    noWorkflowPacks: '暂无共享流程包。',
+    applyPack: '套用到草稿', confirmAllPack: '确认全部流程项',
+    viewPrivateWorkflows: '查看我的 MCP 流程草案',
     sopDraft: '流程', objectDraft: '业务对象', relationDraft: '关系',
     employeeDraft: '角色', toolDraft: '工具',
   },
@@ -89,6 +102,14 @@ const TEXT = {
 const DRAFT_KIND: Record<string, keyof typeof TEXT.en> = {
   sop: 'sopDraft', object: 'objectDraft', relation: 'relationDraft', employee: 'employeeDraft', tool: 'toolDraft',
 };
+type AgentTab = 'results' | 'sop' | 'ontology' | 'mcp';
+const TABS: readonly AgentTab[] = ['results', 'sop', 'ontology', 'mcp'];
+
+function agentLocation() {
+  const params = new URLSearchParams(typeof window === 'undefined' ? undefined : window.location.hash.split('?')[1]);
+  const tab = TABS.find(entry => entry === params.get('tab')) ?? 'results';
+  return { tab, draftType: params.get('type') ?? '' };
+}
 
 const STATUS_LABEL: Record<SopVersionView['status'], string> = { draft: '草稿', passed: '校验通过', failed: '校验未通过', published: '已发布' };
 const GATE_LABEL: Record<string, string> = {
@@ -128,10 +149,12 @@ export function employeeContext(rows: EmployeeRow[]): SopGraphContext['employees
 
 export function SuperAgentPage() {
   const t = useT(TEXT);
-  const [tab, setTab] = useState<'sop' | 'ontology' | 'mcp' | 'mcp-drafts'>(() => {
-    const selected = typeof window !== 'undefined' ? new URLSearchParams(window.location.hash.split('?')[1]).get('tab') : null;
-    return selected === 'mcp' || selected === 'mcp-drafts' ? selected : 'sop';
-  });
+  const [{ tab, draftType }, setLocation] = useState(agentLocation);
+  useEffect(() => {
+    const updateTab = () => setLocation(agentLocation());
+    window.addEventListener('hashchange', updateTab);
+    return () => window.removeEventListener('hashchange', updateTab);
+  }, []);
   const [knowledge, setKnowledge] = useState<DraftRead>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -151,7 +174,7 @@ export function SuperAgentPage() {
     setKnowledge({ status: 'loading' });
     setAttempt(value => value + 1);
   }
-  const mcpCount = knowledge.status === 'ready' ? knowledge.drafts.mcpRecommendations.length : 0;
+  const count = knowledge.status === 'ready' ? knowledge.drafts.recommendations.length + knowledge.drafts.mcpRecommendations.length : 0;
   return (
     <>
       <div className="page-head">
@@ -159,16 +182,13 @@ export function SuperAgentPage() {
         <p>{t('subtitle')}</p>
       </div>
       <div className="tabs" role="tablist" aria-label={t('title')}>
-        <button role="tab" type="button" aria-selected={tab === 'sop'} className="tab" onClick={() => setTab('sop')}>{t('sop')}</button>
-        <button role="tab" type="button" aria-selected={tab === 'ontology'} className="tab" onClick={() => setTab('ontology')}>{t('ontology')}</button>
-        <button role="tab" type="button" aria-selected={tab === 'mcp-drafts'} className="tab" onClick={() => setTab('mcp-drafts')}>
-          {t('mcpDrafts')}{mcpCount ? ` (${mcpCount})` : ''}
-        </button>
-        <button role="tab" type="button" aria-selected={tab === 'mcp'} className="tab" onClick={() => setTab('mcp')}>{t('mcp')}</button>
+        {TABS.map(entry => <button key={entry} role="tab" type="button" aria-selected={tab === entry} className="tab" onClick={() => {
+          if (tab !== entry) window.location.hash = entry === 'results' ? 'brain' : `brain?tab=${entry}`;
+        }}>{t(entry)}{entry === 'results' && count ? ` (${count})` : ''}</button>)}
       </div>
       {tab === 'sop' ? <SopWorkspace knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
         tab === 'ontology' ? <OntologyView knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
-        tab === 'mcp-drafts' ? <McpDrafts knowledge={knowledge} retryKnowledge={retryKnowledge} /> : <McpKnowledge />}
+        tab === 'results' ? <AnalysisResults key={draftType} knowledge={knowledge} retryKnowledge={retryKnowledge} initialKind={draftType} /> : <McpKnowledge />}
     </>
   );
 }
@@ -183,29 +203,31 @@ function DraftLoadStatus({ knowledge, retryKnowledge }: DraftViewProps) {
   </div>;
 }
 
-function McpDrafts({ knowledge, retryKnowledge }: DraftViewProps) {
+function AnalysisResults({ knowledge, retryKnowledge, initialKind }: DraftViewProps & { initialKind: string }) {
   const t = useT(TEXT);
-  const drafts = knowledge.status === 'ready' ? knowledge.drafts.mcpRecommendations : [];
-  return <section className="panel stack" aria-labelledby="mcp-drafts-heading">
-    <h2 className="h2" id="mcp-drafts-heading">{t('mcpDrafts')}</h2>
+  const drafts = knowledge.status === 'ready' ? [
+    ...knowledge.drafts.mcpRecommendations.map(draft => ({ ...draft, privateMcp: true })),
+    ...knowledge.drafts.recommendations,
+  ].sort((a, b) => Number(b.kind === 'sop') - Number(a.kind === 'sop')) : [];
+  return <section className="panel stack" aria-labelledby="agent-results-heading">
+    <div className="agent-results-head">
+      <h2 className="h2" id="agent-results-heading">{t('results')}</h2>
+      <a href="#knowledge?view=analysis">{t('reviewDrafts')}</a>
+    </div>
     <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />
-    {knowledge.status === 'ready' ? <>
-      <p className="helper">{t(drafts.length ? 'privateDrafts' : 'noPrivateDrafts')}</p>
-      {drafts.length ? <ul className="onto-list mcp-draft-list">
-        {drafts.map(draft => <li key={draft.id}>
+    {knowledge.status === 'ready' ? drafts.length ? <AnalysisDraftIndex drafts={drafts} initialKind={initialKind} renderDraft={draft =>
+        <article className="agent-result-draft" key={draft.id}>
           <div className="mcp-draft-heading">
             <h3>{draft.name}</h3>
-            <span className="helper">{DRAFT_KIND[draft.kind] ? t(DRAFT_KIND[draft.kind]!) : draft.kind}</span>
+            <span className="helper">{'privateMcp' in draft ? t('privateDraft') : DRAFT_KIND[draft.kind] ? t(DRAFT_KIND[draft.kind]!) : draft.kind}</span>
           </div>
           <p className="mcp-draft-description">{draft.description}</p>
           {draft.evidence.length ? <details>
             <summary>{t('evidence')}</summary>
             <Evidences ev={draft.evidence} label={t('evidence')} />
           </details> : null}
-        </li>)}
-      </ul> : null}
-      <a className="mcp-draft-review" href="#knowledge">{t('reviewDrafts')}</a>
-    </> : null}
+        </article>
+      } /> : <p className="helper">{t('noDrafts')}</p> : null}
   </section>;
 }
 
@@ -276,6 +298,7 @@ function SopWorkspace({ knowledge, retryKnowledge }: DraftViewProps) {
   const unconfirmed = unconfirmedItems(pack);
   const recs = knowledge.status === 'ready' ? knowledge.drafts.recommendations : [];
   const packs = recs.filter((r) => r.kind === 'sop').map(packFromRecommendation);
+  const privateWorkflows = knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.some(draft => draft.kind === 'sop');
   const impact = knowledge.status === 'ready' ? knowledgeImpact(pack, recs) : [];
   const node = draft.nodes.find((n) => n.id === selected);
   const canValidate = !!openDraft && !dirty && !issues.length && !unconfirmed.length;
@@ -337,9 +360,9 @@ function SopWorkspace({ knowledge, retryKnowledge }: DraftViewProps) {
           <button type="button" className="btn" onClick={() => void loadList()}>{t('retry')}</button>
         </div> : sops === null ? <p className="helper" role="status">{t('loadingSops')}</p> : null}
         <label className="field">
-          <span>流程</span>
-          <select aria-label="选择流程" disabled={sops === null || unavailable} value={sopId} onChange={(e) => setSopId(e.target.value)}>
-            <option value="">请选择</option>
+          <span>{t('chooseWorkflow')}</span>
+          <select disabled={sops === null || unavailable} value={sopId} onChange={(e) => setSopId(e.target.value)}>
+            <option value="">{t('workflowPlaceholder')}</option>
             {sops?.map((s) => (
               <option key={s.sopId} value={s.sopId}>{s.sopId}{s.latest ? `（v${s.latest.number} ${STATUS_LABEL[s.latest.status]}）` : ''}</option>
             ))}
@@ -347,21 +370,22 @@ function SopWorkspace({ knowledge, retryKnowledge }: DraftViewProps) {
         </label>
         {!sopId ? (
           <label className="field">
-            <span>新流程编号（从流程包新建时使用）</span>
-            <input aria-label="新流程编号" value={newSopId} onChange={(e) => setNewSopId(e.target.value)} placeholder="例如 sop.invoice-intake" />
+            <span>{t('workflowKey')}</span>
+            <input value={newSopId} onChange={(e) => setNewSopId(e.target.value)} placeholder={t('workflowKeyPlaceholder')} />
           </label>
         ) : null}
       </section>
 
-      <section className="panel stack" aria-label="流程包">
-        <h2 className="h2">流程包（来自企业知识分析）</h2>
+      <section className="panel stack" aria-label={t('workflowPacks')}>
+        <h2 className="h2">{t('workflowPackTitle')}</h2>
         <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />
-        {knowledge.status === 'ready' && !packs.length ? <p className="helper">分析还没有给出有依据的流程建议。</p> : null}
+        {knowledge.status === 'ready' && !packs.length ? <p className="helper">{t('noWorkflowPacks')}</p> : null}
+        {privateWorkflows ? <a href="#brain?type=sop">{t('viewPrivateWorkflows')}</a> : null}
         <ul className="onto-list">
           {packs.map((p) => (
             <li key={p.key} data-pack={p.key}>
               <strong>{p.name}</strong> <span className="helper">{p.items.length} 项（触发 1，规则 {p.items.length - 1}），套用后逐项确认</span>
-              <button className="btn" type="button" disabled={sops === null || unavailable} onClick={() => requestPack(p)}>套用到草稿</button>
+              <button className="btn" type="button" disabled={sops === null || unavailable} onClick={() => requestPack(p)}>{t('applyPack')}</button>
             </li>
           ))}
         </ul>
@@ -421,7 +445,10 @@ function SopWorkspace({ knowledge, retryKnowledge }: DraftViewProps) {
             </fieldset>
             {pack ? (
               <fieldset className="pack-items" aria-label="流程包确认">
-                <legend>流程包「{pack.name}」：规则与触发需逐项确认</legend>
+                <legend>核对流程包「{pack.name}」的规则和触发条件</legend>
+                {unconfirmed.length > 1 ? <button type="button" className="btn" onClick={() => setPack(current => current && ({
+                  ...current, items: current.items.map(item => ({ ...item, confirmed: true })),
+                }))}>{t('confirmAllPack')}</button> : null}
                 {pack.items.map((it) => (
                   <label key={it.id} className="pack-item" data-item={it.id}>
                     <input

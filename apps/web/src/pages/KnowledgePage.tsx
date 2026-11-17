@@ -4,6 +4,7 @@ import { useLang, useT, type Dict } from '../i18n';
 import './KnowledgePage.css';
 import { DatabaseSourcePanel } from './DatabaseSourcePanel';
 import { MaterialReview, type Material } from './MaterialReview';
+import { AnalysisDraftIndex } from './AnalysisDraftIndex';
 import type { McpConnection } from './McpKnowledge';
 
 interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string; retrievedAt?: string }
@@ -74,7 +75,7 @@ const TEXT = {
     automaticLocal: 'Created automatically when you upload a file.',
     addMaterials: 'Add materials',
     chooseFiles: 'Choose files',
-    dropFiles: 'Drop files here, or choose multiple files from your computer.',
+    dropFiles: 'Drop files here to add them.',
     pasteText: 'Paste text',
     localUploadDisabled: 'Local uploads are available to knowledge managers when the local files source is enabled.',
     sendingFile: 'Uploading',
@@ -131,8 +132,8 @@ const TEXT = {
     scopeResourceId: 'Authorized resource',
     scopeProjects: 'Authorized projects',
     scopeNoProjects: 'No project authorization',
-    importSuccess: 'Selected materials imported. Each version still needs review and confirmation.',
-    syncSuccess: 'Source sync completed. New materials still need version-by-version confirmation.',
+    importSuccess: 'Materials imported. Review them here to make them available for analysis.',
+    syncSuccess: 'Source synced. Review any new versions under Materials.',
     readingPreview: 'Reading scope preview…',
     previewSourceBtn: 'Preview source scope & materials',
     syncSourceBtn: 'Sync source',
@@ -166,14 +167,20 @@ const TEXT = {
     connCreatedNotice: 'Connection verified. You can now choose materials to import.',
     spaceSavedNotice: 'Knowledge space name saved (metadata only).',
     manualRoleSavedNotice: 'Manual role added; this does not automatically enable material analysis.',
-    uploadSuccessNotice: 'Material submitted. Confirm the current version after parsing finishes.',
+    uploadSuccessNotice: 'Material added. It becomes available for analysis after processing.',
     errDocRead: 'Unable to read document file.',
     pageTitle: 'Enterprise Knowledge',
+    workspaceNav: 'Knowledge workspace',
+    workspaceMaterials: 'Materials',
+    workspaceAnalysis: 'Analysis',
+    workspaceSearch: 'Search',
+    closeSources: 'Back to materials',
+    analysisHistory: 'Earlier runs',
+    analysisSourceOptions: 'MCP source options ({count} selected)',
     mcpTitle: 'Read knowledge via MCP',
     mcpHint: 'Connect a Streamable HTTP client using an Entra access token for Super Agent. Search and read confirmed sources you have permission to access.',
     loadingBtn: 'Loading…',
     refreshBtn: 'Refresh',
-    introMain: 'Build grounded evidence from trusted sources so every recommendation traces back to the original text.',
     loadingState: 'Loading sources and knowledge status…',
     step3Cta: 'Start analysis',
     sec1Title: 'Knowledge sources',
@@ -229,7 +236,6 @@ const TEXT = {
     searchNoHits: 'No currently usable evidence. Confirm source versions, check access permissions, or adjust keywords.',
     searchIdleHint: 'Answers and citations come from actual server search results; no conclusions are generated without evidence.',
     sec3Title: 'Knowledge analysis & draft recommendations',
-    sec3Sub: 'Employees, tools, SOPs, and business objects are generated as drafts for human decision.',
     analyzingBtn: 'Analysis running',
     startAnalysisBtn: 'Start analysis',
     analysisSubmittedNotice: 'Analysis job submitted. Progress follows server status.',
@@ -260,9 +266,8 @@ const TEXT = {
     analysisMcpUnavailable: 'An MCP source could not be read. Check the connection and try again.',
     analysisMcpReauthorize: 'Reconnect and authorize the MCP source before running the analysis again.',
     analysisMcpDraft: 'Private MCP analysis draft',
-    analysisOpenMcpDrafts: 'View MCP drafts in Super Agent',
+    analysisOpenMcpDrafts: 'Open results in Super Agent',
     analysisMcpRetrieved: 'Read from MCP on {date}',
-    noAnalyses: 'No analyses run yet. Source permissions and versions are re-checked before analysis starts.',
     noRecommendations: 'No draft recommendations yet. Only analysis results with valid current citations appear here.',
     advancedSummary: 'Advanced',
     advancedHint: 'Rename space, read-only database source, and manual role entry',
@@ -307,7 +312,7 @@ const TEXT = {
     automaticLocal: '首次上传时自动创建。',
     addMaterials: '添加资料',
     chooseFiles: '选择文件',
-    dropFiles: '将文件拖到这里，或从电脑一次选择多个文件。',
+    dropFiles: '也可将文件拖到这里。',
     pasteText: '粘贴文本',
     localUploadDisabled: '知识库管理员可在本地文件来源启用时上传资料。',
     sendingFile: '上传中',
@@ -364,8 +369,8 @@ const TEXT = {
     scopeResourceId: '授权资源引用',
     scopeProjects: '授权项目范围',
     scopeNoProjects: '无项目授权',
-    importSuccess: '所选资料已导入，仍需逐版本核对并确认。',
-    syncSuccess: '来源同步已完成，新资料仍需逐版本确认。',
+    importSuccess: '资料已导入。在这里核对后即可用于分析。',
+    syncSuccess: '来源已同步，可在「资料」中核对新版本。',
     readingPreview: '读取范围预览中…',
     previewSourceBtn: '预览来源范围与资料',
     syncSourceBtn: '同步来源',
@@ -399,14 +404,20 @@ const TEXT = {
     connCreatedNotice: '连接已验证，可以选择资料导入。',
     spaceSavedNotice: '知识空间名称已保存，仅更新名称元数据。',
     manualRoleSavedNotice: '人工角色已补充，不会据此自动启用资料分析。',
-    uploadSuccessNotice: '资料已提交。解析完成后仍需确认当前版本。',
+    uploadSuccessNotice: '资料已添加，处理完成后即可用于分析。',
     errDocRead: '无法读取文档文件。',
     pageTitle: '企业知识',
+    workspaceNav: '知识工作区',
+    workspaceMaterials: '资料',
+    workspaceAnalysis: '分析',
+    workspaceSearch: '检索',
+    closeSources: '返回资料',
+    analysisHistory: '历史分析',
+    analysisSourceOptions: 'MCP 来源设置（已选 {count} 个）',
     mcpTitle: '通过 MCP 读取知识',
     mcpHint: '在支持 Streamable HTTP 的客户端中配置 Super Agent 的 Entra 访问令牌，即可搜索和读取你有权限访问的已确认资料。',
     loadingBtn: '读取中…',
     refreshBtn: '刷新状态',
-    introMain: '从可信来源建立依据，让每一条建议都能回到原文。',
     loadingState: '正在读取来源与知识状态…',
     step3Cta: '开始分析',
     sec1Title: '知识来源',
@@ -462,7 +473,6 @@ const TEXT = {
     searchNoHits: '没有当前可用的依据。请确认来源版本、访问权限，或调整关键词。',
     searchIdleHint: '回答和引用来自服务端实际检索结果；没有依据时不生成结论。',
     sec3Title: '知识分析与建议草案',
-    sec3Sub: '员工、工具、SOP 与业务对象仅形成草案，需人工决定后续操作。',
     analyzingBtn: '分析进行中',
     startAnalysisBtn: '开始分析',
     analysisSubmittedNotice: '分析任务已提交，进度以服务端状态为准。',
@@ -493,9 +503,8 @@ const TEXT = {
     analysisMcpUnavailable: 'MCP 来源读取失败，请检查连接后重试。',
     analysisMcpReauthorize: '请重新连接并授权 MCP 来源，然后再次分析。',
     analysisMcpDraft: '仅自己可见的 MCP 分析草案',
-    analysisOpenMcpDrafts: '在超级智能体中查看 MCP 草案',
+    analysisOpenMcpDrafts: '在超级智能体中查看结果',
     analysisMcpRetrieved: 'MCP 读取时间 {date}',
-    noAnalyses: '尚未运行分析。分析开始前会再次检查来源权限和版本。',
     noRecommendations: '暂无建议草案。只有带当前有效引用的分析结果才会出现在这里。',
     advancedSummary: '高级',
     advancedHint: '知识空间改名、只读数据库来源、人工补充角色',
@@ -561,6 +570,15 @@ const STATUS_KEYS: Record<string, TextKey> = {
 };
 
 const CARD_ORDER = ['local-file', 'mcp', 'database', 'email', 'sharepoint'] as const;
+type KnowledgeView = 'materials' | 'analysis' | 'search' | 'sources';
+const VIEW_LABELS = { materials: 'workspaceMaterials', analysis: 'workspaceAnalysis', search: 'workspaceSearch' } as const;
+
+function viewFromHash(): KnowledgeView {
+  const params = new URLSearchParams(window.location.hash.split('?')[1]);
+  const view = params.get('view');
+  if (view === 'sources' || params.has('source') || params.has('mcp_callback')) return 'sources';
+  return view === 'analysis' || view === 'search' ? view : 'materials';
+}
 
 function EvidenceList({ evidence, t, collapsible = false }: { evidence: Evidence[]; t: Translate; collapsible?: boolean }) {
   const group = useId();
@@ -772,7 +790,7 @@ export function KnowledgePage() {
   const [busy, setBusy] = useState('');
   const [activeSourceCard, setActiveSourceCard] = useState<string | null>(() =>
     window.location.hash === '#knowledge?source=mcp' ? 'mcp' : null);
-  const [sourcesOpen, setSourcesOpen] = useState(() => window.location.hash.startsWith('#knowledge?'));
+  const [view, setView] = useState(viewFromHash);
   const [dragging, setDragging] = useState(false);
   const [fileSubmissions, setFileSubmissions] = useState<FileSubmission[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -813,11 +831,16 @@ export function KnowledgePage() {
   }, []);
   useEffect(() => { void load(); return () => { refreshSequence.current++; searchSequence.current++; }; }, [load]);
   useEffect(() => {
+    const updateView = () => setView(viewFromHash());
+    window.addEventListener('hashchange', updateView);
+    return () => window.removeEventListener('hashchange', updateView);
+  }, []);
+  useEffect(() => {
     const fragment = new URLSearchParams(window.location.hash.split('?')[1]);
     if (!fragment.has('mcp_callback')) return;
-    window.history.replaceState(null, '', '/#knowledge');
+    window.history.replaceState(null, '', '/#knowledge?view=sources');
     actionInFlight.current = true;
-    setSourcesOpen(true);
+    setView('sources');
     setActiveSourceCard('mcp');
     setBusy('mcp-connection');
     void api<{ error?: string; message?: string }>(ROOT + '/connections/mcp/oauth/finish', {
@@ -867,6 +890,8 @@ export function KnowledgePage() {
   const confirmedCount = overview?.items.filter(item => item.confirmed).length ?? 0;
   const recommendations = overview?.recommendations.filter(recommendation => !recommendation.deleted) ?? [];
   const mcpRecommendations = overview?.mcpRecommendations ?? [];
+  const drafts = [...mcpRecommendations.map(draft => ({ ...draft, privateMcp: true })), ...recommendations];
+  const runs = overview?.analyses.slice(-5).reverse() ?? [];
   const selectedResourceScope = JSON.stringify({ scope: selectedResource?.scope, projects: selectedResource?.projectIds });
   useEffect(() => { setReadOnlyAcknowledged(false); }, [selectedPlugin, selectedResource?.id, selectedResourceScope]);
 
@@ -886,7 +911,8 @@ export function KnowledgePage() {
     if (forAnalysis) setAnalysisFeedback(null);
     try {
       await request(path, { method, body: JSON.stringify(body) });
-      if (forSources) setSourceFeedback({ text: success });
+      if (path.endsWith('/import')) { setNotice(success); openView('materials'); }
+      else if (forSources) setSourceFeedback({ text: success });
       else setNotice(success);
       searchSequence.current++; setSearchResult(null); setSearchError(''); setSearching(false);
       await load();
@@ -901,6 +927,29 @@ export function KnowledgePage() {
       return false;
     }
     finally { actionInFlight.current = false; setBusy(''); }
+  }
+
+  function openView(next: KnowledgeView) {
+    setView(next);
+    window.location.hash = next === 'materials' ? 'knowledge' : `knowledge?view=${next}`;
+    window.scrollTo({ top: 0 });
+  }
+
+  function startAnalysis() {
+    openView('analysis');
+    return action('analysis', '/analyses', {
+      mcpSourceIds, ...(mcpSourceIds.length > 0 && analysisFocus.trim() && { focus: analysisFocus.trim() }),
+    }, t('analysisSubmittedNotice'));
+  }
+
+  function renderRun(run: Overview['analyses'][number]) {
+    return <li key={run.id}>
+      <span className={`knowledge-badge ${run.status === 'completed' ? 'is-green' : run.error ? 'is-warning' : ''}`}>{label(run.status)}</span>
+      {run.status === 'completed' ? null : <span>{label(run.stage)}</span>}
+      {run.mcpSources?.length ? <small>{run.mcpSources.join(', ')}</small> : null}
+      {run.error ? <small className="knowledge-run-message">{t(ANALYSIS_MESSAGES[run.error] ?? 'analysisRunFailed')}</small> : null}
+      {run.skippedRelations ? <small className="knowledge-run-message">{t('analysisSkippedRelations', { count: run.skippedRelations })}</small> : null}
+    </li>;
   }
 
   function selectSourceCard(cardId: string) {
@@ -1022,22 +1071,29 @@ export function KnowledgePage() {
         {overview?.spaceName && overview.spaceName !== DEFAULT_SPACE_NAME ? <p className="knowledge-space-name">{overview.spaceName}</p> : null}
       </div>
       <div className="knowledge-actions">
-        <button className="btn" type="button" onClick={() => {
-          setSourcesOpen(!sourcesOpen);
-          if (!sourcesOpen) window.setTimeout(() => document.getElementById('knowledge-sources')?.scrollIntoView({ block: 'nearest' }), 0);
-        }} aria-expanded={sourcesOpen} aria-controls="knowledge-sources">{t('manageSources')}</button>
-        <button className="btn" type="button" onClick={() => { setAnalysisFeedback(null); void load(); }} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
+        <button className="btn knowledge-quiet" type="button" onClick={() => { setAnalysisFeedback(null); void load(); }} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
+        <button className="btn" type="button" onClick={() => openView(view === 'sources' ? 'materials' : 'sources')}
+          aria-expanded={view === 'sources'} aria-controls="knowledge-sources">{t(view === 'sources' ? 'closeSources' : 'manageSources')}</button>
       </div>
     </header>
-    <div className="knowledge-intro"><p>{t('introMain')}</p></div>
+    {overview ? <nav className="knowledge-workspace-nav" aria-label={t('workspaceNav')}>
+      {(['materials', 'analysis', 'search'] as const).map(entry => <button key={entry} type="button" aria-current={view === entry ? 'page' : undefined}
+        onClick={() => openView(entry)}>{t(VIEW_LABELS[entry])}</button>)}
+    </nav> : null}
     {error ? <div className="knowledge-alert" role="alert">{error}</div> : null}
     {notice ? <div className="knowledge-notice" role="status">{notice}</div> : null}
     {!overview && loading ? <div className="panel knowledge-empty" role="status">{t('loadingState')}</div> : null}
     {overview ? <>
-      <section className="panel knowledge-section" aria-labelledby="knowledge-upload-heading">
+      <section className="panel knowledge-section knowledge-library" hidden={view !== 'materials'} aria-labelledby="knowledge-upload-heading">
         <div className="knowledge-section-head">
           <div><h2 id="knowledge-upload-heading">{t('sec2Title')}</h2></div>
-          <button className="btn primary" type="button" disabled={!canUpload || !!busy} onClick={() => fileInput.current?.click()}>{t('addMaterials')}</button>
+          <div className="knowledge-actions">
+            {overview.canConfirm && !analysisBlock && (confirmedCount > 0 || mcpSourceIds.length > 0) ?
+              <button className="btn" type="button" disabled={!!busy || analysisActive} onClick={() => void startAnalysis()}>
+                {analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}
+              </button> : null}
+            {canUpload ? <button className="btn primary" type="button" disabled={!!busy} onClick={() => fileInput.current?.click()}>{t('addMaterials')}</button> : null}
+          </div>
         </div>
         <input ref={fileInput} type="file" multiple hidden aria-label={t('chooseFiles')} disabled={!canUpload || !!busy} onChange={event => {
           const files = Array.from(event.currentTarget.files ?? []);
@@ -1045,8 +1101,7 @@ export function KnowledgePage() {
           void uploadFiles(files);
         }} />
         {canUpload ? <>
-          <button className={`knowledge-file-drop ${dragging ? 'is-dragging' : ''}`} type="button" disabled={!!busy}
-            onClick={() => fileInput.current?.click()}
+          <div className={`knowledge-file-drop ${dragging ? 'is-dragging' : ''}`}
             onDragOver={event => {
               if (!event.dataTransfer.types.includes('Files')) return;
               event.preventDefault();
@@ -1058,7 +1113,7 @@ export function KnowledgePage() {
               event.preventDefault();
               setDragging(false);
               void uploadFiles(Array.from(event.dataTransfer.files));
-            }}>{t('dropFiles')}</button>
+            }}>{t('dropFiles')}</div>
           <details className="knowledge-paste">
             <summary>{t('pasteText')}</summary>
             <form onSubmit={pasteMaterial} className="knowledge-form">
@@ -1086,13 +1141,14 @@ export function KnowledgePage() {
           request={request}
           errorMessage={errorMessage}
           disabled={!!busy}
+          onAnalyze={!analysisBlock && !analysisActive ? startAnalysis : undefined}
           sourceName={pluginId => pluginName(pluginId, overview.plugins)}
           onChanged={async (message, failure) => { setNotice(message ?? ''); setError(failure ?? ''); searchSequence.current++; setSearchResult(null); setSearchError(''); setSearching(false); await load(); }}
           renderPreview={item => <ItemPreview key={`${item.id}:${item.version}`} item={item} request={request} errorMessage={errorMessage} t={t} />}
         /> : !parseJobs.length && !fileSubmissions.length ? <p className="knowledge-empty">{t('noMaterials')}</p> : null}
       </section>
 
-      <section id="knowledge-sources" className="panel knowledge-section" hidden={!sourcesOpen} aria-labelledby="knowledge-sources-heading">
+      <section id="knowledge-sources" className="panel knowledge-section" hidden={view !== 'sources'} aria-labelledby="knowledge-sources-heading">
         <div className="knowledge-section-head"><div><h2 id="knowledge-sources-heading">{t('sec1Title')}</h2><p className="helper">{t('sec1Sub')}</p></div></div>
         <div className="knowledge-plugins knowledge-source-cards" aria-label={t('pluginsAria')}>
           {orderedPlugins.map(plugin => {
@@ -1159,64 +1215,66 @@ export function KnowledgePage() {
         </li>)}</ul> : <p className="knowledge-empty">{t('noConnections')}</p>}
       </section>
 
-      <section className="panel knowledge-section" aria-labelledby="knowledge-analysis-heading">
+      <section className="panel knowledge-section knowledge-analysis-workspace" hidden={view !== 'analysis'} aria-labelledby="knowledge-analysis-heading">
         <div className="knowledge-section-head">
-          <div><h2 id="knowledge-analysis-heading">{t('sec3Title')}</h2><p className="helper">{t('sec3Sub')}</p></div>
-          <button className="btn" disabled={!!busy || analysisActive || (!confirmedCount && !mcpSourceIds.length) || !!analysisBlock || !overview.canConfirm}
-            onClick={() => void action('analysis', '/analyses', { mcpSourceIds, ...(mcpSourceIds.length && analysisFocus.trim() && { focus: analysisFocus.trim() }) }, t('analysisSubmittedNotice'))}>{busy === 'analysis' ? t('submitting') : analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}</button>
+          <div><h2 id="knowledge-analysis-heading">{t('sec3Title')}</h2></div>
+          <button className="btn primary" disabled={!!busy || analysisActive || (!confirmedCount && !mcpSourceIds.length) || !!analysisBlock || !overview.canConfirm}
+            onClick={() => void startAnalysis()}>{busy === 'analysis' ? t('submitting') : analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}</button>
         </div>
         {overview.canConfirm && analysisMessage ? <div className="knowledge-alert knowledge-analysis-status" role="status">
           <p>{analysisMessage}</p>
           {analysisIssue && ANALYSIS_SETTINGS_CODES.has(analysisIssue) ? <a className="btn" href="#settings">{t('analysisSettings')}</a> : null}
         </div> : null}
         {!overview.canConfirm ? <p className="helper">{t('analysisPermission')}</p> : null}
-        {overview.canConfirm && liveAnalysisSources.length > 0 ? <fieldset className="knowledge-analysis-sources" disabled={!!busy || analysisActive}>
-          <legend>{t('analysisMcpSources')}</legend>
-          <div className="knowledge-analysis-source-list">{liveAnalysisSources.map(source => {
-            const checked = mcpSourceIds.includes(source.id);
-            return <label className="knowledge-check knowledge-analysis-source" key={source.id}>
-              <input type="checkbox" checked={checked} disabled={!checked && mcpSourceIds.length >= MAX_MCP_ANALYSIS_SOURCES}
-                onChange={event => setAnalysisSourceIds(event.target.checked ? [...mcpSourceIds, source.id] : mcpSourceIds.filter(id => id !== source.id))} />
-              <span>{source.name}</span>
-            </label>;
-          })}</div>
-          {liveAnalysisSources.length > MAX_MCP_ANALYSIS_SOURCES ? <p className="helper">{t('analysisMcpLimit')}</p> : null}
-          {mcpSourceIds.length > 0 ? <label className="field"><span>{t('analysisMcpFocus')}</span>
-            <input maxLength={1000} value={analysisFocus} onChange={event => setAnalysisFocus(event.target.value)} placeholder={t('analysisMcpFocusPlaceholder')} />
-          </label> : null}
-        </fieldset> : null}
+        {overview.canConfirm && liveAnalysisSources.length > 0 ? <details className="knowledge-analysis-config" key={runs.length > 0 ? 'ran' : 'new'} open={!runs.length}>
+          <summary>{t('analysisSourceOptions', { count: mcpSourceIds.length })}</summary>
+          <fieldset className="knowledge-analysis-sources" aria-label={t('analysisMcpSources')} disabled={!!busy || analysisActive}>
+            <div className="knowledge-analysis-source-list">{liveAnalysisSources.map(source => {
+              const checked = mcpSourceIds.includes(source.id);
+              return <label className="knowledge-check knowledge-analysis-source" key={source.id}>
+                <input type="checkbox" checked={checked} disabled={!checked && mcpSourceIds.length >= MAX_MCP_ANALYSIS_SOURCES}
+                  onChange={event => setAnalysisSourceIds(event.target.checked ? [...mcpSourceIds, source.id] : mcpSourceIds.filter(id => id !== source.id))} />
+                <span>{source.name}</span>
+              </label>;
+            })}</div>
+            {liveAnalysisSources.length > MAX_MCP_ANALYSIS_SOURCES ? <p className="helper">{t('analysisMcpLimit')}</p> : null}
+            {mcpSourceIds.length > 0 ? <label className="field"><span>{t('analysisMcpFocus')}</span>
+              <input maxLength={1000} value={analysisFocus} onChange={event => setAnalysisFocus(event.target.value)} placeholder={t('analysisMcpFocusPlaceholder')} />
+            </label> : null}
+          </fieldset>
+        </details> : null}
         {!confirmedCount && !mcpSourceIds.length ? <p className="helper">{t('needConfirmedHint')}</p> : null}
-        {overview.analyses.length ? <ul className="knowledge-runs">{overview.analyses.slice(-5).reverse().map(run => <li key={run.id}>
-          <span className={`knowledge-badge ${run.status === 'completed' ? 'is-green' : run.error ? 'is-warning' : ''}`}>{label(run.status)}</span><span>{label(run.stage)}</span><small>{run.id}</small>
-          {run.mcpSources?.length ? <small>{run.mcpSources.join(' · ')}</small> : null}
-          {run.error ? <small className="knowledge-run-message">{t(ANALYSIS_MESSAGES[run.error] ?? 'analysisRunFailed')}</small> : null}
-          {run.skippedRelations ? <small className="knowledge-run-message">{t('analysisSkippedRelations', { count: run.skippedRelations })}</small> : null}
-        </li>)}</ul> : <p className="knowledge-empty">{t('noAnalyses')}</p>}
-        {mcpRecommendations.length ? <a className="knowledge-analysis-results-link" href="#brain?tab=mcp-drafts">{t('analysisOpenMcpDrafts')}</a> : null}
-        {recommendations.length || mcpRecommendations.length ? <div className="knowledge-recommendations">
-          {mcpRecommendations.map(recommendation => <RecommendationCard key={recommendation.id} recommendation={recommendation} privateMcp disabled={!!busy} onAction={action} label={label} t={t} />)}
-          {recommendations.map(recommendation => <RecommendationCard key={recommendation.id} recommendation={recommendation} disabled={!!busy} onAction={action} label={label} t={t} />)}
-        </div> : <p className="knowledge-empty">{t('noRecommendations')}</p>}
+        {runs[0] ? <ul className="knowledge-runs">{renderRun(runs[0])}</ul> : null}
+        {runs.length > 1 ? <details className="knowledge-run-history">
+          <summary>{t('analysisHistory')}</summary>
+          <ul className="knowledge-runs">{runs.slice(1).map(renderRun)}</ul>
+        </details> : null}
+        {drafts.length ? <>
+          <a className="knowledge-analysis-results-link" href="#brain">{t('analysisOpenMcpDrafts')}</a>
+          <AnalysisDraftIndex drafts={drafts} renderDraft={draft => <div className="knowledge-recommendations">
+            <RecommendationCard key={draft.id} recommendation={draft} privateMcp={'privateMcp' in draft} disabled={!!busy} onAction={action} label={label} t={t} />
+          </div>} />
+        </> : <p className="knowledge-empty">{t('noRecommendations')}</p>}
       </section>
 
-      <section className="panel knowledge-section" aria-labelledby="knowledge-search-heading">
+      <section className="panel knowledge-section" hidden={view !== 'search'} aria-labelledby="knowledge-search-heading">
         <div className="knowledge-section-head"><div><h2 id="knowledge-search-heading">{t('secSearchTitle')}</h2><p className="helper">{t('secSearchSub')}</p></div></div>
         <form className="knowledge-search-form" onSubmit={search}><label className="field"><span>{t('searchLabel')}</span><input required maxLength={200} value={query} onChange={event => setQuery(event.target.value)} placeholder={t('searchPlaceholder')} /></label><button className="btn" disabled={searching || !!busy || !query.trim()}>{searching ? t('searchingBtn') : t('searchBtn')}</button></form>
         {searchError ? <p className="knowledge-alert" role="alert">{searchError}</p> : null}
         {searchResult ? <div className="knowledge-search-result" aria-live="polite">{searchResult.hits.length ? <><p className="knowledge-answer">{searchResult.answer || t('searchFoundDefault')}</p><EvidenceList evidence={searchResult.hits} t={t} /></> : <p className="knowledge-empty">{t('searchNoHits')}</p>}</div> : <p className="helper">{t('searchIdleHint')}</p>}
-        <details>
-          <summary>{t('mcpTitle')}</summary>
-          <p className="helper">{t('mcpHint')}</p>
-          <code>{window.location.origin}{ROOT}/mcp</code>
-        </details>
       </section>
 
-      <details className="panel knowledge-advanced" open={advancedOpen} onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
+      <details className="panel knowledge-advanced" hidden={view !== 'sources'} open={advancedOpen} onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
         <summary className="knowledge-advanced-summary">
           <strong>{t('advancedSummary')}</strong>
           <span className="helper">{t('advancedHint')}</span>
         </summary>
         <div className="knowledge-advanced-body">
+          <details className="knowledge-client-config">
+            <summary>{t('mcpTitle')}</summary>
+            <p className="helper">{t('mcpHint')}</p>
+            <code>{window.location.origin}{ROOT}/mcp</code>
+          </details>
           <form className="knowledge-space-form" aria-label={t('spaceFormAria')} onSubmit={renameSpace}>
             <label className="field"><span>{t('spaceNameLabel')}</span><input required maxLength={160} value={spaceName} placeholder={t('pageTitle')} onChange={event => setSpaceName(event.target.value)} /></label>
             <button className="btn" disabled={!!busy || !spaceName.trim()}>{t('saveSpaceBtn')}</button>

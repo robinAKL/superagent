@@ -84,7 +84,7 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
       edges: [{ from: 't', to: 'a' }, { from: 'a', to: 'e' }, { from: 'e', to: 'h' }, { from: 'h', to: 'w' }],
     };
     await json(page.request.post('/api/v1/sop/drafts', { data: { sopId: SOP, definition: { requiredFields: ['invoiceNo', 'amount'], threshold: { field: 'amount', max: 5000 }, employeeStatus: 'active', graph } } }));
-    await page.goto('/#brain');
+    await page.goto('/#brain?tab=sop');
     await page.getByLabel('选择流程').selectOption(SOP);
     await expect(page.locator('main')).toContainText('结构检查通过');
     await page.getByRole('button', { name: '校验（运行回归用例）' }).click();
@@ -117,7 +117,7 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
 
   await test.step('the gateway writes once and the read-back matches: the run completes', async () => {
     await expect.poll(async () => json<Record<string, { amount: number }>>(page.request.get('/__e2e/erp/ledger'))).toEqual({ 'INV-480': { invoiceNo: 'INV-480', amount: 480 } });
-    await page.goto('/#brain');
+    await page.goto('/#brain?tab=sop');
     await page.getByLabel('选择流程').selectOption(SOP);
     const run = page.getByRole('region', { name: '运行记录' }).locator('li[data-run]').filter({ hasText: 'INV-480' });
     await expect(run.locator('[data-run-status]')).toHaveText('已完成');
@@ -153,7 +153,7 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
     expect(Object.keys(await json<Record<string, unknown>>(page.request.get('/__e2e/erp/ledger')))).toEqual(['INV-480']);
     await page.goto('/#work');
     await expect(page.getByRole('button', { name: /补资料：缺少 amount（事件 INV-000）/ })).toBeVisible();
-    await page.goto('/#brain');
+    await page.goto('/#brain?tab=sop');
     await page.getByLabel('选择流程').selectOption(SOP);
   });
 
@@ -167,7 +167,7 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
     await page.goto('/#work');
     await page.getByRole('button', { name: /批准写入「付款登记」（事件 INV-555）/ }).click();
     await page.getByRole('complementary', { name: '工作项' }).getByRole('button', { name: /按版本 1 决定/ }).click();
-    await page.goto('/#brain');
+    await page.goto('/#brain?tab=sop');
     await page.getByLabel('选择流程').selectOption(SOP);
     const run = page.getByRole('region', { name: '运行记录' }).locator('li[data-run]').filter({ hasText: 'INV-555' });
     await expect(run.locator('[data-run-status]')).toHaveText('已阻塞');
@@ -187,7 +187,7 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
     await page.getByRole('button', { name: /批准写入「付款登记」（事件 INV-990）/ }).click();
     await page.getByRole('complementary', { name: '工作项' }).getByRole('button', { name: /按版本 1 决定/ }).click();
 
-    await page.goto('/#brain');
+    await page.goto('/#brain?tab=sop');
     await page.getByLabel('选择流程').selectOption(SOP);
     const run = page.getByRole('region', { name: '运行记录' }).locator('li[data-run]').filter({ hasText: 'INV-990' });
     await expect(run.locator('[data-run-status]')).toHaveText('结果未知（已冻结）');
@@ -206,7 +206,7 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
 
   await test.step('paused read-back cannot finish or repeat the original external write', async () => {
     await json(page.request.post(`/api/v1/employees/${employeeId}/pause`));
-    await page.goto('/#brain'); await page.getByLabel('选择流程').selectOption(SOP);
+    await page.goto('/#brain?tab=sop'); await page.getByLabel('选择流程').selectOption(SOP);
     const run = page.getByRole('region', { name: '运行记录' }).locator('li[data-run]').filter({ hasText: 'INV-990' });
     const originalRunId = await run.getAttribute('data-run');
     await run.getByRole('button', { name: '只回读核对外部结果' }).click();
@@ -244,7 +244,7 @@ test('main line: knowledge → employee and tool → SOP → trigger → approva
  */
 test('revising a task contract voids acceptance and the old approval, and never repeats the external write', async ({ page }) => {
   await json(page.request.post('/__e2e/erp/mode', { data: { mode: 'ok' } }));
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByLabel('选择流程').selectOption(SOP);
   const runs = page.getByRole('region', { name: '运行记录' });
   await runs.getByLabel('事件编号').fill('INV-777');

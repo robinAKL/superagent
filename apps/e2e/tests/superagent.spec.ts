@@ -38,7 +38,7 @@ test('setup: an online employee, a placeholder tool and a first SOP draft', asyn
 });
 
 test('the graph shows every node; an unimplemented tool and an unreviewed write block publishing', async ({ page }, info) => {
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByLabel('选择流程').selectOption(SOP);
   const graph = page.getByRole('group', { name: '流程图' });
   await expect(graph.locator('.sop-node')).toHaveCount(4);
@@ -57,7 +57,7 @@ test('the graph shows every node; an unimplemented tool and an unreviewed write 
 });
 
 test('fix the draft (remove the tool, add a review), save, publish with an effective date: all gates reported', async ({ page }, info) => {
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByLabel('选择流程').selectOption(SOP);
   const graph = page.getByRole('group', { name: '流程图' });
   await graph.locator('[data-node="x"]').click();
@@ -88,7 +88,7 @@ test('fix the draft (remove the tool, add a review), save, publish with an effec
 test('editing after publish opens a new draft; the published version and its running instances are untouched', async ({ page, request }) => {
   const v1 = ((await (await request.get(`/api/v1/sop/${SOP}/versions`)).json()) as { versions: { id: string; number: number }[] }).versions.find((v) => v.number === 1)!;
   expect((await request.post(`/__e2e/sop/versions/${v1.id}/instances`)).ok()).toBe(true);
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByLabel('选择流程').selectOption(SOP);
   await expect(page.locator('main')).toContainText('已发布 v1（编辑将新建草稿）');
   await page.getByLabel('节点类型').selectOption('agent');
@@ -105,7 +105,7 @@ test('editing after publish opens a new draft; the published version and its run
 });
 
 test('ontology with configured knowledge but no readable objects stays empty', async ({ page }) => {
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByRole('tab', { name: '本体关系' }).click();
   await expect(page.locator('main')).toContainText('还没有经确认来源支持的对象。先在企业知识里确认来源并运行分析。');
   await expect(page.locator('[data-object], [data-relation]')).toHaveCount(0);
@@ -127,7 +127,7 @@ test('ontology renders objects, a relation and their evidence on the real page (
       },
     }),
   );
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByRole('tab', { name: '本体关系' }).click();
   const objects = page.getByRole('region', { name: '对象与实体' });
   await expect(objects.locator('[data-object]')).toHaveCount(2); // the employee recommendation is not an ontology object

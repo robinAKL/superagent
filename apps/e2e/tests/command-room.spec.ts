@@ -444,7 +444,7 @@ test('an async report leaves the SOP draft and the field being edited', async ({
     },
   })).status()).toBe(200);
 
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByLabel('选择流程').selectOption(sopId);
   const field = page.getByLabel('必填字段');
   const name = page.getByLabel('节点名称');

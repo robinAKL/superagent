@@ -23,7 +23,7 @@ const publishBtn = (page: Page) => page.getByRole('button', { name: '发布', ex
 
 test('validation runs the regression cases; an edit makes it stale and says so; revalidation allows publishing', async ({ page, request }) => {
   expect((await request.post('/api/v1/sop/drafts', { data: { sopId: 'e2e.month-end', definition: { ...rules, employeeStatus: 'active', graph: ok } } })).status()).toBe(200);
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByLabel('选择流程').selectOption('e2e.month-end');
   await expect(publishBtn(page)).toBeDisabled(); // never published without a validation
   await validateBtn(page).click();
@@ -63,7 +63,7 @@ test('a validation report missing baseline regression cases blocks publishing', 
     for (const x of body.versions) if (x.report) x.report.gates = { read_ok: { ok: true, detail: '' } };
     await route.fulfill({ response: res, json: body });
   });
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByLabel('选择流程').selectOption('e2e.partial');
   await expect(page.locator('[data-block="incomplete"]')).toContainText('校验缺少回归用例');
   await expect(publishBtn(page)).toBeDisabled();
@@ -71,7 +71,7 @@ test('a validation report missing baseline regression cases blocks publishing', 
 
 test('a pack starts as a draft with every rule and trigger unconfirmed; it cannot be validated or published until confirmed', async ({ page }) => {
   await knowledge(page, { s1: 'v1', s2: 'v1' });
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByLabel('新流程编号').fill('e2e.invoice-intake');
   await page.locator('[data-pack="invoice-intake"]').getByRole('button', { name: '套用到草稿' }).click();
   await expect(page.getByRole('status')).toContainText('已保存为草稿 v1');
@@ -82,7 +82,8 @@ test('a pack starts as a draft with every rule and trigger unconfirmed; it canno
   await expect(validateBtn(page)).toBeDisabled();
   await expect(publishBtn(page)).toBeDisabled();
 
-  for (const c of await items.all()) await c.check();
+  await page.getByRole('button', { name: '确认全部流程项', exact: true }).click();
+  for (const c of await items.all()) await expect(c).toBeChecked();
   await page.getByRole('button', { name: '保存草稿' }).click();
   await expect(page.locator('[data-block="pack"]')).toHaveCount(0);
   // without run rules the real regression cases fail and say why
@@ -101,7 +102,7 @@ test('a pack starts as a draft with every rule and trigger unconfirmed; it canno
 
 test('applying a pack over an existing draft needs explicit confirmation; cancel keeps the draft', async ({ page }) => {
   await knowledge(page, { s1: 'v1', s2: 'v1' });
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByLabel('选择流程').selectOption('e2e.month-end');
   // month-end has a published v1; create an open draft first
   await page.getByLabel('节点类型').selectOption('agent');
@@ -122,7 +123,7 @@ test('applying a pack over an existing draft needs explicit confirmation; cancel
 
 test('a pack never modifies the published workflow: applied to a published flow it opens a new draft', async ({ page }) => {
   await knowledge(page, { s1: 'v1', s2: 'v1' });
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByLabel('选择流程').selectOption('e2e.invoice-intake');
   await validateBtn(page).click();
   await publishBtn(page).click();
@@ -135,7 +136,7 @@ test('a pack never modifies the published workflow: applied to a published flow 
 
 test('knowledge changes behind a draft are shown with their impact and context', async ({ page }) => {
   await knowledge(page, { s1: 'v2', s2: null }); // s1 revised, s2 withdrawn since the pack was applied
-  await page.goto('/#brain');
+  await page.goto('/#brain?tab=sop');
   await page.getByLabel('选择流程').selectOption('e2e.invoice-intake');
   const impact = page.getByRole('region', { name: '知识变化影响' });
   await expect(impact).toContainText('企业知识已变化');
