@@ -21,26 +21,26 @@ interface CompanyContext {
 
 const TEXT = {
   en: {
-    title: 'Company context', name: 'Company name', goal: 'Business goal',
-    boundaries: 'Decision boundaries', boundaryHint: 'Describe the decisions that require a person and the limits the team must follow.',
-    save: 'Save context', saving: 'Saving…', saved: 'Saved context v{version}.',
-    loading: 'Loading company context…', loadError: 'Could not load the company context.',
-    conflict: 'The context changed while you were editing. Reload to see the latest version.',
-    saveError: 'Could not save the context. Try again.', reload: 'Reload',
-    ready: 'Operational readiness', employees: 'Digital employees', tools: 'Tools',
+    title: 'Company setup', name: 'Company name', goal: 'Work to hand to the digital team',
+    boundaries: 'Boundaries that must be followed', boundaryHint: 'Name the decisions that still need a person, and the limits the digital team must not cross.',
+    save: 'Save configuration', saving: 'Saving…', saved: 'Saved configuration v{version}.',
+    loading: 'Loading company setup…', loadError: 'Could not load the company setup.',
+    conflict: 'The configuration changed while you were editing. Reload to see the latest version.',
+    saveError: 'Could not save the configuration. Try again.', reload: 'Reload',
+    ready: 'Team and workflow readiness', employees: 'Digital employees', tools: 'Tools',
     employeeCount: '{ready} online of {total}', toolCount: '{ready} available of {total}',
     unavailable: 'Unavailable', checking: 'Checking…', published: 'Active workflows',
     noWorkflows: 'Publish a workflow to make it available in the command room.',
     configure: 'Open workflow editor', review: 'Review workflow candidates', openRoom: 'Open command room',
   },
   zh: {
-    title: '企业上下文', name: '企业名称', goal: '业务目标',
-    boundaries: '决策边界', boundaryHint: '写清哪些事需要人决定，以及团队必须遵守的限制。',
-    save: '保存企业上下文', saving: '保存中…', saved: '已保存上下文 v{version}。',
-    loading: '正在读取企业上下文…', loadError: '无法读取企业上下文。',
-    conflict: '编辑期间上下文已更新，请重新读取最新版本。',
-    saveError: '无法保存企业上下文，请重试。', reload: '重新读取',
-    ready: '运行就绪情况', employees: '数字员工', tools: '工具',
+    title: '企业配置', name: '企业名称', goal: '希望交给数字团队的工作',
+    boundaries: '必须遵守的边界', boundaryHint: '写清哪些事需要人决定，以及数字团队不得越过的限制。',
+    save: '保存配置', saving: '保存中…', saved: '已保存配置 v{version}。',
+    loading: '正在读取企业配置…', loadError: '无法读取企业配置。',
+    conflict: '编辑期间配置已更新，请重新读取最新版本。',
+    saveError: '无法保存配置，请重试。', reload: '重新读取',
+    ready: '团队与流程就绪', employees: '数字员工', tools: '工具',
     employeeCount: '在线 {ready} / 共 {total}', toolCount: '可用 {ready} / 共 {total}',
     unavailable: '暂不可用', checking: '正在核对…', published: '生效流程',
     noWorkflows: '流程发布生效后，指挥室即可启动。',
@@ -109,28 +109,26 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
     const field = key as keyof typeof EMPTY;
     return fields[field] !== (context?.[field] ?? '');
   });
-  return <div className="agent-context-grid">
-    <section className="panel stack" aria-labelledby="company-context-heading">
-      <h2 className="h2" id="company-context-heading">{t('title')}</h2>
-      {state === 'loading' ? <p className="helper" role="status">{t('loading')}</p> : state === 'error' ?
-        <p className="warn" role="alert">{t('loadError')}</p> : <form className="stack" onSubmit={save}>
-          <label className="field"><span>{t('name')}</span><input required maxLength={160} disabled={state === 'saving'} value={fields.name}
-            onChange={event => setFields({ ...fields, name: event.target.value })} /></label>
-          <label className="field"><span>{t('goal')}</span><textarea required maxLength={4000} rows={3} disabled={state === 'saving'} value={fields.goal}
-            onChange={event => setFields({ ...fields, goal: event.target.value })} /></label>
-          <label className="field"><span>{t('boundaries')}</span><textarea maxLength={4000} rows={3} disabled={state === 'saving'} value={fields.boundaries}
-            aria-describedby="company-context-boundary-hint" onChange={event => setFields({ ...fields, boundaries: event.target.value })} /></label>
-          <p className="helper" id="company-context-boundary-hint">{t('boundaryHint')}</p>
-          {state === 'conflict' || state === 'saveError' ? <p className="warn" role="alert">{t(state)}</p> : null}
-          <button className="btn primary" disabled={!dirty || state === 'saving' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()}>
-            {state === 'saving' ? t('saving') : t('save')}
-          </button>
-          {state === 'ready' && context && !dirty ? <p className="helper" role="status">{t('saved', { version: context.version })}</p> : null}
-        </form>}
-      {state === 'error' || state === 'conflict' ? <button type="button" className="btn" onClick={() => setAttempt(value => value + 1)}>{t('reload')}</button> : null}
-    </section>
-    <section className="panel stack" aria-labelledby="workflow-readiness-heading">
-      <h2 className="h2" id="workflow-readiness-heading">{t('ready')}</h2>
+  return <section className="panel stack company-setup" aria-labelledby="company-context-heading">
+    <h2 className="h2" id="company-context-heading">{t('title')}</h2>
+    {state === 'loading' ? <p className="helper" role="status">{t('loading')}</p> : state === 'error' ?
+      <p className="warn" role="alert">{t('loadError')}</p> : <form className="stack" onSubmit={save}>
+        <label className="field"><span>{t('name')}</span><input required maxLength={160} disabled={state === 'saving'} value={fields.name}
+          onChange={event => setFields({ ...fields, name: event.target.value })} /></label>
+        <label className="field"><span>{t('goal')}</span><textarea required maxLength={4000} rows={3} disabled={state === 'saving'} value={fields.goal}
+          onChange={event => setFields({ ...fields, goal: event.target.value })} /></label>
+        <label className="field"><span>{t('boundaries')}</span><textarea maxLength={4000} rows={3} disabled={state === 'saving'} value={fields.boundaries}
+          aria-describedby="company-context-boundary-hint" onChange={event => setFields({ ...fields, boundaries: event.target.value })} /></label>
+        <p className="helper" id="company-context-boundary-hint">{t('boundaryHint')}</p>
+        {state === 'conflict' || state === 'saveError' ? <p className="warn" role="alert">{t(state)}</p> : null}
+        <button className="btn primary" disabled={!dirty || state === 'saving' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()}>
+          {state === 'saving' ? t('saving') : t('save')}
+        </button>
+        {state === 'ready' && context && !dirty ? <p className="helper" role="status">{t('saved', { version: context.version })}</p> : null}
+      </form>}
+    {state === 'error' || state === 'conflict' ? <button type="button" className="btn" onClick={() => setAttempt(value => value + 1)}>{t('reload')}</button> : null}
+    <div className="company-setup-ready">
+      <h3 id="workflow-readiness-heading">{t('ready')}</h3>
       <dl className="agent-readiness">
         <div><dt><a href="#employees">{t('employees')}</a></dt><dd>{team ? t('employeeCount', team) : t(team === null ? 'unavailable' : 'checking')}</dd></div>
         <div><dt><a href="#tools">{t('tools')}</a></dt><dd>{tools ? t('toolCount', tools) : t(tools === null ? 'unavailable' : 'checking')}</dd></div>
@@ -143,6 +141,6 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
       </ul> : <p className="helper">{t(workflows === undefined ? 'checking' : workflows === null ? 'unavailable' : 'noWorkflows')}</p>}
       {fromOrganization ? <a className="btn" href="#brain?tab=results&org=1">{t('review')}</a> : null}
       <a href={workflows?.length ? '#room' : '#brain?tab=sop'}>{t(workflows?.length ? 'openRoom' : 'configure')}</a>
-    </section>
-  </div>;
+    </div>
+  </section>;
 }
