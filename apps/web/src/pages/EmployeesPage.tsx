@@ -79,6 +79,7 @@ export const TEXT = {
     unsaved: 'Changes not yet applied',
     saved: 'Saved.', merged: 'Merged.', removed: 'Deleted.', added: 'Role added.',
     confirmed: 'Organization confirmed. {e} new employees, {t} new tool placeholders.',
+    chipsMore: '+{n} more', chipsLess: 'Show less',
     confirmedRetired: 'Organization confirmed. {e} new, {r} removed, {t} new tool placeholders.',
     busyKept: 'Not removed yet because they still have work in progress: {names}. Reassign or finish that work, then confirm again.',
     planPending: 'A plan for {n} roles is waiting below. Confirming now uses the current {m} roles — adopt the plan first if you want {n}.',
@@ -137,6 +138,7 @@ export const TEXT = {
     unsaved: '有未应用的修改',
     saved: '已保存。', merged: '已合并。', removed: '已删除。', added: '已添加岗位。',
     confirmed: '组织已确认。新建 {e} 名员工、{t} 个工具占位。',
+    chipsMore: '另有 {n} 项', chipsLess: '收起',
     confirmedRetired: '组织已确认。新建 {e} 名、移除 {r} 名员工，新建 {t} 个工具占位。',
     busyKept: '以下员工还有进行中的工作，暂未移除：{names}。请先改派或完成这些工作，再确认一次。',
     planPending: '下方有一个 {n} 个岗位的人数方案还没采用。现在确认会按当前 {m} 个岗位创建员工；想要 {n} 个请先「采用这个方案」。',
@@ -166,6 +168,17 @@ function Sources({ evidence, t }: { evidence: Evidence[]; t: T }) {
     <summary>{t('evidence', { n: evidence.length })}</summary>
     <ul>{evidence.map((e, i) => <li key={i}><code>{e.locator}</code><q>{e.quote}</q></li>)}</ul>
   </details>;
+}
+
+/** Compact chips; long lists show the first few and a "+N more" toggle so a role card stays scannable. */
+function ChipList({ items, t, limit = 6 }: { items: { key: string; label: string; tone?: string }[]; t: T; limit?: number }) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? items : items.slice(0, limit);
+  return <span className="org-chips">
+    {shown.map(item => <span key={item.key} className={`org-chip ${item.tone ?? ''}`} title={item.label}>{item.label}</span>)}
+    {items.length > limit ? <button type="button" className="org-chip-more" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+      {open ? t('chipsLess') : t('chipsMore', { n: items.length - limit })}</button> : null}
+  </span>;
 }
 
 export function RoleCard({ role, org, busy, t, onSave, onMerge, onRemove }: {
@@ -215,12 +228,12 @@ export function RoleCard({ role, org, busy, t, onSave, onMerge, onRemove }: {
       <p className="org-duty">{role.duty}</p>
       <dl className="org-links">
         <dt>{t('usesTools')}</dt>
-        <dd>{role.tools.length ? role.tools.map(k => {
+        <dd>{role.tools.length ? <ChipList t={t} items={role.tools.map(k => {
           const tool = org.tools.find(x => x.key === k);
-          return <span key={k} className={`org-chip ${tool?.match === 'existing' ? 'is-ready' : 'is-missing'}`}>{toolName(k)}</span>;
-        }) : <span className="helper">{t('none')}</span>}</dd>
+          return { key: k, label: toolName(k), tone: tool?.match === 'existing' ? 'is-ready' : 'is-missing' };
+        })} /> : <span className="helper">{t('none')}</span>}</dd>
         <dt>{t('joinsSops')}</dt>
-        <dd>{role.sops.length ? role.sops.map(k => <span key={k} className="org-chip">{sopName(k)}</span>) : <span className="helper">{t('none')}</span>}</dd>
+        <dd>{role.sops.length ? <ChipList t={t} items={role.sops.map(k => ({ key: k, label: sopName(k) }))} /> : <span className="helper">{t('none')}</span>}</dd>
       </dl>
       <details className="org-prompt"><summary>{t('prompt')}</summary>
         {!role.promptEdited ? <p className="helper">{t('promptDefault')}</p> : null}

@@ -28,12 +28,25 @@ describe('Digital employees: role card', () => {
   it('shows duty, tools marked reusable or missing, workflows and sources', () => {
     const html = render('en');
     expect(html).toContain('Checks credit and amount');
-    expect(html).toMatch(/org-chip is-ready">Knowledge Q&amp;A/);
-    expect(html).toMatch(/org-chip is-missing">Order entry/);
+    expect(html).toMatch(/org-chip is-ready" title="Knowledge Q&amp;A">Knowledge Q&amp;A/);
+    expect(html).toMatch(/org-chip is-missing" title="Order entry">Order entry/);
     expect(html).toContain('Order review');
     expect(html).toContain('Sources (1)');
     expect(html).toContain('guide.md#L3');
     expect(html).toContain('>Merge into…<');
+  });
+
+  it('a long tool list shows six compact chips and a "+N more" toggle instead of a column of pills', () => {
+    const many = Array.from({ length: 9 }, (_, i) => `tool${i}`);
+    const tools = many.map((key, i) => ({ id: `t${i}`, key, name: `record_order_step_${i} (CRM action)`, description: '', evidence: [], toolId: null, match: 'placeholder' as const, matchName: null }));
+    const t = (key: keyof typeof TEXT.en, vars?: Record<string, string | number>) => translate(TEXT, 'en', key, vars);
+    const r = { ...role, tools: many };
+    const html = renderToStaticMarkup(<RoleCard role={r} org={{ ...org, tools, employees: [r] }} busy={false} t={t}
+      onSave={async () => true} onMerge={() => undefined} onRemove={() => undefined} />);
+    expect(html.match(/class="org-chip is-missing"/g)).toHaveLength(6);
+    expect(html).toContain('title="record_order_step_0 (CRM action)"');
+    expect(html).toMatch(/<button type="button" class="org-chip-more" aria-expanded="false">\+3 more<\/button>/);
+    expect(html).not.toContain('record_order_step_8');
   });
 
   it('English UI contains no Chinese chrome; Chinese UI is fully translated', () => {
