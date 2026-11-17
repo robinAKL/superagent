@@ -21,6 +21,7 @@ describe('employee manage drawer', () => {
     expect(drawer).toContain('v2');
     expect(drawer).toContain('dev-owner');
     expect(drawer).toContain('暂停');
+    expect(drawer).toContain('href="#tools?employee=emp-1"');
     const en = renderToStaticMarkup(<LangProvider initial="en"><EmployeeFeedback employees={[]} /></LangProvider>);
     expect(en).toContain('Employee feedback and capability requests (0)');
     expect(en).not.toMatch(/[一-鿿]/);

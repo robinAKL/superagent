@@ -240,7 +240,7 @@ function initialEmployeeId(): string {
   if (typeof window === 'undefined') return '';
   const hashQuery = window.location.hash.includes('?') ? window.location.hash.slice(window.location.hash.indexOf('?')) : '';
   const params = new URLSearchParams(hashQuery || window.location.search);
-  return params.get('employeeId')?.trim() ?? '';
+  return (params.get('employeeId') ?? params.get('employee'))?.trim() ?? '';
 }
 
 export function ToolsPage() {
