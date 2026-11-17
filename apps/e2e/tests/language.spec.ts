@@ -48,10 +48,12 @@ test.describe('nothing chosen yet', () => {
       await page.goto(`/#${hash}`);
       await expect(page.getByRole('heading', { level: 1 }), `#${hash}`).toHaveText(heading);
       await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+      const optional = async (locator: ReturnType<typeof page.locator>) =>
+        (await locator.count()) ? await locator.first().innerText() : '';
       const chrome = [
         await page.getByRole('navigation', { name: 'Main menu' }).innerText(),
-        await page.locator('main .page-head').innerText().catch(() => ''),
-        await page.locator('main [role="tablist"]').innerText().catch(() => ''),
+        await optional(page.locator('main .page-head')),
+        await optional(page.locator('main [role="tablist"]')),
       ].join('\n');
       expect(chrome, `#${hash} chrome`).not.toMatch(han);
     }
