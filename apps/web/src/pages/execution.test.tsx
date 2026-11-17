@@ -182,7 +182,7 @@ describe('execution pages reuse the v12 copy', () => {
   });
 
   it('starts with no sample items, and keeps the seven kinds, four renderers and three groups', () => {
-    const html = renderToStaticMarkup(<WorkInboxPage />);
+    const html = renderToStaticMarkup(<LangProvider initial="zh"><WorkInboxPage /></LangProvider>);
     expect(html).toContain('待我处理');
     expect(html).toContain('核对数据、作决定、亲自完成工作；每一步都有证据和下一位责任人。');
     expect(html).toContain('正在读取');
