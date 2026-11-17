@@ -207,7 +207,14 @@ export function WorkInboxPage() {
           <div className="exec-scroll">
             {failed ? <p className="helper" role="alert">没能读取待办，请稍后重试。</p> : null}
             {items === null && !failed ? <p className="helper">正在读取…</p> : null}
-            {items !== null && visible.length === 0 ? <p className="helper">没有分给你的事项。</p> : null}
+            {items !== null ? <div className="work-summary" aria-label="待办汇总">
+              <p>审批 {items.filter(i => i.kind === 'action_approval').length} · 工具发布相关 {items.filter(i => /tool|release|install/i.test(i.kind + String(i.payload.title ?? ''))).length} · 全部 {items.length}</p>
+            </div> : null}
+            {items !== null && visible.length === 0 ? <div className="room-tasks-empty" role="status">
+              <strong>现在没有需要你处理的事项</strong>
+              <p className="helper">审批和工具发布会汇总在这里。没有事项时先看指挥室里进行中的任务，或到员工工具安装能力。</p>
+              <p><a href="#room">打开指挥室</a> · <a href="#tools">打开员工工具</a></p>
+            </div> : null}
             {GROUPS.map((section) => {
               const rows = visible.filter((item) => groupOf(item) === section.id);
               if (rows.length === 0) return null;

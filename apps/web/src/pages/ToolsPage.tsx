@@ -39,6 +39,14 @@ type TextKey =
   | 'store.title'
   | 'store.subtitle'
   | 'store.filterLabel'
+  | 'store.search'
+  | 'store.searchPlaceholder'
+  | 'store.category'
+  | 'store.categoryAll'
+  | 'store.effect.read'
+  | 'store.effect.write'
+  | 'store.effect.external'
+  | 'store.source'
   | 'store.allEmployees'
   | 'store.status.available'
   | 'store.status.installed'
@@ -86,6 +94,14 @@ const TEXT: Dict<TextKey> = {
     'store.title': 'Tool store',
     'store.subtitle': 'Preset tools backed by verified server capabilities. External write connectors are marked coming soon.',
     'store.filterLabel': 'View for employee',
+    'store.search': 'Search',
+    'store.searchPlaceholder': 'Name or id',
+    'store.category': 'Category',
+    'store.categoryAll': 'All categories',
+    'store.effect.read': 'Read',
+    'store.effect.write': 'Write',
+    'store.effect.external': 'External',
+    'store.source': 'Source: catalog',
     'store.allEmployees': 'All employees',
     'store.status.available': 'Ready to install',
     'store.status.installed': 'Installed',
@@ -132,6 +148,14 @@ const TEXT: Dict<TextKey> = {
     'store.title': '工具商店',
     'store.subtitle': '仅对后端已实现的真实能力开放安装，未接入的外部写连接器标注为“即将提供”。',
     'store.filterLabel': '按员工查看',
+    'store.search': '搜索',
+    'store.searchPlaceholder': '名称或编号',
+    'store.category': '类别',
+    'store.categoryAll': '全部类别',
+    'store.effect.read': '读取',
+    'store.effect.write': '写入',
+    'store.effect.external': '外部',
+    'store.source': '来源：预置目录',
     'store.allEmployees': '全部员工',
     'store.status.available': '待安装',
     'store.status.installed': '已安装',
@@ -230,6 +254,8 @@ export function ToolsPage() {
   const [targetEmpId, setTargetEmpId] = useState<string>('');
   const [storeNotice, setStoreNotice] = useState<string>('');
   const [busyInstall, setBusyInstall] = useState(false);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<'all' | CatalogTool['effect']>('all');
 
   const [toolId, setToolId] = useState('');
   const [tool, setTool] = useState<ToolView | null>(null);
@@ -357,8 +383,29 @@ export function ToolsPage() {
 
         {storeNotice ? <p className="helper" role="status">{storeNotice}</p> : null}
 
+        <div className="tool-store-head">
+          <label className="tool-store-filter">
+            <span>{t('store.search')}</span>
+            <input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder={t('store.searchPlaceholder')} />
+          </label>
+          <label className="tool-store-filter">
+            <span>{t('store.category')}</span>
+            <select value={category} onChange={e => setCategory(e.target.value as typeof category)}>
+              <option value="all">{t('store.categoryAll')}</option>
+              <option value="read">{t('store.effect.read')}</option>
+              <option value="write">{t('store.effect.write')}</option>
+              <option value="external">{t('store.effect.external')}</option>
+            </select>
+          </label>
+        </div>
+
         <div className="tool-store-grid">
-          {catalog.map((item) => {
+          {catalog.filter(item => {
+            const q = query.trim().toLowerCase();
+            const label = (item.name?.[lang] ?? item.toolId).toLowerCase();
+            const matchQ = !q || item.toolId.toLowerCase().includes(q) || label.includes(q);
+            return matchQ && (category === 'all' || item.effect === category);
+          }).map((item) => {
             const picking = installingToolId === item.toolId;
             return (
               <article key={item.toolId} className="tool-card">
@@ -371,6 +418,7 @@ export function ToolsPage() {
                     <span className={`tool-badge ${item.status}`}>{t(`store.status.${item.status}`)}</span>
                   </div>
                   <p className="tool-card-summary">{item.summary[lang]}</p>
+                  <p className="helper">{t(`store.effect.${item.effect}`)} · {t('store.source')}</p>
                   {item.installedEmployees.length > 0 ? (
                     <p className="helper">{t('store.installedOn', { names: employeeNames(item.installedEmployees) })}</p>
                   ) : null}

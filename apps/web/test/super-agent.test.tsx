@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { validateSopGraph, type SopGraph } from '@superagent/shared';
 import { SopGraphView } from '../src/components/SopGraphView';
 import { LangProvider } from '../src/i18n';
-import { employeeContext } from '../src/pages/SuperAgentPage';
+import { employeeContext, SuperAgentPage } from '../src/pages/SuperAgentPage';
 
 const graph: SopGraph = {
   nodes: [
@@ -15,6 +15,20 @@ const graph: SopGraph = {
 };
 
 describe('SOP graph view', () => {
+  it('the Super Agent page only lists company setup and workflows as primary tabs', () => {
+    const zh = renderToStaticMarkup(<LangProvider initial="zh"><SuperAgentPage /></LangProvider>);
+    expect(zh).toContain('企业配置与数字组织');
+    expect(zh).toContain('企业流程');
+    expect(zh).toContain('数字岗位与工作量');
+    expect(zh).toContain('确认并发布配置，生成数字员工');
+    expect(zh).toContain('启用前请确认这三项');
+    expect(zh).toContain('高级：MCP 知识');
+    expect(zh).not.toMatch(/role="tab"[^>]*>MCP 知识/);
+    const en = renderToStaticMarkup(<SuperAgentPage />);
+    expect(en).toContain('Company setup &amp; digital org');
+    expect(en).not.toMatch(/[一-鿿]/);
+  });
+
   it('draws every node as a labelled button with its kind, and marks nodes that have structural issues', () => {
     const issues = validateSopGraph(graph, { employees: { 'emp-1': { status: 'active' } }, tools: { 'erp.post': { stage: 'available', effect: 'write' } } });
     expect(issues.map((i) => i.code)).toEqual(['write_without_review']);

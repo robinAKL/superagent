@@ -21,7 +21,16 @@ interface TestResponse {
 
 const TEXT = {
   en: {
-    title: 'Settings', lead: 'Connect a model and set its monthly budget', connection: 'Model connection', budget: 'Monthly usage cap',
+    title: 'Settings', lead: 'Connect a model and set its monthly budget',
+    tabRun: 'Runtime settings', tabAudit: 'Audit log', tabArch: 'Architecture',
+    auditLead: 'Append-only events. Secrets and source text are never shown.',
+    auditEmpty: 'No model-configuration events on this page yet. Status above is the current runtime setting.',
+    auditStatus: 'Current model status',
+    archLead: 'How the workbench, control plane and workers stay separate.',
+    archWorkbench: 'Workbench', archWorkbenchBody: 'People use seven entries. Closing a window does not stop the control plane.',
+    archControl: 'Control plane', archControlBody: 'Tasks, leases and audit stay in the server. Agents are started only when there is work.',
+    archWorker: 'Workers', archWorkerBody: 'A worker identity can be reachable without a model occupying a seat. Unconnected roles never appear online.',
+    connection: 'Model connection', budget: 'Monthly usage cap',
     providerAnthropic: 'Anthropic (Claude)', providerOpenai: 'OpenAI (GPT)', providerAzure: 'Azure OpenAI',
     statusUnconfigured: 'Not configured', statusConfigured: 'Configured', statusRevoked: 'Revoked', statusKeyInvalid: 'Key invalid',
     status: 'Status: ', loading: 'Loading…', statusUnavailable: 'Could not load model settings.',
@@ -47,7 +56,16 @@ const TEXT = {
     capSaved: 'Saved; applies to this month right away', capNotSaved: 'Not saved: Enter a positive USD amount with up to two decimals.',
   },
   zh: {
-    title: '管理设置', lead: '连接模型并设置月度预算', connection: '模型连接', budget: '月度用量上限',
+    title: '管理设置', lead: '连接模型并设置月度预算',
+    tabRun: '运行设置', tabAudit: '审计记录', tabArch: '架构说明',
+    auditLead: '只追加、不可改。密钥和原文不会出现在这里。',
+    auditEmpty: '本页还没有列出模型配置事件。上方状态就是当前运行设置。',
+    auditStatus: '当前模型状态',
+    archLead: '工作台、控制面和 worker 分开，关掉窗口不会停后台。',
+    archWorkbench: '工作台', archWorkbenchBody: '负责人七个入口。关掉窗口不等于停止控制面。',
+    archControl: '控制面', archControlBody: '任务、租约和审计留在服务端。有任务时才拉起 agent。',
+    archWorker: 'Worker', archWorkerBody: '身份可达不必占模型座位。未连接的岗位不会显示在线。',
+    connection: '模型连接', budget: '月度用量上限',
     providerAnthropic: 'Anthropic（Claude）', providerOpenai: 'OpenAI（GPT）', providerAzure: 'Azure OpenAI',
     statusUnconfigured: '未配置', statusConfigured: '已配置', statusRevoked: '已撤销', statusKeyInvalid: 'Key 失效',
     status: '状态：', loading: '读取中…', statusUnavailable: '无法读取模型设置。',
@@ -83,8 +101,21 @@ const PROVIDERS: { id: string; label: Key }[] = [
 const STATUS: Record<string, Key> = { unconfigured: 'statusUnconfigured', configured: 'statusConfigured', revoked: 'statusRevoked', key_invalid: 'statusKeyInvalid' };
 const AUTH_ERROR: Record<string, Key> = { invalid_key: 'invalidKey', quota: 'quota', network: 'network' };
 
+type SetupTab = 'run' | 'audit' | 'arch';
+function setupTab(): SetupTab {
+  const params = new URLSearchParams(typeof window === 'undefined' ? undefined : window.location.hash.split('?')[1]);
+  const tab = params.get('tab');
+  return tab === 'audit' || tab === 'arch' ? tab : 'run';
+}
+
 export function SetupPage() {
   const t = useT(TEXT);
+  const [tab, setTab] = useState<SetupTab>(setupTab);
+  useEffect(() => {
+    const onHash = () => setTab(setupTab());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
   const [status, setStatus] = useState<LlmStatus | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [form, setForm] = useState({ provider: 'anthropic', apiKey: '', endpoint: '', probeModel: '' });
@@ -181,6 +212,30 @@ export function SetupPage() {
 
   return <div className="setup-page">
     <header className="page-head"><h1>{t('title')}</h1><p>{t('lead')}</p></header>
+    <div className="tabs" role="tablist" aria-label={t('title')}>
+      {([['run', 'tabRun'], ['audit', 'tabAudit'], ['arch', 'tabArch']] as const).map(([id, key]) =>
+        <button key={id} role="tab" type="button" className="tab" aria-selected={tab === id} onClick={() => {
+          window.location.hash = id === 'run' ? 'settings' : `settings?tab=${id}`;
+        }}>{t(key)}</button>)}
+    </div>
+    {tab === 'audit' ? <section className="panel setup-card" aria-labelledby="setup-audit">
+      <h2 id="setup-audit" className="h2">{t('tabAudit')}</h2>
+      <p className="helper">{t('auditLead')}</p>
+      <dl className="setup-audit">
+        <dt>{t('auditStatus')}</dt>
+        <dd>{status ? t(STATUS[status.status] ?? 'statusUnconfigured') : t(loadFailed ? 'statusUnavailable' : 'loading')}
+          {status?.keyLast4 ? ` · Key ••••${status.keyLast4}` : ''}
+          {status?.primaryModel ? t('primaryModelIs', { model: status.primaryModel }) : ''}
+        </dd>
+      </dl>
+      {status?.reminder ? <p className="warn">{status.reminder}</p> : <p className="helper">{t('auditEmpty')}</p>}
+    </section> : tab === 'arch' ? <section className="panel setup-card" aria-labelledby="setup-arch">
+      <h2 id="setup-arch" className="h2">{t('tabArch')}</h2>
+      <p className="helper">{t('archLead')}</p>
+      <article><h3>{t('archWorkbench')}</h3><p>{t('archWorkbenchBody')}</p></article>
+      <article><h3>{t('archControl')}</h3><p>{t('archControlBody')}</p></article>
+      <article><h3>{t('archWorker')}</h3><p>{t('archWorkerBody')}</p></article>
+    </section> : <>
     <section className="panel setup-card" aria-labelledby="setup-connection">
       <header className="setup-card-head">
         <h2 id="setup-connection" className="h2">{t('connection')}</h2>
@@ -245,5 +300,6 @@ export function SetupPage() {
       </div>
       {feedback(capNotice)}
     </form>
+    </>}
   </div>;
 }

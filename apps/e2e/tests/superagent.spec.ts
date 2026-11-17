@@ -105,8 +105,7 @@ test('editing after publish opens a new draft; the published version and its run
 });
 
 test('ontology with configured knowledge but no readable objects stays empty', async ({ page }) => {
-  await page.goto('/#brain?tab=sop');
-  await page.getByRole('tab', { name: '本体关系' }).click();
+  await page.goto('/#brain?tab=ontology');
   await expect(page.locator('main')).toContainText('还没有业务对象');
   await expect(page.getByRole('img', { name: /本体关系图/ })).toHaveCount(0);
 });
@@ -127,8 +126,7 @@ test('ontology renders objects, a relation and their evidence on the real page (
       },
     }),
   );
-  await page.goto('/#brain?tab=sop');
-  await page.getByRole('tab', { name: '本体关系' }).click();
+  await page.goto('/#brain?tab=ontology');
   const ontology = page.getByRole('region', { name: '本体关系图', exact: true });
   const canvas = ontology.getByRole('img', { name: /2 个业务对象 · 1 条关系/ });
   await expect(canvas.locator('.onto-node')).toHaveCount(2); // the employee recommendation is not an ontology object
