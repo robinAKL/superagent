@@ -17,6 +17,17 @@ export interface Recommendation {
   proposedChange?: { name: string; description: string; evidence: Evidence[]; relation?: { from:string;to:string;label:string } };
   mcpScope?: string;
   mcpRunId?: string;
+  /** Employee drafts only: the system prompt the owner reviewed, and which tool / SOP drafts (by key) the role works with. */
+  prompt?: string;
+  assignment?: { tools: string[]; sops: string[] };
+  /** Set when an owner merged this employee draft into another one; the draft is then deleted. */
+  mergedInto?: string;
+}
+/** What "Confirm organization" created, keyed by recommendation id so a repeat confirmation creates nothing new. */
+export interface OrganizationRecord {
+  confirmedAt: string; confirmedBy: string; revision: number;
+  employees: Record<string, { employeeId: string; name: string; duty: string; prompt: string }>;
+  tools: Record<string, { toolId: string; name: string; match: 'existing' | 'placeholder' }>;
 }
 export interface AnalysisRun {
   id: string; actor: UserContext; status: 'queued' | 'running' | 'completed' | 'failed' | 'stale' | 'outcome_unknown';
@@ -41,6 +52,7 @@ export interface KnowledgeState {
   liveMcp: Record<string, LiveMcpUser>;
   /** Existing grants from the previous release, migrated on the user's next write. */
   veraMcp: Record<string, { grant?: { clientId: string; deadline: number; secret: SecretVersion } }>;
+  organization?: OrganizationRecord;
 }
 export const emptyState = (): KnowledgeState => ({ spaceName: '企业知识', installedPlugins: ['local-file'], revision: 0, source: { connections: [], items: [], chunks: [], citations: [], flagged: [] }, connectionMeta: {}, confirmations: {}, analyses: [], recommendations: [], uploads: [], disabledPlugins: [], parseJobs: [], queryTemplates: [], profiles: {}, liveMcp: {}, veraMcp: {} });
 export const stamp = () => new Date().toISOString();
