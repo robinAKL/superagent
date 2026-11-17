@@ -9,6 +9,7 @@ import { McpKnowledge } from './McpKnowledge';
 import { AnalysisDraftIndex } from './AnalysisDraftIndex';
 import { CompanyContextPanel } from './CompanyContextPanel';
 import { ExecutionsPanel } from './ExecutionsPanel';
+import { sopTabView, type LoadCount } from './knowledge-sop-tab';
 import './SuperAgentPage.css';
 import './EmployeesPage.css';
 
@@ -201,6 +202,17 @@ export function SuperAgentPage() {
   }, []);
   const [knowledge, retryKnowledge] = useDraftRead();
   const count = knowledge.status === 'ready' ? [...knowledge.drafts.recommendations, ...knowledge.drafts.mcpRecommendations].filter(draft => draft.kind === 'sop').length : 0;
+  const [saved, setSaved] = useState<LoadCount>({ status: 'loading' });
+  useEffect(() => {
+    let cancelled = false;
+    void api<{ sops?: unknown[] }>('/api/v1/sop').then(r => {
+      if (cancelled) return;
+      setSaved(r.status === 200 && Array.isArray(r.body?.sops) ? { status: 'ready', count: r.body.sops.length } : { status: 'error' });
+    }).catch(() => { if (!cancelled) setSaved({ status: 'error' }); });
+    return () => { cancelled = true; };
+  }, []);
+  const candidates: LoadCount = knowledge.status !== 'ready' ? { status: knowledge.status } : { status: 'ready', count };
+  const { sub: sopSub } = sopTabView(saved, candidates, workflowId || candidate ? 'flows' : 'auto');
   return (
     <>
       <header className="page-head">
@@ -219,7 +231,7 @@ export function SuperAgentPage() {
           {typeof window === 'undefined' ? null : <McpKnowledge />}
         </details>
       </> :
-        tab === 'sop' ? (!workflowId && !candidate
+        tab === 'sop' ? (sopSub === 'candidates' && !workflowId && !candidate
           ? <AnalysisResults knowledge={knowledge} retryKnowledge={retryKnowledge} initialKind="" fromOrganization={fromOrganization} />
           : <SopWorkspace key={`${workflowId}|${candidate}`} initialSop={workflowId} candidate={candidate} knowledge={knowledge} retryKnowledge={retryKnowledge} />) :
         tab === 'ontology' ? <OntologyView knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
@@ -280,6 +292,8 @@ export function AnalysisResults({ knowledge, retryKnowledge, initialKind, fromOr
       <div className="workflow-actions">
         {route === 'brain' && !initialKind && knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.length
           ? <a href={`#brain?tab=results&type=all${fromOrganization ? '&org=1' : ''}`}>{t('allDrafts')}</a> : null}
+        {knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.some(draft => draft.kind === 'sop')
+          ? <a href={route === 'knowledge' ? '#knowledge?view=sop&sub=candidates' : `#brain?type=sop${fromOrganization ? '&org=1' : ''}`}>{t('viewPrivateWorkflows')}</a> : null}
         {route === 'brain' ? <a href="#knowledge?view=analysis">{t('reviewDrafts')}</a> : null}
       </div>
     </div>
