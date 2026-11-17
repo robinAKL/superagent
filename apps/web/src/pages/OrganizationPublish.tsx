@@ -54,6 +54,10 @@ const TEXT = {
   },
 };
 
+export function orgPublishReady(org: Organization | null, loaded: boolean): boolean {
+  return loaded && !!org && org.canConfirm && !org.blocked;
+}
+
 class RequestError extends Error { constructor(public code: string) { super(code); } }
 
 async function call<R>(path: string, init?: RequestInit): Promise<R> {
@@ -62,13 +66,15 @@ async function call<R>(path: string, init?: RequestInit): Promise<R> {
   return body;
 }
 
-export function OrganizationPublish({ embedded, confirmRef }: {
+export function OrganizationPublish({ embedded, confirmRef, onGate }: {
   embedded?: boolean;
   confirmRef?: { current: (() => Promise<boolean>) | null };
+  onGate?: (gate: { loaded: boolean; ready: boolean; busy: boolean }) => void;
 }) {
   const t = useT(TEXT);
   const planT = useT(PLAN_TEXT);
   const [org, setOrg] = useState<Organization | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [fallback, setFallback] = useState(false);
@@ -78,8 +84,11 @@ export function OrganizationPublish({ embedded, confirmRef }: {
   const load = useCallback(async () => {
     try { setOrg(await call<Organization>('/organization')); }
     catch { setOrg(null); }
+    finally { setLoaded(true); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  const ready = orgPublishReady(org, loaded);
+  useEffect(() => { onGate?.({ loaded, ready, busy }); }, [loaded, ready, busy, onGate]);
 
   async function planTeam(count: number) {
     setBusy(true); setPlanning(true); setError(null);
@@ -94,7 +103,7 @@ export function OrganizationPublish({ embedded, confirmRef }: {
   }
 
   async function confirm() {
-    if (!org || !org.canConfirm || org.blocked) return false;
+    if (!orgPublishReady(org, loaded) || busy) return false;
     setBusy(true); setError(null);
     try {
       const result = await call<{ createdEmployees: number; createdTools: number }>('/organization/confirm', { method: 'POST', body: '{}' });
@@ -105,8 +114,6 @@ export function OrganizationPublish({ embedded, confirmRef }: {
     finally { setBusy(false); }
   }
   if (confirmRef) confirmRef.current = () => confirm();
-
-  const ready = !!org && org.canConfirm && !org.blocked;
   const body = <>
     <p className="helper">{t('hint')}</p>
     {error ? <p className="warn" role="alert">{error}</p> : null}

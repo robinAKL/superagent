@@ -56,8 +56,10 @@ const TIMEOUT = 12_000;
 export function CompanyContextPanel({ fromOrganization }: { fromOrganization: boolean }) {
   const t = useT(TEXT);
   const confirmRef = useRef<(() => Promise<boolean>) | null>(null);
+  const [orgGate, setOrgGate] = useState({ loaded: false, ready: false, busy: false });
   const [context, setContext] = useState<CompanyContext | null>();
   const [fields, setFields] = useState(EMPTY);
+  const [published, setPublished] = useState(false);
   const [workflows, setWorkflows] = useState<PublishedWorkflow[] | null>();
   const [knowledgeCount, setKnowledgeCount] = useState<number | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -86,8 +88,9 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
 
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (state === 'saving' || state === 'conflict') return;
+    if (state === 'saving' || state === 'conflict' || !orgGate.loaded || !orgGate.ready || orgGate.busy) return;
     setState('saving');
+    setPublished(false);
     try {
       const response = await api<{ context: CompanyContext }>('/api/v1/sop/company-context', {
         method: 'PUT', body: JSON.stringify({ ...fields, expectedVersion: context?.version ?? 0 }),
@@ -97,8 +100,10 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
       const next = response.body.context;
       setContext(next);
       setFields({ name: next.name, goal: next.goal, boundaries: next.boundaries });
+      const confirmed = await confirmRef.current?.() ?? false;
+      if (!confirmed) { setState('saveError'); return; }
+      setPublished(true);
       setState('ready');
-      await confirmRef.current?.();
     } catch {
       setState('saveError');
     }
@@ -121,12 +126,12 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
           <label className="field"><span>{t('boundaries')}</span><textarea maxLength={4000} rows={3} disabled={state === 'saving' || state === 'loading'} value={fields.boundaries}
             aria-describedby="company-context-boundary-hint" onChange={event => setFields({ ...fields, boundaries: event.target.value })} /></label>
           <p className="helper" id="company-context-boundary-hint">{t('boundaryHint')}</p>
-          <OrganizationPublish embedded confirmRef={confirmRef} />
+          <OrganizationPublish embedded confirmRef={confirmRef} onGate={setOrgGate} />
           {state === 'conflict' || state === 'saveError' ? <p className="warn" role="alert">{t(state)}</p> : null}
-          <button className="btn primary" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()}>
+          <button className="btn primary" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !orgGate.loaded || !orgGate.ready || orgGate.busy || !fields.name.trim() || !fields.goal.trim()}>
             {state === 'saving' ? t('saving') : t('save')}
           </button>
-          {state === 'ready' && context && !dirty ? <p className="helper" role="status">{t('saved', { version: context.version })}</p> : null}
+          {state === 'ready' && published && context && !dirty ? <p className="helper" role="status">{t('saved', { version: context.version })}</p> : null}
         </form>}
       {state === 'error' || state === 'conflict' ? <button type="button" className="btn" onClick={() => setAttempt(value => value + 1)}>{t('reload')}</button> : null}
       {fromOrganization ? <a className="btn" href="#brain?tab=results&org=1">{t('review')}</a> : null}

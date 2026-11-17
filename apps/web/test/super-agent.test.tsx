@@ -4,6 +4,7 @@ import { validateSopGraph, type SopGraph } from '@superagent/shared';
 import { SopGraphView } from '../src/components/SopGraphView';
 import { LangProvider } from '../src/i18n';
 import { employeeContext, SuperAgentPage } from '../src/pages/SuperAgentPage';
+import { orgPublishReady } from '../src/pages/OrganizationPublish';
 
 const graph: SopGraph = {
   nodes: [
@@ -56,6 +57,15 @@ describe('SOP graph view', () => {
     const en = renderToStaticMarkup(<SopGraphView graph={{ nodes: [], edges: [] }} />);
     expect(en).toContain('The draft has no nodes yet.');
     expect(en).not.toMatch(/[一-鿿]/);
+  });
+
+  it('does not treat the organization as confirmable until it has loaded and canConfirm', () => {
+    const org = { employees: [], tools: [], sops: [], confirmation: null, changedSinceConfirmation: false, missing: 0, blocked: null, canConfirm: true };
+    expect(orgPublishReady(null, false)).toBe(false);
+    expect(orgPublishReady(null, true)).toBe(false);
+    expect(orgPublishReady({ ...org, canConfirm: false }, true)).toBe(false);
+    expect(orgPublishReady({ ...org, blocked: 'no_employees' }, true)).toBe(false);
+    expect(orgPublishReady(org, true)).toBe(true);
   });
 
   it('maps employee runtime status onto graph availability', () => {
