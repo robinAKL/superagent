@@ -212,9 +212,9 @@ export function SetupPage() {
 
   return <div className="setup-page">
     <header className="page-head"><h1>{t('title')}</h1><p>{t('lead')}</p></header>
-    <div className="tabs" role="tablist" aria-label={t('title')}>
+    <div className="page-tabs" role="tablist" aria-label={t('title')}>
       {([['run', 'tabRun'], ['audit', 'tabAudit'], ['arch', 'tabArch']] as const).map(([id, key]) =>
-        <button key={id} role="tab" type="button" className="tab" aria-selected={tab === id} onClick={() => {
+        <button key={id} role="tab" type="button" aria-selected={tab === id} onClick={() => {
           window.location.hash = id === 'run' ? 'settings' : `settings?tab=${id}`;
         }}>{t(key)}</button>)}
     </div>
