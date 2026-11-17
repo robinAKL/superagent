@@ -19,10 +19,12 @@
 .onto-canvas svg:active { cursor: grabbing; }
 .onto-hint { position: absolute; left: var(--space-sm); bottom: var(--space-xs); margin: 0; font-size: 11px; color: var(--color-subtle); pointer-events: none; }
 
-.onto-node { cursor: pointer; transition: opacity .15s; }
+.onto-node { cursor: pointer; transition: opacity .15s; outline: none; }
 .onto-node rect { fill: var(--color-paper-3); stroke: var(--color-rule); stroke-width: 1.2; transition: fill .15s, stroke .15s; }
-.onto-node circle { fill: var(--color-accent); }
-.onto-node text { fill: var(--color-ink); font-size: 15px; font-weight: 600; pointer-events: none; }
+.onto-node text { pointer-events: none; }
+.onto-node-title { fill: var(--color-ink); font-size: 14px; font-weight: 600; }
+.onto-node-type { fill: var(--color-muted); font-size: 11px; font-weight: 400; }
+.onto-node:focus-visible rect { stroke: var(--color-focus); stroke-width: 2; }
 .onto-node:hover rect { stroke: var(--color-subtle); }
 .onto-node.is-selected rect { fill: color-mix(in srgb, var(--color-accent) 20%, var(--color-paper-3)); stroke: var(--color-accent); stroke-width: 2; }
 .onto-link-line { fill: none; stroke: var(--color-subtle); stroke-opacity: .55; stroke-width: 1.4; transition: stroke .15s, stroke-opacity .15s; }
@@ -62,6 +64,14 @@ svg.has-selection .onto-link:not(.is-active) { opacity: .18; }
 .onto-sources li { display: grid; gap: 2px; font-size: 12px; border-left: 2px solid var(--color-rule); padding: 2px 0 2px var(--space-sm); }
 .onto-sources code { color: var(--color-muted); overflow-wrap: anywhere; }
 .onto-sources q { overflow-wrap: anywhere; line-height: 1.55; }
+.onto-meta { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: 4px 10px; margin: 0; font-size: 12px; }
+.onto-meta dt { color: var(--color-muted); }
+.onto-meta dd { margin: 0; overflow-wrap: anywhere; }
+.onto-rel-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.onto-rel-table th { text-align: start; color: var(--color-muted); font-weight: 600; font-size: 11px; padding: 4px 6px; }
+.onto-rel-table td { padding: 2px 4px; vertical-align: top; }
+.onto-rel-table button { border: 0; background: none; padding: 4px 2px; font: inherit; color: var(--color-ink); cursor: pointer; text-align: start; overflow-wrap: anywhere; }
+.onto-rel-table button:hover, .onto-rel-table button:focus-visible { color: var(--color-accent); }
 
 .onto-empty { display: grid; gap: var(--space-xs); justify-items: start; padding: var(--space-lg); border: 1px dashed var(--color-rule); border-radius: var(--radius); }
 .onto-empty h3 { margin: 0; font-size: 16px; }

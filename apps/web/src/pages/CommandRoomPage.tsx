@@ -604,7 +604,7 @@ export function CommandRoomPage() {
             ? t('跟进自己负责的数字员工：交给它的任务、它的回报和追问都在这里。')
             : t('和超级智能体一起，把工作推进到交付。')}
         </p>
-        <div className="room-head-actions">
+        <div className="page-head-actions room-head-actions">
           <button type="button" className="room-head-btn" aria-expanded={teamOpen} aria-controls="room-team" onClick={() => setTeamOpen((open) => !open)}>
             <Icon name="team" /><span>{t('团队')}</span>
           </button>

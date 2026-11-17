@@ -8,7 +8,7 @@ import { AnalysisDraftIndex } from './AnalysisDraftIndex';
 import type { McpConnection } from './McpKnowledge';
 import { OntologyGraphView } from '../components/OntologyGraphView';
 import { AnalysisResults, SopWorkspace, useDraftRead } from './SuperAgentPage';
-import { AssertionFacts, DimensionChips, KnowledgeTimeline, RuleCard, TimeBar, dimensionsOf, objectNames, recordedOf, timeFromParams, visibleAt, type Dimension, type KnowledgeTime } from './KnowledgeLenses';
+import { AssertionFacts, DimensionChips, KnowledgeTimeline, RuleCard, TimeBar, dimensionsOf, objectNames, timeFromParams, visibleDraft, type Dimension, type KnowledgeTime } from './KnowledgeLenses';
 
 interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string; retrievedAt?: string }
 interface Plugin { id: string; name: string; enabled: boolean; configured: boolean; capabilities: string[] }
@@ -21,6 +21,8 @@ interface Recommendation {
   id: string; key: string; kind: string; name: string; description: string; humanLocked: boolean; deleted: boolean; stale?: boolean;
   proposedChange?: { name: string; description: string; evidence?: Evidence[] }; evidence: Evidence[];
   relation?: { from: string; to: string; label: string };
+  recordedAt?: string; effectiveFrom?: string; effectiveTo?: string;
+  assignment?: { tools: string[]; sops: string[] };
   origin?: 'manual' | 'inferred';
 }
 interface Overview {
@@ -187,7 +189,7 @@ const TEXT = {
     viewAgentContext: 'View Super Agent context',
     sopIntro: 'A workflow is one kind of knowledge. The flowchart defines triggers and execution order; the ontology graph defines objects and relationships. Nodes reuse roles, tools, human roles and sources.',
     sopFlows: 'Published & draft graphs', sopCandidates: 'Extract SOP from knowledge', sopSwitch: 'Workflow view',
-    graphIntro: 'The graph shows concrete business objects and the relationships the sources support. Select a node to see its sources.',
+    graphIntro: 'The graph shows concrete entities and evidenced relationships. Select a node for identity, time and sources; the relationship table is keyboard-operable.',
     closeSources: 'Back to materials',
     analysisHistory: 'Earlier runs',
     analysisSourceOptions: 'MCP source options ({count} selected)',
@@ -437,7 +439,7 @@ const TEXT = {
     viewAgentContext: '查看超级智能体上下文',
     sopIntro: '工作流是知识的一种。流程图定义触发与执行顺序；本体关系图定义对象与关系。节点复用岗位、工具、人类角色和来源标识。',
     sopFlows: '已发布图与草稿图', sopCandidates: '从知识提取 SOP', sopSwitch: '工作流视图',
-    graphIntro: '图表达具体实体与有证据的关系。选中节点查看属性与来源。',
+    graphIntro: '图表达具体实体与有证据的关系。选择节点查看标识、时间与来源；关系表可键盘操作。',
     closeSources: '返回资料',
     analysisHistory: '历史分析',
     analysisSourceOptions: 'MCP 来源设置（已选 {count} 个）',
@@ -958,7 +960,7 @@ export function KnowledgePage() {
   const liveDrafts = drafts.filter(draft => !draft.stale);
   const lensRuns = overview?.analyses ?? [];
   const lastRunAt = lensRuns.filter(run => run.status === 'completed' && run.createdAt).map(run => run.createdAt!).sort().at(-1);
-  const timedDrafts = drafts.filter(draft => visibleAt(recordedOf(draft, lensRuns), time));
+  const timedDrafts = drafts.filter(draft => visibleDraft(draft, lensRuns, time));
   const hiddenByTime = drafts.length - timedDrafts.length;
   const names = objectNames(drafts);
   const shownDrafts = dimension ? timedDrafts.filter(draft => dimensionsOf(draft).includes(dimension)) : timedDrafts;
@@ -1150,14 +1152,14 @@ export function KnowledgePage() {
         <p className="knowledge-subtitle">{t(view === 'materials' || view === 'search' || view === 'sources' ? 'subtitleLibrary' : view === 'sop' ? 'subtitleSop' : 'subtitleKnowledge')}</p>
         {overview?.spaceName && overview.spaceName !== DEFAULT_SPACE_NAME ? <p className="knowledge-space-name">{overview.spaceName}</p> : null}
       </div>
-      <div className="knowledge-actions">
+      <div className="page-head-actions knowledge-actions">
         <a className="btn knowledge-quiet" href="#brain">{t('viewAgentContext')}</a>
         <button className="btn knowledge-quiet" type="button" onClick={() => { setAnalysisFeedback(null); void load(); }} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
         <button className="btn" type="button" onClick={() => openView(view === 'sources' ? 'materials' : 'sources')}
           aria-expanded={view === 'sources'} aria-controls="knowledge-sources">{t(view === 'sources' ? 'closeSources' : 'manageSources')}</button>
       </div>
     </header>
-    {overview ? <nav className="knowledge-workspace-nav" aria-label={t('workspaceNav')}>
+    {overview ? <nav className="page-tabs knowledge-workspace-nav" aria-label={t('workspaceNav')}>
       {WORKSPACE_TABS.map(entry => <button key={entry} type="button" aria-current={view === entry || (entry === 'materials' && view === 'search') ? 'page' : undefined}
         onClick={() => openView(entry)}>{t(VIEW_LABELS[entry])}</button>)}
     </nav> : null}
@@ -1357,7 +1359,7 @@ export function KnowledgePage() {
 
       {view === 'graph' ? <section className="panel knowledge-section knowledge-graph-tab" aria-labelledby="knowledge-graph-heading">
         <div className="knowledge-section-head"><div><h2 id="knowledge-graph-heading">{t('workspaceGraph')}</h2><p className="helper">{t('graphIntro')}</p></div></div>
-        <OntologyGraphView shared={timedDrafts.filter(draft => !('privateMcp' in draft) && !draft.stale && draft.evidence.length > 0)}
+        <OntologyGraphView time={time} shared={timedDrafts.filter(draft => !('privateMcp' in draft) && !draft.stale && draft.evidence.length > 0)}
           personal={timedDrafts.filter(draft => 'privateMcp' in draft && !draft.stale && draft.evidence.length > 0)} />
       </section> : null}
 

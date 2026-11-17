@@ -57,6 +57,7 @@ interface Recommendation {
   description: string;
   evidence: Evidence[];
   relation?: { from: string; to: string; label: string };
+  assignment?: { tools: string[]; sops: string[] };
   workflow?: RecommendedWorkflow;
 }
 
@@ -202,12 +203,12 @@ export function SuperAgentPage() {
   const count = knowledge.status === 'ready' ? [...knowledge.drafts.recommendations, ...knowledge.drafts.mcpRecommendations].filter(draft => draft.kind === 'sop').length : 0;
   return (
     <>
-      <div className="page-head">
+      <header className="page-head">
         <h1>{t('title')}</h1>
         <p>{t('subtitle')}</p>
-      </div>
-      <div className="tabs" role="tablist" aria-label={t('title')}>
-        {PRIMARY_TABS.map(entry => <button key={entry} role="tab" type="button" aria-selected={tab === entry || (entry === 'context' && (tab === 'mcp' || tab === 'ontology')) || (entry === 'sop' && tab === 'results')} className="tab" onClick={() => {
+      </header>
+      <div className="page-tabs" role="tablist" aria-label={t('title')}>
+        {PRIMARY_TABS.map(entry => <button key={entry} role="tab" type="button" aria-selected={tab === entry || (entry === 'context' && (tab === 'mcp' || tab === 'ontology')) || (entry === 'sop' && tab === 'results')} onClick={() => {
           if (tab !== entry) window.location.hash = entry === 'context' ? 'brain' : `brain?tab=${entry}${fromOrganization ? '&org=1' : ''}`;
         }}>{t(entry === 'context' ? 'tabConfig' : 'tabFlow')}{entry === 'sop' && count ? <span aria-hidden="true"> ({count})</span> : null}</button>)}
       </div>

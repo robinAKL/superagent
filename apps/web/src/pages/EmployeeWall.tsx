@@ -28,7 +28,7 @@ const TEXT = {
 };
 type Key = keyof typeof TEXT.en;
 
-export function EmployeeWall({ employees, viewerId, hasDraft }: { employees: WallEmployee[]; viewerId?: string; hasDraft: boolean }) {
+export function EmployeeWall({ employees, viewerId, hasDraft, onManage }: { employees: WallEmployee[]; viewerId?: string; hasDraft: boolean; onManage?: (employee: WallEmployee) => void }) {
   const t = useT(TEXT);
   const [toolCounts, setToolCounts] = useState<Record<string, number>>({});
   useEffect(() => {
@@ -50,7 +50,6 @@ export function EmployeeWall({ employees, viewerId, hasDraft }: { employees: Wal
     </div>
     <ul className="emp-wall">
       {employees.map(employee => {
-        const recId = employee.id.startsWith('emp-org-') ? employee.id.slice('emp-org-'.length) : '';
         const owner = !employee.owner ? t('ownerUnknown') : employee.owner === viewerId ? `${employee.owner}` : employee.owner;
         const tools = toolCounts[employee.id];
         return <li key={employee.id} className="emp-card" data-employee={employee.id}>
@@ -69,7 +68,9 @@ export function EmployeeWall({ employees, viewerId, hasDraft }: { employees: Wal
             <small>{t(employee.source === 'manual' ? 'manual' : 'fromAnalysis')}</small>
             <span className="emp-card-links">
               <a href={`#tools?employee=${encodeURIComponent(employee.id)}`}>{t('manageTools')}</a>
-              <a className="btn" href={recId ? `#employees?view=draft&role=${encodeURIComponent(recId)}` : '#employees?view=draft'}>{t('manage')}</a>
+              {onManage
+                ? <button type="button" className="btn" onClick={() => onManage(employee)}>{t('manage')}</button>
+                : <a className="btn" href={`#employees?manage=${encodeURIComponent(employee.id)}`}>{t('manage')}</a>}
             </span>
           </div>
         </li>;

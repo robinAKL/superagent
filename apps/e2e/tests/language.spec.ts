@@ -31,4 +31,34 @@ test.describe('nothing chosen yet', () => {
     await page.reload();
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Digital employees');
   });
+
+  const PAGES: { hash: string; heading: string }[] = [
+    { hash: 'room', heading: 'Command room' },
+    { hash: 'work', heading: 'My work' },
+    { hash: 'knowledge', heading: 'Enterprise Knowledge' },
+    { hash: 'employees', heading: 'Digital employees' },
+    { hash: 'tools', heading: 'Employee tools' },
+    { hash: 'brain', heading: 'Super Agent' },
+    { hash: 'settings', heading: 'Settings' },
+  ];
+
+  test('all seven pages open in English with no Han in the chrome', async ({ page }) => {
+    const han = /[\u3400-\u9FFF]/;
+    for (const { hash, heading } of PAGES) {
+      await page.goto(`/#${hash}`);
+      await expect(page.getByRole('heading', { level: 1 }), `#${hash}`).toHaveText(heading);
+      await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+      const optional = async (locator: ReturnType<typeof page.locator>) =>
+        (await locator.count()) ? await locator.first().innerText() : '';
+      const chrome = [
+        await page.getByRole('navigation', { name: 'Main menu' }).innerText(),
+        await optional(page.locator('main .page-head')),
+        await optional(page.locator('main [role="tablist"]')),
+      ].join('\n');
+      expect(chrome, `#${hash} chrome`).not.toMatch(han);
+    }
+    await page.getByRole('group', { name: 'Language' }).getByRole('button', { name: '中文' }).click();
+    await page.goto('/#employees');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('数字员工');
+  });
 });

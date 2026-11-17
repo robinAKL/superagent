@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LangProvider } from '../src/i18n';
-import { AssertionFacts, DimensionChips, KnowledgeTimeline, RuleCard, dimensionsOf, objectNames, recordedOf, timeFromParams, visibleAt } from '../src/pages/KnowledgeLenses';
+import { AssertionFacts, DimensionChips, KnowledgeTimeline, RuleCard, dimensionsOf, objectNames, recordedOf, timeFromParams, visibleAt, visibleDraft } from '../src/pages/KnowledgeLenses';
 import { EmployeeWall } from '../src/pages/EmployeeWall';
 
 const render = (lang: 'en' | 'zh', node: JSX.Element) => renderToStaticMarkup(<LangProvider initial={lang}>{node}</LangProvider>);
@@ -37,6 +37,10 @@ describe('knowledge lenses', () => {
     expect(visibleAt(recorded, { at: '2026-11-17', known: '2026-11-09' })).toBe(false);
     expect(visibleAt(recorded, { at: '2026-11-09', known: '2026-11-17' })).toBe(false);
     expect(recordedOf({ ...rule, evidence: [{ locator: 'x', quote: 'y', retrievedAt: '2026-11-12T00:00:00Z' }] }, runs)).toBe('2026-11-12T00:00:00Z');
+    const dated = { ...rule, recordedAt: '2026-11-03T00:00:00Z', effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31' };
+    expect(visibleDraft(dated, runs, { at: '2026-09-01', known: '2026-11-03' })).toBe(true);
+    expect(visibleDraft(dated, runs, { at: '2026-11-02', known: '2026-11-03' })).toBe(false);
+    expect(visibleDraft(dated, runs, { at: '2026-09-01', known: '2026-11-02' })).toBe(false);
   });
 
   it('shows the key rule with object names, its source and honest effect date', () => {
@@ -45,6 +49,9 @@ describe('knowledge lenses', () => {
     expect(html).toContain('订单 → 超 5 万需 → 主管审批');
     expect(html).toContain('来源：guide.md#L4');
     expect(html).toContain('业务有效：资料未写明，按 2026-11-10 计');
+    const stated = render('zh', <RuleCard drafts={[{ ...rule, effectiveFrom: '2026-08-01' }]} runs={runs} names={objectNames([order, approval])} />);
+    expect(stated).toContain('业务有效：2026-08-01');
+    expect(stated).not.toContain('资料未写明');
     expect(html).toContain('待核对');
     expect(render('en', <RuleCard drafts={[order]} runs={runs} names={new Map()} />)).toContain('No rule found yet');
   });
@@ -80,7 +87,7 @@ describe('employee wall', () => {
     expect(html.match(/class="emp-card"/g)).toHaveLength(2);
     expect(html).toContain('新增岗位');
     expect(html).toContain('href="#employees?view=draft"');
-    expect(html).toContain('href="#employees?view=draft&amp;role=rec1"');
+    expect(html).toContain('href="#employees?manage=emp-org-rec1"');
     expect(html).toContain('未连接');
     expect(html).toContain('在线');
     expect(html).toContain('dev-owner');

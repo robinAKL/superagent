@@ -1,7 +1,3 @@
-.tabs { display: flex; flex-wrap: wrap; gap: var(--space-2xs); margin-bottom: var(--space-md); }
-.tab { min-height: var(--control); padding: 0 var(--space-md); border: 1px solid var(--color-rule); border-radius: var(--radius-sm); background: var(--color-paper); color: var(--color-ink); font: inherit; cursor: pointer; }
-.tab[aria-selected="true"] { background: var(--color-accent); color: var(--color-accent-ink); border-color: var(--color-accent); }
-
 .graph-editor { display: grid; gap: var(--space-xs); }
 .graph-editor .row { display: flex; flex-wrap: wrap; gap: var(--space-xs); align-items: center; }
 .issues li, .gates li { margin: 2px 0; }

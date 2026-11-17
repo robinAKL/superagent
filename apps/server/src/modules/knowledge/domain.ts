@@ -30,6 +30,11 @@ export interface Recommendation {
   assignment?: { tools: string[]; sops: string[] };
   /** Set when an owner merged this employee draft into another one; the draft is then deleted. */
   mergedInto?: string;
+  /** When the platform recorded this draft. Independent of business effective dates. */
+  recordedAt?: string;
+  /** Business effective window copied from source quotes (YYYY-MM-DD); omitted when the source does not state it. */
+  effectiveFrom?: string;
+  effectiveTo?: string;
 }
 /** What "Confirm organization" created, keyed by recommendation id so a repeat confirmation creates nothing new. */
 export interface OrganizationRecord {
@@ -130,6 +135,27 @@ export function evidenceValid(state: KnowledgeState, ctx: UserContext, e: Eviden
   if (!item || !mayRead(state, ctx, item) || item.version !== e.version || !Number.isSafeInteger(e.start) || !Number.isSafeInteger(e.end) || e.start < 0 || e.end <= e.start) return false;
   return positionedChunks(state, item).some(c => e.start >= c.start && e.end <= c.end && c.text.slice(e.start - c.start, e.end - c.start) === e.quote && c.locator === e.locator);
 }
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+export function datesInText(text: string): string[] {
+  return [...text.matchAll(/\d{4}-\d{2}-\d{2}/g)].map(match => match[0]).filter(day => DAY.test(day));
+}
+/** Effective dates only when they appear in cited quotes — model output is checked, never invented. */
+export function validityOf(p: { effectiveFrom?: unknown; effectiveTo?: unknown; evidence: Evidence[] }): { effectiveFrom?: string; effectiveTo?: string } {
+  const quotes = p.evidence.map(e => e.quote).join('\n');
+  const allowed = new Set(datesInText(quotes));
+  const stated = (value: unknown) => typeof value === 'string' && DAY.test(value) && allowed.has(value) ? value : undefined;
+  const fromQuote = [...quotes.matchAll(/(?:自|从|from|生效|valid from)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:起|生效|开始)/gi)]
+    .map(match => match[1] ?? match[2]).find(day => day && allowed.has(day));
+  const toQuote = [...quotes.matchAll(/(?:至|到|until|止于|失效|截止)\s*(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})\s*(?:止|失效|截止)/gi)]
+    .map(match => match[1] ?? match[2]).find(day => day && allowed.has(day));
+  const effectiveFrom = stated(p.effectiveFrom) ?? fromQuote;
+  const effectiveTo = stated(p.effectiveTo) ?? toQuote;
+  const out: { effectiveFrom?: string; effectiveTo?: string } = {};
+  if (effectiveFrom) out.effectiveFrom = effectiveFrom;
+  if (effectiveTo && (!effectiveFrom || effectiveTo >= effectiveFrom)) out.effectiveTo = effectiveTo;
+  return out;
+}
+
 export function mergeRecommendations(
   state: KnowledgeState, ctx: UserContext, proposals: Omit<Recommendation, 'id' | 'humanLocked' | 'deleted'>[],
   mcp?: { mcpScope: string; mcpRunId: string; validEvidence: (e: Evidence) => boolean },
@@ -156,8 +182,10 @@ export function mergeRecommendations(
     }
     accepted.push(p);
     if (existing?.humanLocked) { existing.proposedChange = { name: p.name, description: p.description, evidence: p.evidence, workflow: p.workflow, ...(p.relation?{relation:p.relation}:{}) }; continue; }
-    const draft = { ...p, workflow: p.workflow, origin: 'inferred' as const, ...(mcp && { mcpScope: mcp.mcpScope, mcpRunId: mcp.mcpRunId }) };
-    if (existing) Object.assign(existing, draft);
+    const { effectiveFrom: _from, effectiveTo: _to, recordedAt: _recorded, ...rest } = p;
+    const recordedAt = existing?.recordedAt ?? stamp();
+    const draft = { ...rest, workflow: p.workflow, origin: 'inferred' as const, recordedAt, ...validityOf(p), ...(mcp && { mcpScope: mcp.mcpScope, mcpRunId: mcp.mcpRunId }) };
+    if (existing) Object.assign(existing, draft, { recordedAt: existing.recordedAt ?? recordedAt });
     else {
       const recommendation = { ...draft, id: id(), humanLocked: false, deleted: false };
       state.recommendations.push(recommendation);

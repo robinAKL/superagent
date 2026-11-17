@@ -4,43 +4,62 @@ import { useT } from '../i18n';
 import './OntologyGraphView.css';
 
 /**
- * Ontology = the business objects analysis found and the directed relations between them, drawn as a force graph.
- * Shared drafts (from confirmed company sources) and the viewer's private MCP drafts are shown separately, never merged.
- * D3 owns positions, zoom and drag; React owns selection, the detail panel and the keyboard-accessible object list.
+ * Ontology = concrete entities analysis found (objects, rules, processes, employees, tools, source documents)
+ * and the directed relations between them. Edges come from analysed object relations, employee tool/SOP
+ * assignments, and evidence locators — never invented. Shared vs private MCP drafts stay separate.
  */
-export interface OntologyEvidence { locator: string; quote: string; sourceId?: string; version?: string }
+export interface OntologyEvidence { locator: string; quote: string; sourceId?: string; version?: string; retrievedAt?: string }
 export interface OntologyDraft {
   id: string; key: string; kind: string; name: string; description: string;
   evidence: OntologyEvidence[]; relation?: { from: string; to: string; label: string };
+  assignment?: { tools: string[]; sops: string[] };
 }
-
-export interface GraphNode extends d3.SimulationNodeDatum { id: string; key: string; name: string; label: string; width: number; degree: number; draft: OntologyDraft }
+export type NodeType = 'company' | 'process' | 'rule' | 'source' | 'employee' | 'tool' | 'object';
+export interface GraphNode extends d3.SimulationNodeDatum {
+  id: string; key: string; name: string; label: string; type: NodeType; typeLabel: string; width: number; degree: number; draft: OntologyDraft;
+}
 export interface GraphLink extends d3.SimulationLinkDatum<GraphNode> { id: string; label: string; source: string | GraphNode; target: string | GraphNode; lane: number; lanes: number; draft: OntologyDraft }
 
 const TEXT = {
   en: {
-    shared: 'Company sources', personal: 'My MCP sources', summary: '{objects} business objects · {relations} relationships',
-    emptyTitle: 'No business objects yet',
-    emptyBody: 'Confirm materials in Company knowledge and run an analysis. The objects it finds, and how they relate, are drawn here with their sources.',
+    shared: 'Company sources', personal: 'My MCP sources', summary: '{objects} entities · {relations} relationships',
+    emptyTitle: 'No entities yet',
+    emptyBody: 'Confirm materials in Company knowledge and run an analysis. Objects, roles, tools, processes and source documents it finds are drawn here with their sources.',
     openAnalysis: 'Open knowledge analysis',
     zoomIn: 'Zoom in', zoomOut: 'Zoom out', fit: 'Fit to view', canvas: 'Ontology graph',
-    hint: 'Drag to move · select an object to see its sources',
-    objects: 'Objects', object: 'Business object', relation: 'Relationship', relations: 'Relationships ({n})',
-    noRelations: 'No relationship found for this object yet.', sources: 'Sources ({n})', noSources: 'No locatable source.',
-    personalNote: 'Only you can see drafts from your MCP sources.', back: 'All objects', isolated: 'not linked',
+    hint: 'Drag to move · select an entity to see identity, time and sources',
+    objects: 'Entities', object: 'Business object', relation: 'Relationship', relations: 'Relationships ({n})',
+    noRelations: 'No relationship found for this entity yet.', sources: 'Sources ({n})', noSources: 'No locatable source.',
+    personalNote: 'Only you can see drafts from your MCP sources.', back: 'All entities', isolated: 'not linked',
+    type_company: 'Enterprise', type_process: 'Business process', type_rule: 'Rule', type_source: 'Source document',
+    type_employee: 'Digital employee', type_tool: 'Tool', type_object: 'Business object',
+    sourced: 'sourced from', uses: 'uses tool', assists: 'assists process',
+    stableId: 'Stable entity ID', version: 'Source version', businessTime: 'Business date', recordedTime: 'Recorded',
+    knownTime: 'Known to the platform by', notStated: 'not stated in the source',
+    relTable: 'Related relationships', from: 'From', edge: 'Relationship', to: 'To',
   },
   zh: {
-    shared: '企业资料', personal: '我的 MCP 来源', summary: '{objects} 个业务对象 · {relations} 条关系',
-    emptyTitle: '还没有业务对象',
-    emptyBody: '先在企业知识里确认资料并运行分析。分析找到的业务对象和它们之间的关系会画在这里，并附上原文依据。',
+    shared: '企业资料', personal: '我的 MCP 来源', summary: '{objects} 个实体 · {relations} 条关系',
+    emptyTitle: '还没有实体',
+    emptyBody: '先在企业知识里确认资料并运行分析。分析找到的对象、岗位、工具、流程和来源文档会画在这里，并附上原文依据。',
     openAnalysis: '打开知识分析',
     zoomIn: '放大', zoomOut: '缩小', fit: '适配窗口', canvas: '本体关系图',
-    hint: '拖动节点调整位置 · 选中对象查看依据',
-    objects: '对象', object: '业务对象', relation: '关系', relations: '关系（{n}）',
-    noRelations: '这个对象还没有找到关系。', sources: '依据（{n}）', noSources: '没有可定位的依据。',
-    personalNote: '个人 MCP 来源的草案只有你能看到。', back: '全部对象', isolated: '未关联',
+    hint: '拖动节点调整位置 · 选中实体查看标识、时间与依据',
+    objects: '实体', object: '业务对象', relation: '关系', relations: '关系（{n}）',
+    noRelations: '这个实体还没有找到关系。', sources: '依据（{n}）', noSources: '没有可定位的依据。',
+    personalNote: '个人 MCP 来源的草案只有你能看到。', back: '全部实体', isolated: '未关联',
+    type_company: '企业', type_process: '业务流程', type_rule: '规则', type_source: '来源文档',
+    type_employee: '数字员工', type_tool: '工具', type_object: '业务对象',
+    sourced: '来源于', uses: '使用工具', assists: '协助执行',
+    stableId: '稳定实体 ID', version: '来源版本', businessTime: '业务时间', recordedTime: '记录时间',
+    knownTime: '知识截至', notStated: '资料未写明',
+    relTable: '与它有关的关系', from: '起点', edge: '关系', to: '终点',
   },
 };
+
+const NODE_KINDS = new Set(['object', 'employee', 'tool', 'sop', 'source']);
+const DERIVED = { sourced: '__sourced', uses: '__uses', assists: '__assists' } as const;
+const RULE = /必须|须|需要|需经|应当|不得|禁止|不超过|超过|以上|以下|上限|下限|阈值|审批|批准|must|shall|required?|requires|not allowed|threshold|approv|limit|exceed/i;
 
 const charWidth = (ch: string) => (/[⺀-￿]/.test(ch) ? 16 : 8.8);
 function fitLabel(name: string, max = 196): { label: string; width: number } {
@@ -49,22 +68,75 @@ function fitLabel(name: string, max = 196): { label: string; width: number } {
     if (width + charWidth(ch) > max) return { label: `${label}…`, width: width + 12 + 50 };
     width += charWidth(ch); label += ch;
   }
-  return { label, width: Math.max(width + 50, 80) };
+  return { label, width: Math.max(width + 50, 96) };
 }
 
-/** Pure: objects become nodes, relations whose two ends exist become links; parallel links get separate lanes. */
+export function nodeTypeOf(draft: OntologyDraft): NodeType {
+  if (draft.kind === 'employee') return 'employee';
+  if (draft.kind === 'tool') return 'tool';
+  if (draft.kind === 'sop') return 'process';
+  if (draft.kind === 'source') return 'source';
+  if (draft.kind === 'company') return 'company';
+  if (RULE.test(`${draft.name} ${draft.description}`)) return 'rule';
+  return 'object';
+}
+
+function sourceKey(e: OntologyEvidence) {
+  return `src:${e.sourceId || e.locator}:${e.version || ''}`;
+}
+
+/** Adds source-document nodes and employee→tool / employee→process edges from real assignment + evidence. */
+export function enrichOntologyDrafts(drafts: OntologyDraft[]): OntologyDraft[] {
+  const extra: OntologyDraft[] = [];
+  const sources = new Map<string, OntologyDraft>();
+  const keys = new Set(drafts.filter(d => NODE_KINDS.has(d.kind) || d.kind === 'object').map(d => d.key));
+  for (const draft of drafts) {
+    if (!NODE_KINDS.has(draft.kind) && draft.kind !== 'relation') continue;
+    for (const e of draft.evidence) {
+      const key = sourceKey(e);
+      if (!sources.has(key)) {
+        sources.set(key, { id: key, key, kind: 'source', name: e.locator, description: '', evidence: [e] });
+      }
+      extra.push({
+        id: `from:${draft.id}:${key}`, key: `from:${draft.key}:${key}`, kind: 'relation', name: DERIVED.sourced,
+        description: '', evidence: [e], relation: { from: draft.key, to: key, label: DERIVED.sourced },
+      });
+    }
+    if (draft.kind === 'employee' && draft.assignment) {
+      for (const tool of draft.assignment.tools) {
+        if (!keys.has(tool)) continue;
+        extra.push({
+          id: `use:${draft.key}:${tool}`, key: `use:${draft.key}:${tool}`, kind: 'relation', name: DERIVED.uses,
+          description: '', evidence: draft.evidence, relation: { from: draft.key, to: tool, label: DERIVED.uses },
+        });
+      }
+      for (const sop of draft.assignment.sops) {
+        if (!keys.has(sop)) continue;
+        extra.push({
+          id: `sop:${draft.key}:${sop}`, key: `sop:${draft.key}:${sop}`, kind: 'relation', name: DERIVED.assists,
+          description: '', evidence: draft.evidence, relation: { from: draft.key, to: sop, label: DERIVED.assists },
+        });
+      }
+    }
+  }
+  return [...drafts, ...sources.values(), ...extra];
+}
+
+/** Pure: typed entities become nodes; relations whose two ends exist become links; parallel links get lanes. */
 export function buildOntologyGraph(drafts: OntologyDraft[]): { nodes: GraphNode[]; links: GraphLink[] } {
+  const enriched = enrichOntologyDrafts(drafts);
   const nodes: GraphNode[] = [];
   const byKey = new Map<string, GraphNode>();
-  for (const draft of drafts) {
-    if (draft.kind !== 'object' || byKey.has(draft.key)) continue;
+  for (const draft of enriched) {
+    if (!NODE_KINDS.has(draft.kind) || byKey.has(draft.key)) continue;
     const { label, width } = fitLabel(draft.name);
-    const node: GraphNode = { id: draft.id, key: draft.key, name: draft.name, label, width, degree: 0, draft };
+    const type = nodeTypeOf(draft);
+    const node: GraphNode = { id: draft.id, key: draft.key, name: draft.name, label, type, typeLabel: type, width, degree: 0, draft };
     byKey.set(draft.key, node); nodes.push(node);
   }
   const links: GraphLink[] = [];
   const pairs = new Map<string, GraphLink[]>();
-  for (const draft of drafts) {
+  for (const draft of enriched) {
     const rel = draft.relation;
     if (draft.kind !== 'relation' || !rel) continue;
     const from = byKey.get(rel.from), to = byKey.get(rel.to);
@@ -80,9 +152,8 @@ export function buildOntologyGraph(drafts: OntologyDraft[]): { nodes: GraphNode[
 }
 
 const endpoint = (end: string | GraphNode) => (typeof end === 'string' ? undefined : end);
-/** Point where the line towards (tx,ty) leaves a node's rounded box, so arrows stop at the border. */
 function boxExit(n: GraphNode, tx: number, ty: number) {
-  const x = n.x ?? 0, y = n.y ?? 0, dx = tx - x, dy = ty - y, hw = n.width / 2 + 3, hh = 24;
+  const x = n.x ?? 0, y = n.y ?? 0, dx = tx - x, dy = ty - y, hw = n.width / 2 + 3, hh = 32;
   if (!dx && !dy) return { x, y };
   const s = Math.min(dx ? hw / Math.abs(dx) : Infinity, dy ? hh / Math.abs(dy) : Infinity);
   return { x: x + dx * s, y: y + dy * s };
@@ -99,8 +170,9 @@ function linkGeometry(l: GraphLink) {
 }
 
 type Scope = 'shared' | 'personal';
-
-export function OntologyGraphView({ shared, personal = [], height = 560 }: { shared: OntologyDraft[]; personal?: OntologyDraft[]; height?: number }) {
+export function OntologyGraphView({ shared, personal = [], height = 560, time }: {
+  shared: OntologyDraft[]; personal?: OntologyDraft[]; height?: number; time?: { at: string; known: string };
+}) {
   const t = useT(TEXT);
   const sharedGraph = useMemo(() => buildOntologyGraph(shared), [shared]);
   const personalGraph = useMemo(() => buildOntologyGraph(personal), [personal]);
@@ -111,10 +183,10 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
   const zoomRef = useRef<{ zoom: d3.ZoomBehavior<SVGSVGElement, unknown>; fit: () => void } | null>(null);
   const selectRef = useRef(setSelected);
   selectRef.current = setSelected;
+  const edgeLabel = (label: string) => (label === DERIVED.sourced ? t('sourced') : label === DERIVED.uses ? t('uses') : label === DERIVED.assists ? t('assists') : label);
 
   useEffect(() => { setSelected(null); }, [scope]);
 
-  // Build the simulation once per graph; selection changes only restyle (next effect).
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl || !graph.nodes.length) return;
@@ -122,7 +194,6 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
     const byId = new Map(nodes.map(n => [n.id, n]));
     const links = graph.links.map(l => ({ ...l, source: byId.get(l.source as string) ?? (l.source as GraphNode), target: byId.get((typeof l.target === 'string' ? l.target : l.target.id)) ?? (l.target as GraphNode) }));
     const rect = svgEl.getBoundingClientRect();
-    // Measure the canvas: CSS shrinks it on phones, so the prop height is only the desktop default.
     const w = rect.width || 800, h = rect.height || height;
     const svg = d3.select(svgEl);
     svg.selectAll('*').remove();
@@ -139,24 +210,26 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
     linkSel.append('path').attr('class', 'onto-link-line').attr('marker-end', 'url(#onto-arrow)');
     const labelSel = linkSel.append('g').attr('class', 'onto-link-label');
     labelSel.append('rect').attr('rx', 6).attr('height', 24);
-    labelSel.append('text').attr('dy', '0.35em').attr('text-anchor', 'middle').text(l => fitLabel(l.label, 120).label);
+    labelSel.append('text').attr('dy', '0.35em').attr('text-anchor', 'middle').text(l => fitLabel(edgeLabel(l.label), 120).label);
     labelSel.each(function () {
       const text = (this as SVGGElement).querySelector('text') as SVGTextElement;
       const bw = (text.getComputedTextLength?.() || 60) + 12;
       d3.select(this).select('rect').attr('x', -bw / 2).attr('y', -12).attr('width', bw);
     });
 
-    const nodeSel = root.append('g').selectAll<SVGGElement, GraphNode>('g').data(nodes).join('g').attr('class', 'onto-node')
-      .on('click', (event: MouseEvent, n) => { event.stopPropagation(); selectRef.current(n.id); });
-    nodeSel.append('rect').attr('x', n => -n.width / 2).attr('y', -22).attr('width', n => n.width).attr('height', 44).attr('rx', 12);
-    nodeSel.append('circle').attr('cx', n => -n.width / 2 + 16).attr('r', 5);
-    nodeSel.append('text').attr('x', 10).attr('dy', '0.35em').attr('text-anchor', 'middle').text(n => n.label);
-    nodeSel.append('title').text(n => n.name);
+    const nodeSel = root.append('g').selectAll<SVGGElement, GraphNode>('g').data(nodes).join('g').attr('class', n => `onto-node onto-type-${n.type}`)
+      .attr('tabindex', 0).attr('role', 'button').attr('aria-label', n => `${n.name}, ${t(`type_${n.type}` as 'type_object')}`)
+      .on('click', (event: MouseEvent, n) => { event.stopPropagation(); selectRef.current(n.id); })
+      .on('keydown', (event: KeyboardEvent, n) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectRef.current(n.id); } });
+    nodeSel.append('rect').attr('x', n => -n.width / 2).attr('y', -32).attr('width', n => n.width).attr('height', 64).attr('rx', 8);
+    nodeSel.append('text').attr('class', 'onto-node-title').attr('y', -6).attr('text-anchor', 'middle').text(n => n.label);
+    nodeSel.append('text').attr('class', 'onto-node-type').attr('y', 16).attr('text-anchor', 'middle').text(n => t(`type_${n.type}` as 'type_object'));
+    nodeSel.append('title').text(n => `${n.name} · ${t(`type_${n.type}` as 'type_object')}`);
 
     const sim = d3.forceSimulation<GraphNode>(nodes)
-      .force('link', d3.forceLink<GraphNode, GraphLink>(links).id(n => n.id).distance(l => 150 + ((endpoint(l.source)?.width ?? 0) + (endpoint(l.target)?.width ?? 0)) / 2.4).strength(0.7))
+      .force('link', d3.forceLink<GraphNode, GraphLink>(links).id(n => n.id).distance(l => 160 + ((endpoint(l.source)?.width ?? 0) + (endpoint(l.target)?.width ?? 0)) / 2.4).strength(0.7))
       .force('charge', d3.forceManyBody().strength(-1100).distanceMax(900))
-      .force('collide', d3.forceCollide<GraphNode>().radius(n => n.width / 2 + 30).strength(0.9))
+      .force('collide', d3.forceCollide<GraphNode>().radius(n => n.width / 2 + 36).strength(0.9))
       .force('x', d3.forceX(w / 2).strength(0.015)).force('y', d3.forceY(h / 2).strength(0.14));
 
     const tick = () => {
@@ -175,12 +248,12 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
       .on('zoom', event => root.attr('transform', event.transform.toString()));
     svg.call(zoom).on('dblclick.zoom', null).on('click', () => selectRef.current(null));
     const fit = () => {
-      const xs = nodes.flatMap(n => [(n.x ?? 0) - n.width / 2, (n.x ?? 0) + n.width / 2]), ys = nodes.flatMap(n => [(n.y ?? 0) - 20, (n.y ?? 0) + 20]);
+      const xs = nodes.flatMap(n => [(n.x ?? 0) - n.width / 2, (n.x ?? 0) + n.width / 2]), ys = nodes.flatMap(n => [(n.y ?? 0) - 32, (n.y ?? 0) + 32]);
       const box = svgEl.getBoundingClientRect(), cw = box.width || w, ch = (box.height || h) - 24;
       const padding = cw < 480 ? 18 : 30;
       const [x0, x1] = [Math.min(...xs) - padding, Math.max(...xs) + padding];
       const [y0, y1] = [Math.min(...ys) - padding, Math.max(...ys) + padding];
-      const k = Math.min(1.6, cw / (x1 - x0), ch / (y1 - y0));
+      const k = Math.min(1.6, cw / Math.max(x1 - x0, 1), ch / Math.max(y1 - y0, 1));
       const transform = d3.zoomIdentity.translate(cw / 2 - k * (x0 + x1) / 2, ch / 2 - k * (y0 + y1) / 2).scale(k);
       svg.interrupt().call(zoom.transform, transform);
     };
@@ -193,13 +266,11 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
       .on('drag', (e, n) => { n.fx = e.x; n.fy = e.y; })
       .on('end', (e, n) => { if (!e.active) sim.alphaTarget(0); n.fx = null; n.fy = null; }));
 
-    // Settle quickly so the first frame is already readable, then let it relax.
     for (let i = 0; i < 300; i++) sim.tick();
     tick(); fit();
     return () => { resize.disconnect(); sim.stop(); svg.interrupt().on('.zoom', null); zoomRef.current = null; };
-  }, [graph, height]);
+  }, [graph, height, t]);
 
-  // Highlight the selection and its neighbourhood.
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
@@ -239,7 +310,10 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
     </section>;
   }
 
-  const sources = (selNode?.draft ?? selLink?.draft)?.evidence ?? [];
+  const draft = selNode?.draft ?? selLink?.draft;
+  const sources = draft?.evidence ?? [];
+  const recorded = sources.map(e => e.retrievedAt).filter((v): v is string => !!v).sort().at(-1)?.slice(0, 10);
+  const version = sources.map(e => e.version).find(Boolean);
   return <section className="onto" aria-label={t('canvas')}>
     <header className="onto-bar">
       {sharedGraph.nodes.length && personalGraph.nodes.length ? <div className="onto-scope" role="tablist" aria-label={t('canvas')}>
@@ -263,21 +337,33 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
       <aside className="onto-panel" aria-live="polite">
         {selNode || selLink ? <>
           <button type="button" className="onto-back" onClick={() => setSelected(null)}>← {t('back')}</button>
-          <span className="onto-kind">{t(selNode ? 'object' : 'relation')}</span>
+          <span className="onto-kind">{selNode ? t(`type_${selNode.type}` as 'type_object') : t('relation')}</span>
           {selLink ? <h3 className="onto-rel-title">
             <button type="button" onClick={() => setSelected(nodeOf(selLink.source)?.id ?? null)}>{nodeOf(selLink.source)?.name}</button>
-            <span>→ {selLink.label} →</span>
+            <span>→ {edgeLabel(selLink.label)} →</span>
             <button type="button" onClick={() => setSelected(nodeOf(selLink.target)?.id ?? null)}>{nodeOf(selLink.target)?.name}</button>
           </h3> : <h3>{selNode!.name}</h3>}
-          {(selNode?.draft ?? selLink?.draft)?.description ? <p className="onto-desc">{(selNode?.draft ?? selLink!.draft).description}</p> : null}
+          {draft?.description ? <p className="onto-desc">{draft.description}</p> : null}
+          <dl className="onto-meta">
+            <dt>{t('stableId')}</dt><dd><code>{draft?.id ?? selected}</code></dd>
+            <dt>{t('version')}</dt><dd>{version || t('notStated')}</dd>
+            <dt>{t('businessTime')}</dt><dd>{time?.at ? `${time.at} · ${t('notStated')}` : t('notStated')}</dd>
+            <dt>{t('recordedTime')}</dt><dd>{recorded || t('notStated')}</dd>
+            {time ? <><dt>{t('knownTime')}</dt><dd>{time.known}</dd></> : null}
+          </dl>
           {selNode ? <div className="onto-section">
-            <h4>{t('relations', { n: nodeLinks.length })}</h4>
-            {nodeLinks.length ? <ul className="onto-rels">{nodeLinks.map(l => {
-              const out = nodeOf(l.source)?.id === selNode.id, other = nodeOf(out ? l.target : l.source);
-              return <li key={l.id}><button type="button" onClick={() => setSelected(l.id)}>
-                <span className="onto-dir">{out ? '→' : '←'}</span><span>{l.label}</span><strong>{other?.name}</strong>
-              </button></li>;
-            })}</ul> : <p className="helper">{t('noRelations')}</p>}
+            <h4 id="onto-rel-heading">{t('relTable')}</h4>
+            {nodeLinks.length ? <table className="onto-rel-table" aria-labelledby="onto-rel-heading">
+              <thead><tr><th>{t('from')}</th><th>{t('edge')}</th><th>{t('to')}</th></tr></thead>
+              <tbody>{nodeLinks.map(l => {
+                const from = nodeOf(l.source), to = nodeOf(l.target);
+                return <tr key={l.id}>
+                  <td><button type="button" onClick={() => setSelected(from?.id ?? null)}>{from?.name}</button></td>
+                  <td><button type="button" onClick={() => setSelected(l.id)}>{edgeLabel(l.label)}</button></td>
+                  <td><button type="button" onClick={() => setSelected(to?.id ?? null)}>{to?.name}</button></td>
+                </tr>;
+              })}</tbody>
+            </table> : <p className="helper">{t('noRelations')}</p>}
           </div> : null}
           <div className="onto-section">
             <h4>{t('sources', { n: sources.length })}</h4>
@@ -287,7 +373,7 @@ export function OntologyGraphView({ shared, personal = [], height = 560 }: { sha
         </> : <>
           <h4>{t('objects')}</h4>
           <ul className="onto-list">{[...graph.nodes].sort((a, b) => b.degree - a.degree || a.name.localeCompare(b.name)).map(n => <li key={n.id}>
-            <button type="button" onClick={() => setSelected(n.id)}><span>{n.name}</span><small>{n.degree || t('isolated')}</small></button>
+            <button type="button" onClick={() => setSelected(n.id)}><span>{n.name}</span><small>{t(`type_${n.type}` as 'type_object')}</small></button>
           </li>)}</ul>
         </>}
       </aside>
