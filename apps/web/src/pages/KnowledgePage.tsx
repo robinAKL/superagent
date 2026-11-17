@@ -238,6 +238,9 @@ const TEXT = {
     sec3Title: 'Knowledge analysis & draft recommendations',
     analyzingBtn: 'Analysis running',
     startAnalysisBtn: 'Start analysis',
+    reanalyzeBtn: 'Analyze again',
+    reviewOrgBtn: 'Review organization draft',
+    orgReadyHint: 'Analysis suggested {roles} roles, {tools} tools and {sops} workflows. Review and confirm them in Digital employees.',
     analysisSubmittedNotice: 'Analysis job submitted. Progress follows server status.',
     analysisSettings: 'Open model settings',
     analysisSetupRequired: 'Configure a model provider and select a primary model in Settings.',
@@ -475,6 +478,9 @@ const TEXT = {
     sec3Title: '知识分析与建议草案',
     analyzingBtn: '分析进行中',
     startAnalysisBtn: '开始分析',
+    reanalyzeBtn: '重新分析',
+    reviewOrgBtn: '审阅组织草案',
+    orgReadyHint: '分析给出了 {roles} 个岗位、{tools} 个工具、{sops} 个流程，到数字员工页审阅并确认。',
     analysisSubmittedNotice: '分析任务已提交，进度以服务端状态为准。',
     analysisSettings: '打开模型设置',
     analysisSetupRequired: '请在设置中配置模型供应商并选择主模型。',
@@ -892,6 +898,9 @@ export function KnowledgePage() {
   const mcpRecommendations = overview?.mcpRecommendations ?? [];
   const drafts = [...mcpRecommendations.map(draft => ({ ...draft, privateMcp: true })), ...recommendations];
   const runs = overview?.analyses.slice(-5).reverse() ?? [];
+  const liveDrafts = drafts.filter(draft => !draft.stale);
+  const draftCount = (kind: string) => liveDrafts.filter(draft => draft.kind === kind).length;
+  const orgReady = !analysisActive && runs[0]?.status !== 'stale' && draftCount('employee') > 0;
   const selectedResourceScope = JSON.stringify({ scope: selectedResource?.scope, projects: selectedResource?.projectIds });
   useEffect(() => { setReadOnlyAcknowledged(false); }, [selectedPlugin, selectedResource?.id, selectedResourceScope]);
 
@@ -1218,9 +1227,13 @@ export function KnowledgePage() {
       <section className="panel knowledge-section knowledge-analysis-workspace" hidden={view !== 'analysis'} aria-labelledby="knowledge-analysis-heading">
         <div className="knowledge-section-head">
           <div><h2 id="knowledge-analysis-heading">{t('sec3Title')}</h2></div>
-          <button className="btn primary" disabled={!!busy || analysisActive || (!confirmedCount && !mcpSourceIds.length) || !!analysisBlock || !overview.canConfirm}
-            onClick={() => void startAnalysis()}>{busy === 'analysis' ? t('submitting') : analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}</button>
+          <div className="knowledge-actions">
+            <button className={`btn ${orgReady ? '' : 'primary'}`} disabled={!!busy || analysisActive || (!confirmedCount && !mcpSourceIds.length) || !!analysisBlock || !overview.canConfirm}
+              onClick={() => void startAnalysis()}>{busy === 'analysis' ? t('submitting') : analysisActive ? t('analyzingBtn') : t(orgReady ? 'reanalyzeBtn' : 'startAnalysisBtn')}</button>
+            {orgReady ? <a className="btn primary" href="#employees">{t('reviewOrgBtn')}</a> : null}
+          </div>
         </div>
+        {orgReady ? <p className="knowledge-notice">{t('orgReadyHint', { roles: draftCount('employee'), tools: draftCount('tool'), sops: draftCount('sop') })}</p> : null}
         {overview.canConfirm && analysisMessage ? <div className="knowledge-alert knowledge-analysis-status" role="status">
           <p>{analysisMessage}</p>
           {analysisIssue && ANALYSIS_SETTINGS_CODES.has(analysisIssue) ? <a className="btn" href="#settings">{t('analysisSettings')}</a> : null}
@@ -1250,7 +1263,6 @@ export function KnowledgePage() {
           <ul className="knowledge-runs">{runs.slice(1).map(renderRun)}</ul>
         </details> : null}
         {drafts.length ? <>
-          <a className="knowledge-analysis-results-link" href="#brain?tab=results&type=all">{t('analysisOpenMcpDrafts')}</a>
           <AnalysisDraftIndex drafts={drafts} renderDraft={draft => <div className="knowledge-recommendations">
             <RecommendationCard key={draft.id} recommendation={draft} privateMcp={'privateMcp' in draft} disabled={!!busy} onAction={action} label={label} t={t} />
           </div>} />

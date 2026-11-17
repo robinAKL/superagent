@@ -9,6 +9,10 @@ import { managedSourcePlugins } from './sources.js';
 import { PgKnowledgeAudit } from './audit.js';
 import { LiveMcpKnowledge } from './live-mcp.js';
 /** All identity/endpoints/pools originate from the fail-closed platform bootstrap. */
+import { employeesState } from '../employees/index.js';
+import { toolsState } from '../tools/index.js';
+import { createOrganizationSink } from '../employees/organization.js';
+
 export function createKnowledgeDeps(runtime: Runtime & { llm?: AnalysisGateway }): KnowledgeDeps {
   const sourceResources = runtime.config.sourceResources ?? [], plugins = managedSourcePlugins(sourceResources, runtime.app.setupDeps.secrets);
   const model = runtime.llm ? new GatewayAnalysisModel(runtime.llm, async tenantId =>
@@ -18,10 +22,11 @@ export function createKnowledgeDeps(runtime: Runtime & { llm?: AnalysisGateway }
   const repo = config.mode === 'dev' ? new MemoryKnowledgeRepository() : pool && new PgKnowledgeRepository(pool);
   if (!repo) throw Error('Knowledge requires persistent runtime dependencies');
   const liveMcp = new LiveMcpKnowledge(repo, runtime.app.setupDeps.secrets);
-  if (config.mode === 'dev') return { repo, liveMcp, mcpAnswerGateway: runtime.llm, sourceResources, plugins, model, database: database.gateway, close: database.close, enqueue: async () => undefined };
+  const organization = createOrganizationSink(() => employeesState.current, () => toolsState.current);
+  if (config.mode === 'dev') return { repo, organization, liveMcp, mcpAnswerGateway: runtime.llm, sourceResources, plugins, model, database: database.gateway, close: database.close, enqueue: async () => undefined };
   if (!pool || !config.blobUrl || !config.docIntelEndpoint) throw Error('Knowledge requires persistent runtime dependencies');
   return {
-    repo, liveMcp, mcpAnswerGateway: runtime.llm, sourceResources, plugins,
+    repo, organization, liveMcp, mcpAnswerGateway: runtime.llm, sourceResources, plugins,
     audit: new PgKnowledgeAudit(pool),
     model,
     database: database.gateway, close: database.close,
