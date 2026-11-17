@@ -91,6 +91,10 @@ export function visibleDraft(draft: LensDraft, runs: LensRun[], time: KnowledgeT
   return visibleAt(recorded, time);
 }
 const day = (iso?: string) => iso ? iso.slice(0, 10) : '';
+function statedEffect(draft: Pick<LensDraft, 'effectiveFrom' | 'effectiveTo'>): string | undefined {
+  if (draft.effectiveFrom && draft.effectiveTo) return `${draft.effectiveFrom} – ${draft.effectiveTo}`;
+  return draft.effectiveFrom || draft.effectiveTo;
+}
 
 const TEXT = {
   en: {
@@ -174,7 +178,7 @@ export function RuleCard({ drafts, runs, names, onSeeAll }: { drafts: LensDraft[
   if (!rule) return <aside className="lens-rule is-empty" aria-label={t('ruleTitle')}><p>{t('ruleEmpty')}</p></aside>;
   const recorded = day(recordedOf(rule, runs));
   const source = rule.evidence[0]?.locator;
-  const effect = rule.effectiveFrom;
+  const effect = statedEffect(rule);
   return <aside className="lens-rule" aria-label={t('ruleTitle')}>
     <div className="lens-rule-main">
       <span className="lens-eyebrow">{t('ruleTitle')}</span>
@@ -207,7 +211,7 @@ export function DimensionChips({ drafts, value, onChange }: { drafts: LensDraft[
   </div>;
 }
 
-interface TimelineEvent { at: string; kind: 'material' | 'run' | 'org' | 'drafts'; title: string; body: string }
+interface TimelineEvent { at: string; kind: 'material' | 'run' | 'org' | 'drafts'; title: string; body: string; effect?: string }
 
 export function KnowledgeTimeline({ items, runs, drafts, organizationConfirmedAt, time }: {
   items: LensItem[]; runs: LensRun[]; drafts: LensDraft[]; organizationConfirmedAt?: string; time: KnowledgeTime;
@@ -216,10 +220,19 @@ export function KnowledgeTimeline({ items, runs, drafts, organizationConfirmedAt
   const events: TimelineEvent[] = [];
   for (const item of items) if (item.confirmed && item.confirmedAt) events.push({ at: item.confirmedAt, kind: 'material', title: t('evMaterial'), body: t('evMaterialBody', { title: item.title, version: item.version }) });
   const completed = runs.filter(run => run.createdAt);
-  const latestCompleted = completed.filter(run => run.status === 'completed').map(run => run.createdAt!).sort().at(-1);
   for (const run of completed) {
     events.push({ at: run.createdAt!, kind: 'run', title: t('evRun'), body: t('evRunBody', { status: t(`run_${run.status}` as keyof typeof TEXT.en) || run.status }) });
-    if (run.createdAt === latestCompleted && drafts.length) events.push({ at: run.createdAt!, kind: 'drafts', title: t('evDrafts'), body: t('evDraftsBody', { n: drafts.length }) });
+  }
+  for (const draft of drafts) {
+    const at = recordedOf(draft, runs);
+    if (!at) continue;
+    events.push({
+      at,
+      kind: 'drafts',
+      title: t('evDrafts'),
+      body: t('evDraftsBody', { n: 1 }),
+      effect: statedEffect(draft) || undefined,
+    });
   }
   if (organizationConfirmedAt) events.push({ at: organizationConfirmedAt, kind: 'org', title: t('evOrg'), body: t('evOrgBody') });
   events.sort((a, b) => b.at.localeCompare(a.at));
@@ -230,7 +243,7 @@ export function KnowledgeTimeline({ items, runs, drafts, organizationConfirmedAt
       return <li key={`${event.kind}-${event.at}-${index}`} className={`lens-event is-${event.kind} ${later ? 'is-later' : ''}`}>
         <div className="lens-axes">
           <span><small>{t('recordAxis')}</small><time dateTime={event.at}>{event.at.slice(0, 16).replace('T', ' ')}</time></span>
-          <span><small>{t('effectAxis')}</small>{event.kind === 'material' || event.kind === 'drafts' ? t('effectUnknown') : event.at.slice(0, 10)}</span>
+          <span><small>{t('effectAxis')}</small>{event.effect ?? (event.kind === 'material' || event.kind === 'drafts' ? t('effectUnknown') : event.at.slice(0, 10))}</span>
         </div>
         <div className="lens-event-body"><strong>{event.title}</strong><p>{event.body}</p>{later ? <span className="lens-later">{t('later')}</span> : null}</div>
       </li>;
@@ -248,8 +261,8 @@ export function AssertionFacts({ draft, runs, names, stale }: { draft: LensDraft
     <div><dt>{t('factDims')}</dt><dd className="lens-fact-dims">{dims.map(dim => <span key={dim}>{t(`dim_${dim}` as keyof typeof TEXT.en)}</span>)}</dd></div>
     <div><dt>{t('factEntity')}</dt><dd>{draft.relation ? relationText(draft, names) : draft.name}</dd></div>
     <div><dt>{t('factSource')}</dt><dd>{source ? draft.evidence.length > 1 ? t('factSourceMore', { source, n: draft.evidence.length }) : source : t('factNoSource')}</dd></div>
-    {recorded ? <div><dt>{t('factTime')}</dt><dd>{draft.effectiveFrom
-      ? t('factTimeStated', { from: draft.effectiveFrom, to: draft.effectiveTo ? t('factTimeUntil', { to: draft.effectiveTo }) : '', date: recorded })
+    {recorded ? <div><dt>{t('factTime')}</dt><dd>{statedEffect(draft)
+      ? t('factTimeStated', { from: statedEffect(draft)!, to: '', date: recorded })
       : t('factTimeValue', { date: recorded })}</dd></div> : null}
     <div><dt>{t('factStatus')}</dt><dd>{t(stale ? 'factStale' : draft.humanLocked ? 'factConfirmed' : 'factPending')}</dd></div>
   </dl>;
