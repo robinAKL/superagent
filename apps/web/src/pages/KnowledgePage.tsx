@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useLang, useT, type Dict } from '../i18n';
 import './KnowledgePage.css';
@@ -22,7 +22,7 @@ interface Recommendation {
 interface Overview {
   spaceName: string; sourceResources: SourceResource[];
   plugins: Plugin[]; connections: Connection[]; items: Item[];
-  analyses: { id: string; status: string; stage: string; error?: string | null; mcpSources?: string[] }[];
+  analyses: { id: string; status: string; stage: string; error?: string | null; mcpSources?: string[]; skippedRelations?: number }[];
   recommendations: Recommendation[];
   mcpRecommendations?: Recommendation[];
   analysisReadiness?: { ready: true } | { ready: false; code: string };
@@ -121,6 +121,7 @@ const TEXT = {
     reqFailedHttp: 'Request failed (HTTP {status})',
     evidenceLocator: 'Version {version} · Chars {start}–{end}',
     evidenceSource: 'Source {sourceId}',
+    evidenceExcerpt: 'Source excerpt',
     noEvidence: 'No locatable evidence; cannot generate or adopt recommendations from this.',
     scopeMailbox: 'Mailbox',
     scopeFolder: 'Mail folder',
@@ -150,20 +151,18 @@ const TEXT = {
     recLockSuccess: 'Draft saved and locked by human.',
     recDraftKind: '{kind} draft',
     recHumanLocked: 'Human locked',
-    recPendingReview: 'Suggestion · pending review',
+    recPendingReview: 'Pending review',
     recOriginManual: 'Manual entry · not inferred from documents',
-    recOriginInferred: 'Document-inferred · verify source evidence',
     recStaleAlert: 'Evidence version changed and old citations were withdrawn. Manual content is kept; review new suggestions before adopting.',
     recName: 'Name',
     recDesc: 'Description',
-    recSaveLockBtn: 'Save & human lock',
+    recSaveLockBtn: 'Save and lock',
     recDeleteSuccess: 'Draft deleted; future analyses will not restore it automatically.',
     recDeleteBtn: 'Delete draft',
     recProposalTitle: 'Analysis proposed a change without overwriting manual content',
     recAdoptSuccess: 'Change adopted and locked by human.',
     recAdoptBtn: 'Verify & adopt this change',
-    recManualNoEvidence: 'Entered manually; no document-inferred evidence.',
-    recViewEvidence: 'View evidence · {count} item(s)',
+    recEvidenceTitle: 'Source evidence',
     connCreatedNotice: 'Connection verified. You can now choose materials to import.',
     spaceSavedNotice: 'Knowledge space name saved (metadata only).',
     manualRoleSavedNotice: 'Manual role added; this does not automatically enable material analysis.',
@@ -248,6 +247,7 @@ const TEXT = {
     analysisTruncatedOutput: 'The model reached its output limit before finishing the drafts. Try running the analysis again.',
     analysisInvalidCitations: 'The model returned citations that could not be matched to the source material.',
     analysisInvalidRelation: 'The model proposed a relationship between business objects without valid supporting drafts.',
+    analysisSkippedRelations: 'Relationships skipped because their objects lack supporting drafts: {count}',
     analysisRunFailed: 'The analysis failed. Try again.',
     analysisPermission: 'An owner or administrator can start an analysis.',
     needConfirmedHint: 'Add a material or select a connected MCP source.',
@@ -256,10 +256,11 @@ const TEXT = {
     analysisMcpFocus: 'Analysis focus (optional)',
     analysisMcpFocusPlaceholder: 'e.g. Order handling guide or pricing policy',
     analysisMcpScopeChanged: 'An MCP connection changed. Select the sources again and restart the analysis.',
-    analysisMcpEmpty: 'The MCP source returned no readable knowledge. If it serves guides through tools, reconnect with read-only queries enabled.',
+    analysisMcpEmpty: 'The MCP source returned no readable knowledge. Try a more specific analysis focus or check what the source exposes.',
     analysisMcpUnavailable: 'An MCP source could not be read. Check the connection and try again.',
     analysisMcpReauthorize: 'Reconnect and authorize the MCP source before running the analysis again.',
     analysisMcpDraft: 'Private MCP analysis draft',
+    analysisOpenMcpDrafts: 'View MCP drafts in Super Agent',
     analysisMcpRetrieved: 'Read from MCP on {date}',
     noAnalyses: 'No analyses run yet. Source permissions and versions are re-checked before analysis starts.',
     noRecommendations: 'No draft recommendations yet. Only analysis results with valid current citations appear here.',
@@ -353,6 +354,7 @@ const TEXT = {
     reqFailedHttp: '请求失败（HTTP {status}）',
     evidenceLocator: '版本 {version} · 字符 {start}–{end}',
     evidenceSource: '来源 {sourceId}',
+    evidenceExcerpt: '来源原文',
     noEvidence: '没有可定位依据，不能据此生成或采纳建议。',
     scopeMailbox: '邮箱',
     scopeFolder: '邮件文件夹',
@@ -382,9 +384,8 @@ const TEXT = {
     recLockSuccess: '草案已保存并由人工锁定。',
     recDraftKind: '{kind}草案',
     recHumanLocked: '人工锁定',
-    recPendingReview: '建议 · 待核对',
+    recPendingReview: '待核对',
     recOriginManual: '人工补充 · 不是文档推断',
-    recOriginInferred: '文档推断 · 需核对来源依据',
     recStaleAlert: '依据版本已变化，旧引用已撤回。人工内容保留，请核对新建议后决定是否采纳。',
     recName: '名称',
     recDesc: '说明',
@@ -394,8 +395,7 @@ const TEXT = {
     recProposalTitle: '分析提出了修改，尚未覆盖人工内容',
     recAdoptSuccess: '修改已由人工采纳并锁定。',
     recAdoptBtn: '核对后采纳这次修改',
-    recManualNoEvidence: '此角色由人工录入，没有文档推断依据。',
-    recViewEvidence: '查看依据 · {count} 处',
+    recEvidenceTitle: '来源依据',
     connCreatedNotice: '连接已验证，可以选择资料导入。',
     spaceSavedNotice: '知识空间名称已保存，仅更新名称元数据。',
     manualRoleSavedNotice: '人工角色已补充，不会据此自动启用资料分析。',
@@ -480,6 +480,7 @@ const TEXT = {
     analysisTruncatedOutput: '模型达到输出上限，未完成草案生成。请重新开始分析。',
     analysisInvalidCitations: '模型返回的引用无法与原始资料匹配。',
     analysisInvalidRelation: '模型提出的业务对象关系缺少有效的对象草案。',
+    analysisSkippedRelations: '因缺少有效对象草案，已跳过 {count} 条关系。',
     analysisRunFailed: '分析失败，请重试。',
     analysisPermission: '所有者或管理员可以开始分析。',
     needConfirmedHint: '请添加资料或选择已连接的 MCP 来源。',
@@ -488,10 +489,11 @@ const TEXT = {
     analysisMcpFocus: '分析重点（可选）',
     analysisMcpFocusPlaceholder: '例如订单处理指南或定价规则',
     analysisMcpScopeChanged: 'MCP 连接已变化，请重新选择来源并开始分析。',
-    analysisMcpEmpty: 'MCP 来源未返回可读知识。如果指南通过工具提供，请重新连接并启用只读查询。',
+    analysisMcpEmpty: 'MCP 来源未返回可读资料。请尝试更具体的分析重点，或检查该来源提供的内容。',
     analysisMcpUnavailable: 'MCP 来源读取失败，请检查连接后重试。',
     analysisMcpReauthorize: '请重新连接并授权 MCP 来源，然后再次分析。',
     analysisMcpDraft: '仅自己可见的 MCP 分析草案',
+    analysisOpenMcpDrafts: '在超级智能体中查看 MCP 草案',
     analysisMcpRetrieved: 'MCP 读取时间 {date}',
     noAnalyses: '尚未运行分析。分析开始前会再次检查来源权限和版本。',
     noRecommendations: '暂无建议草案。只有带当前有效引用的分析结果才会出现在这里。',
@@ -560,16 +562,36 @@ const STATUS_KEYS: Record<string, TextKey> = {
 
 const CARD_ORDER = ['local-file', 'mcp', 'database', 'email', 'sharepoint'] as const;
 
-function EvidenceList({ evidence, t }: { evidence: Evidence[]; t: Translate }) {
-  return evidence.length ? <ol className="knowledge-evidence">
-    {evidence.map((entry, index) => <li key={`${entry.sourceId}:${entry.version}:${entry.start}:${index}`}>
-      <blockquote>{entry.quote}</blockquote>
-      {entry.retrievedAt ? <><p>{entry.locator}</p><small>{t('analysisMcpRetrieved', { date: new Date(entry.retrievedAt).toLocaleString() })}</small></> : <>
-        <p>{entry.locator} <span>· {t('evidenceLocator', { version: entry.version, start: entry.start, end: entry.end })}</span></p>
-        <small>{t('evidenceSource', { sourceId: entry.sourceId })}</small>
-      </>}
-    </li>)}
-  </ol> : <p className="knowledge-empty">{t('noEvidence')}</p>;
+function EvidenceList({ evidence, t, collapsible = false }: { evidence: Evidence[]; t: Translate; collapsible?: boolean }) {
+  const group = useId();
+  if (!evidence.length) return <p className="knowledge-empty">{t('noEvidence')}</p>;
+
+  return <ol className={collapsible ? 'knowledge-evidence knowledge-evidence-collapsible' : 'knowledge-evidence'}>
+    {evidence.map((entry, index) => {
+      const position = t('evidenceLocator', { version: entry.version, start: entry.start, end: entry.end });
+      const source = t('evidenceSource', { sourceId: entry.sourceId });
+      const retrieved = entry.retrievedAt ? t('analysisMcpRetrieved', { date: new Date(entry.retrievedAt).toLocaleString() }) : undefined;
+      return <li key={`${entry.sourceId}:${entry.version}:${entry.start}:${index}`}>
+        {collapsible ? <details name={group}>
+          <summary>
+            <span className="knowledge-evidence-location">{entry.locator || source}</span>
+            <span className="knowledge-evidence-preview" aria-hidden="true">{entry.quote}</span>
+          </summary>
+          <div className="knowledge-evidence-body">
+            <div className="knowledge-evidence-scroll" role="region" aria-label={t('evidenceExcerpt')} tabIndex={0}>
+              <blockquote>{entry.quote}</blockquote>
+            </div>
+            <small>{retrieved ?? position}</small>
+            {retrieved ? null : <small>{source}</small>}
+          </div>
+        </details> : <>
+          <blockquote>{entry.quote}</blockquote>
+          <p>{entry.locator} {!retrieved ? <span>· {position}</span> : null}</p>
+          <small>{retrieved ?? source}</small>
+        </>}
+      </li>;
+    })}
+  </ol>;
 }
 
 function ScopeSummary({ scope, projectIds, t }: { scope: SourceScope; projectIds?: string[]; t: Translate }) {
@@ -671,28 +693,38 @@ function RecommendationCard({ recommendation: r, privateMcp, disabled, onAction,
     await onAction(`lock:${r.id}`, `/recommendations/${encodeURIComponent(r.id)}/lock`, { name: name.trim(), description: description.trim() }, t('recLockSuccess'));
   }
   return <article className="knowledge-recommendation">
-    <div className="knowledge-row">
-      <span className="knowledge-kind">{t('recDraftKind', { kind: label(r.kind) })}</span>
-      <span className={`knowledge-badge ${r.humanLocked ? 'is-gold' : ''}`}>{r.humanLocked ? t('recHumanLocked') : t('recPendingReview')}</span>
-    </div>
-    <p className="helper">{privateMcp ? t('analysisMcpDraft') : r.origin === 'manual' ? t('recOriginManual') : t('recOriginInferred')}</p>
-    {r.stale ? <p className="knowledge-alert">{t('recStaleAlert')}</p> : null}
-    {r.relation ? <p className="helper">{r.relation.from} → {r.relation.to} · {r.relation.label}</p> : null}
-    <form onSubmit={save} className="knowledge-form">
-      <label className="field"><span>{t('recName')}</span><input required maxLength={160} value={name} onChange={event => setName(event.target.value)} /></label>
-      <label className="field"><span>{t('recDesc')}</span><textarea required maxLength={4000} rows={3} value={description} onChange={event => setDescription(event.target.value)} /></label>
-      <div className="knowledge-actions">
-        <button className="btn" disabled={disabled || !name.trim() || !description.trim() || (r.origin !== 'manual' && !r.evidence.length)}>{t('recSaveLockBtn')}</button>
+    <header className="knowledge-recommendation-head">
+      <div>
+        <h3>{t('recDraftKind', { kind: label(r.kind) })}</h3>
+        {privateMcp ? <p className="helper">{t('analysisMcpDraft')}</p> : r.origin === 'manual' ? <p className="helper">{t('recOriginManual')}</p> : null}
+      </div>
+      <span className={`knowledge-badge ${r.humanLocked ? 'is-green' : ''}`}>{r.humanLocked ? t('recHumanLocked') : t('recPendingReview')}</span>
+    </header>
+    <form onSubmit={save}>
+      {r.stale ? <p className="knowledge-alert">{t('recStaleAlert')}</p> : null}
+      <div className="knowledge-recommendation-body">
+        <div className="knowledge-form knowledge-recommendation-editor">
+          {r.relation ? <p className="helper">{r.relation.from} → {r.relation.to} · {r.relation.label}</p> : null}
+          <label className="field"><span>{t('recName')}</span><input required maxLength={160} value={name} onChange={event => setName(event.target.value)} /></label>
+          <label className="field"><span>{t('recDesc')}</span><textarea required maxLength={4000} rows={4} value={description} onChange={event => setDescription(event.target.value)} /></label>
+        </div>
+        {r.origin !== 'manual' ? <section className="knowledge-recommendation-evidence" aria-label={t('recEvidenceTitle')}>
+          <h4>{t('recEvidenceTitle')} <span>{r.evidence.length}</span></h4>
+          <EvidenceList evidence={r.evidence} t={t} collapsible />
+        </section> : null}
+      </div>
+      {r.proposedChange ? <section className="knowledge-proposal">
+        <h4>{t('recProposalTitle')}</h4>
+        <p><strong>{r.proposedChange.name}</strong></p>
+        <p>{r.proposedChange.description}</p>
+        {r.proposedChange.evidence ? <EvidenceList evidence={r.proposedChange.evidence} t={t} collapsible /> : null}
+        <button className="btn" type="button" disabled={disabled} onClick={() => void onAction(`adopt:${r.id}`, `/recommendations/${encodeURIComponent(r.id)}/adopt`, {}, t('recAdoptSuccess'))}>{t('recAdoptBtn')}</button>
+      </section> : null}
+      <div className="knowledge-recommendation-actions">
         <button className="btn knowledge-danger" type="button" disabled={disabled} onClick={() => void onAction(`delete:${r.id}`, `/recommendations/${encodeURIComponent(r.id)}/delete`, {}, t('recDeleteSuccess'))}>{t('recDeleteBtn')}</button>
+        <button className="btn primary" type="submit" disabled={disabled || !name.trim() || !description.trim() || (r.origin !== 'manual' && !r.evidence.length)}>{t('recSaveLockBtn')}</button>
       </div>
     </form>
-    {r.proposedChange ? <div className="knowledge-proposal">
-      <strong>{t('recProposalTitle')}</strong>
-      <p>{r.proposedChange.name}</p><p>{r.proposedChange.description}</p>
-      {r.proposedChange.evidence ? <EvidenceList evidence={r.proposedChange.evidence} t={t} /> : null}
-      <button className="btn" type="button" disabled={disabled} onClick={() => void onAction(`adopt:${r.id}`, `/recommendations/${encodeURIComponent(r.id)}/adopt`, {}, t('recAdoptSuccess'))}>{t('recAdoptBtn')}</button>
-    </div> : null}
-    {r.origin === 'manual' ? <p className="helper">{t('recManualNoEvidence')}</p> : <details><summary>{t('recViewEvidence', { count: r.evidence.length })}</summary><EvidenceList evidence={r.evidence} t={t} /></details>}
   </article>;
 }
 
@@ -1142,7 +1174,7 @@ export function KnowledgePage() {
           <legend>{t('analysisMcpSources')}</legend>
           <div className="knowledge-analysis-source-list">{liveAnalysisSources.map(source => {
             const checked = mcpSourceIds.includes(source.id);
-            return <label className="knowledge-check" key={source.id}>
+            return <label className="knowledge-check knowledge-analysis-source" key={source.id}>
               <input type="checkbox" checked={checked} disabled={!checked && mcpSourceIds.length >= MAX_MCP_ANALYSIS_SOURCES}
                 onChange={event => setAnalysisSourceIds(event.target.checked ? [...mcpSourceIds, source.id] : mcpSourceIds.filter(id => id !== source.id))} />
               <span>{source.name}</span>
@@ -1155,10 +1187,12 @@ export function KnowledgePage() {
         </fieldset> : null}
         {!confirmedCount && !mcpSourceIds.length ? <p className="helper">{t('needConfirmedHint')}</p> : null}
         {overview.analyses.length ? <ul className="knowledge-runs">{overview.analyses.slice(-5).reverse().map(run => <li key={run.id}>
-          <span className={`knowledge-badge ${run.status === 'completed' ? 'is-green' : ''}`}>{label(run.status)}</span><span>{label(run.stage)}</span><small>{run.id}</small>
+          <span className={`knowledge-badge ${run.status === 'completed' ? 'is-green' : run.error ? 'is-warning' : ''}`}>{label(run.status)}</span><span>{label(run.stage)}</span><small>{run.id}</small>
           {run.mcpSources?.length ? <small>{run.mcpSources.join(' · ')}</small> : null}
-          {run.error ? <small className="knowledge-job-error">{t(ANALYSIS_MESSAGES[run.error] ?? 'analysisRunFailed')}</small> : null}
+          {run.error ? <small className="knowledge-run-message">{t(ANALYSIS_MESSAGES[run.error] ?? 'analysisRunFailed')}</small> : null}
+          {run.skippedRelations ? <small className="knowledge-run-message">{t('analysisSkippedRelations', { count: run.skippedRelations })}</small> : null}
         </li>)}</ul> : <p className="knowledge-empty">{t('noAnalyses')}</p>}
+        {mcpRecommendations.length ? <a className="knowledge-analysis-results-link" href="#brain?tab=mcp-drafts">{t('analysisOpenMcpDrafts')}</a> : null}
         {recommendations.length || mcpRecommendations.length ? <div className="knowledge-recommendations">
           {mcpRecommendations.map(recommendation => <RecommendationCard key={recommendation.id} recommendation={recommendation} privateMcp disabled={!!busy} onAction={action} label={label} t={t} />)}
           {recommendations.map(recommendation => <RecommendationCard key={recommendation.id} recommendation={recommendation} disabled={!!busy} onAction={action} label={label} t={t} />)}

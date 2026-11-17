@@ -107,10 +107,14 @@ export async function runAnalysis(
         mcpScope: hash(JSON.stringify([ctx.userId, selected.map(source => [source.id, source.revision]).sort()])), mcpRunId: runId,
         validEvidence: (e: Evidence) => e.retrievedAt ? mcpEvidenceValid(s, ctx, e) : evidenceValid(s, ctx, e),
       } : undefined;
-      mergeRecommendations(s, ctx, result, scope);
+      const { accepted, skippedRelations } = mergeRecommendations(s, ctx, result, scope);
+      run.skippedRelations = skippedRelations;
       const store = s.source;
-      if (!scope) for (const proposal of result) for (const e of proposal.evidence) {
-        const citer = s.recommendations.find(r => r.key === proposal.key && r.kind === proposal.kind)?.id;
+      if (scope) {
+        const citations = accepted.flatMap(proposal => proposal.evidence).filter(citation => citation.retrievedAt);
+        run.mcpEvidence = [...new Map(citations.map(citation => [JSON.stringify(citation), citation])).values()];
+      } else for (const proposal of accepted) for (const e of proposal.evidence) {
+        const citer = s.recommendations.find(r => !r.mcpScope && !r.deleted && r.key === proposal.key && r.kind === proposal.kind)?.id;
         if (!citer) continue;
         const entry = store.citations.find(([key]) => key === e.sourceId);
         if (entry) { if (!entry[1].includes(citer)) entry[1].push(citer); } else store.citations.push([e.sourceId, [citer]]);

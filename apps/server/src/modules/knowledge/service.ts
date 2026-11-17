@@ -86,12 +86,7 @@ export class KnowledgeService {
     const plugin = this.deps.plugins?.[pluginId];
     if (!plugin) throw new KnowledgeError('connector_not_configured', '此来源需要独立配置连接凭据与只读授权。模型 API Key 不能代替来源授权。', 503); return plugin;
   }
-  async overview(ctx: UserContext) {
-    const s = await this.deps.repo.read(ctx);
-    const modelReadiness = await this.modelReadiness(ctx);
-    const analysisReadiness = this.deps.enqueue ? modelReadiness : { ready: false as const, code: 'analysis_unavailable' };
-    const refining = !!this.deps.model?.profile && modelReadiness.ready;
-    const items = s.source.items.filter(i => this.allowed(s, ctx, i, false));
+  private recommendationView(s: KnowledgeState, ctx: UserContext) {
     const recs = s.recommendations.filter(r => !r.deleted && this.draftAllowed(s, ctx, r)).flatMap(r => {
       const valid = r.origin === 'manual' || r.evidence.length > 0 && r.evidence.every(e => this.valid(s, ctx, e));
       const identityAllowed = r.humanLocked && r.evidence.length > 0 && r.evidence.every(e => {
@@ -106,6 +101,20 @@ export class KnowledgeService {
     const objectKeys = new Set(recs.filter(r => r.kind === 'object').map(r => objectKey(r.mcpScope, r.key)));
     const visibleRecs = recs.filter(r => r.kind !== 'relation' || r.relation && objectKeys.has(objectKey(r.mcpScope, r.relation.from)) && objectKeys.has(objectKey(r.mcpScope, r.relation.to)));
     return {
+      recommendations: visibleRecs.filter(r => !r.mcpScope),
+      mcpRecommendations: visibleRecs.filter(r => r.mcpScope).map(({ mcpScope: _, mcpRunId: _run, ...draft }) => draft),
+    };
+  }
+  async recommendations(ctx: UserContext) {
+    return this.recommendationView(await this.deps.repo.read(ctx), ctx);
+  }
+  async overview(ctx: UserContext) {
+    const s = await this.deps.repo.read(ctx);
+    const modelReadiness = await this.modelReadiness(ctx);
+    const analysisReadiness = this.deps.enqueue ? modelReadiness : { ready: false as const, code: 'analysis_unavailable' };
+    const refining = !!this.deps.model?.profile && modelReadiness.ready;
+    const items = s.source.items.filter(i => this.allowed(s, ctx, i, false));
+    return {
       spaceName: s.spaceName,
       mcpConnections: this.deps.liveMcp?.list(s, ctx),
       analysisReadiness,
@@ -116,10 +125,9 @@ export class KnowledgeService {
       items: items.map(i => ({ id: hash(i.id), title: i.title, version: i.version, status: i.status, confirmed: this.allowed(s, ctx, i), locator: i.locator, pluginId: s.source.connections.find(c => c.id === i.connectionId)!.pluginId, profile: this.profileView(s, ctx, i, refining) })),
       analyses: s.analyses.filter(r => r.actor.userId === ctx.userId).map(run => ({
         id: run.id, status: run.status, stage: run.stage, signature: run.signature, createdAt: run.createdAt, error: run.error,
-        mcpSources: run.mcpSources?.map(source => source.name),
+        mcpSources: run.mcpSources?.map(source => source.name), skippedRelations: run.skippedRelations,
       })),
-      recommendations: visibleRecs.filter(r => !r.mcpScope),
-      mcpRecommendations: visibleRecs.filter(r => r.mcpScope).map(({ mcpScope: _, mcpRunId: _run, ...draft }) => draft),
+      ...this.recommendationView(s, ctx),
       canConfirm: ctx.roles.some(role => role === 'owner' || role === 'admin'),
       parseJobs: s.parseJobs.filter(j => j.actor.userId === ctx.userId && s.connectionMeta[j.connectionId]?.audience.includes(ctx.userId) && s.connectionMeta[j.connectionId]!.projectIds.every(p => ctx.projectScopes.includes(p))).map(j => ({ id: j.id, name: j.name, status: j.status, error: j.error })),
     };

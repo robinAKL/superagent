@@ -114,7 +114,7 @@ test('ontology with configured knowledge but no readable objects stays empty', a
 test('ontology renders objects, a relation and their evidence on the real page (desktop and phone width)', async ({ page }) => {
   // Response in the shape the knowledge analysis returns (kind object / relation with relation {from,to,label}).
   const evidence = (quote: string, line: number) => [{ sourceId: 's1', version: 'v1', start: 0, end: quote.length, locator: `采购制度.md#L${line}`, quote }];
-  await page.route('**/api/v1/knowledge/overview', (route) =>
+  await page.route('**/api/v1/knowledge/recommendations', (route) =>
     route.fulfill({
       json: {
         recommendations: [
@@ -123,6 +123,7 @@ test('ontology renders objects, a relation and their evidence on the real page (
           { id: 'r3', key: 'invoice-po', kind: 'relation', name: '发票匹配采购单', description: '', relation: { from: 'invoice', to: 'po', label: '须匹配' }, evidence: evidence('付款前发票须与采购单金额一致', 12), humanLocked: false, deleted: false },
           { id: 'r4', key: 'ap-clerk', kind: 'employee', name: '应付专员', description: '不是本体对象', evidence: evidence('应付专员负责付款', 20), humanLocked: false, deleted: false },
         ],
+        mcpRecommendations: [],
       },
     }),
   );

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { SOP_NODE_KINDS, validateSopGraph, type SopGraph, type SopGraphContext, type SopNodeKind } from '@superagent/shared';
 import { api } from '../api';
-import { useLang } from '../i18n';
+import { useT } from '../i18n';
 import { KIND_LABEL, SopGraphView } from '../components/SopGraphView';
 import { graphFromPack, knowledgeImpact, packFromRecommendation, unconfirmedItems, validationState, type KnowledgeEvidence, type SopPack } from './sop-workflow';
 import { McpKnowledge } from './McpKnowledge';
@@ -25,13 +25,6 @@ export interface SopVersionView {
   revision?: number;
   validatedRevision?: number | null;
   definition: { graph?: SopGraph; pack?: SopPack | null; [k: string]: unknown };
-}
-interface KnowledgeRecommendation {
-  key: string;
-  kind: string;
-  name: string;
-  description: string;
-  evidence: KnowledgeEvidence[];
 }
 interface SopSummary {
   sopId: string;
@@ -61,6 +54,41 @@ interface Recommendation {
   evidence: Evidence[];
   relation?: { from: string; to: string; label: string };
 }
+
+interface Drafts {
+  recommendations: (Recommendation & { evidence: KnowledgeEvidence[] })[];
+  mcpRecommendations: Recommendation[];
+}
+type DraftRead = { status: 'loading' | 'error' } | { status: 'ready'; drafts: Drafts };
+interface DraftViewProps { knowledge: DraftRead; retryKnowledge: () => void }
+const READ_TIMEOUT_MS = 15_000;
+const TEXT = {
+  en: {
+    title: 'Super Agent', subtitle: 'Workflows (SOP) and business ontology',
+    sop: 'Workflows', ontology: 'Ontology', mcp: 'MCP knowledge', mcpDrafts: 'MCP drafts',
+    loadingDrafts: 'Loading analysis drafts…', draftError: 'Could not load analysis drafts.',
+    retry: 'Try again', loadingSops: 'Loading workflows…', sopError: 'Could not load workflows.',
+    privateDrafts: 'Drafts from your MCP analysis are visible only to you.',
+    noPrivateDrafts: 'No MCP drafts are currently available. Run an analysis with a connected MCP source.',
+    reviewDrafts: 'Open Company knowledge', evidence: 'View source evidence',
+    sopDraft: 'Workflow', objectDraft: 'Business object', relationDraft: 'Relationship',
+    employeeDraft: 'Role', toolDraft: 'Tool',
+  },
+  zh: {
+    title: '超级智能体', subtitle: '流程（SOP）与企业本体',
+    sop: '流程', ontology: '本体关系', mcp: 'MCP 知识', mcpDrafts: 'MCP 草案',
+    loadingDrafts: '正在读取分析草案…', draftError: '无法读取分析草案。',
+    retry: '重试', loadingSops: '正在读取流程…', sopError: '无法读取流程列表。',
+    privateDrafts: '这些 MCP 分析草案仅你可见。',
+    noPrivateDrafts: '暂无可查看的 MCP 草案。请在企业知识中选择已连接的 MCP 来源进行分析。',
+    reviewDrafts: '打开企业知识', evidence: '查看来源依据',
+    sopDraft: '流程', objectDraft: '业务对象', relationDraft: '关系',
+    employeeDraft: '角色', toolDraft: '工具',
+  },
+};
+const DRAFT_KIND: Record<string, keyof typeof TEXT.en> = {
+  sop: 'sopDraft', object: 'objectDraft', relation: 'relationDraft', employee: 'employeeDraft', tool: 'toolDraft',
+};
 
 const STATUS_LABEL: Record<SopVersionView['status'], string> = { draft: '草稿', passed: '校验通过', failed: '校验未通过', published: '已发布' };
 const GATE_LABEL: Record<string, string> = {
@@ -99,34 +127,97 @@ export function employeeContext(rows: EmployeeRow[]): SopGraphContext['employees
 }
 
 export function SuperAgentPage() {
-  const [lang] = useLang();
-  const [tab, setTab] = useState<'sop' | 'ontology' | 'mcp'>(() =>
-    typeof window !== 'undefined' && new URLSearchParams(window.location.hash.split('?')[1]).get('tab') === 'mcp' ? 'mcp' : 'sop');
+  const t = useT(TEXT);
+  const [tab, setTab] = useState<'sop' | 'ontology' | 'mcp' | 'mcp-drafts'>(() => {
+    const selected = typeof window !== 'undefined' ? new URLSearchParams(window.location.hash.split('?')[1]).get('tab') : null;
+    return selected === 'mcp' || selected === 'mcp-drafts' ? selected : 'sop';
+  });
+  const [knowledge, setKnowledge] = useState<DraftRead>({ status: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(READ_TIMEOUT_MS)]);
+    void api<Drafts>('/api/v1/knowledge/recommendations', { signal }).then(response => {
+      if (controller.signal.aborted) return;
+      setKnowledge(response.status === 200 && Array.isArray(response.body?.recommendations) && Array.isArray(response.body?.mcpRecommendations)
+        ? { status: 'ready', drafts: response.body }
+        : { status: 'error' });
+    }).catch(() => {
+      if (!controller.signal.aborted) setKnowledge({ status: 'error' });
+    });
+    return () => controller.abort();
+  }, [attempt]);
+  function retryKnowledge() {
+    setKnowledge({ status: 'loading' });
+    setAttempt(value => value + 1);
+  }
+  const mcpCount = knowledge.status === 'ready' ? knowledge.drafts.mcpRecommendations.length : 0;
   return (
     <>
       <div className="page-head">
-        <h1>超级智能体</h1>
-        <p>流程（SOP）与企业本体</p>
+        <h1>{t('title')}</h1>
+        <p>{t('subtitle')}</p>
       </div>
-      <div className="tabs" role="tablist" aria-label="超级智能体">
-        <button role="tab" type="button" aria-selected={tab === 'sop'} className="tab" onClick={() => setTab('sop')}>流程</button>
-        <button role="tab" type="button" aria-selected={tab === 'ontology'} className="tab" onClick={() => setTab('ontology')}>本体关系</button>
-        <button role="tab" type="button" aria-selected={tab === 'mcp'} className="tab" onClick={() => setTab('mcp')}>{lang === 'zh' ? 'MCP 知识' : 'MCP knowledge'}</button>
+      <div className="tabs" role="tablist" aria-label={t('title')}>
+        <button role="tab" type="button" aria-selected={tab === 'sop'} className="tab" onClick={() => setTab('sop')}>{t('sop')}</button>
+        <button role="tab" type="button" aria-selected={tab === 'ontology'} className="tab" onClick={() => setTab('ontology')}>{t('ontology')}</button>
+        <button role="tab" type="button" aria-selected={tab === 'mcp-drafts'} className="tab" onClick={() => setTab('mcp-drafts')}>
+          {t('mcpDrafts')}{mcpCount ? ` (${mcpCount})` : ''}
+        </button>
+        <button role="tab" type="button" aria-selected={tab === 'mcp'} className="tab" onClick={() => setTab('mcp')}>{t('mcp')}</button>
       </div>
-      {tab === 'sop' ? <SopWorkspace /> : tab === 'ontology' ? <OntologyView /> : <McpKnowledge />}
+      {tab === 'sop' ? <SopWorkspace knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
+        tab === 'ontology' ? <OntologyView knowledge={knowledge} retryKnowledge={retryKnowledge} /> :
+        tab === 'mcp-drafts' ? <McpDrafts knowledge={knowledge} retryKnowledge={retryKnowledge} /> : <McpKnowledge />}
     </>
   );
 }
 
-function SopWorkspace() {
+function DraftLoadStatus({ knowledge, retryKnowledge }: DraftViewProps) {
+  const t = useT(TEXT);
+  if (knowledge.status === 'ready') return null;
+  if (knowledge.status === 'loading') return <p className="helper" role="status">{t('loadingDrafts')}</p>;
+  return <div className="draft-load-error">
+    <p className="warn" role="alert">{t('draftError')}</p>
+    <button className="btn" type="button" onClick={retryKnowledge}>{t('retry')}</button>
+  </div>;
+}
+
+function McpDrafts({ knowledge, retryKnowledge }: DraftViewProps) {
+  const t = useT(TEXT);
+  const drafts = knowledge.status === 'ready' ? knowledge.drafts.mcpRecommendations : [];
+  return <section className="panel stack" aria-labelledby="mcp-drafts-heading">
+    <h2 className="h2" id="mcp-drafts-heading">{t('mcpDrafts')}</h2>
+    <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />
+    {knowledge.status === 'ready' ? <>
+      <p className="helper">{t(drafts.length ? 'privateDrafts' : 'noPrivateDrafts')}</p>
+      {drafts.length ? <ul className="onto-list mcp-draft-list">
+        {drafts.map(draft => <li key={draft.id}>
+          <div className="mcp-draft-heading">
+            <h3>{draft.name}</h3>
+            <span className="helper">{DRAFT_KIND[draft.kind] ? t(DRAFT_KIND[draft.kind]!) : draft.kind}</span>
+          </div>
+          <p className="mcp-draft-description">{draft.description}</p>
+          {draft.evidence.length ? <details>
+            <summary>{t('evidence')}</summary>
+            <Evidences ev={draft.evidence} label={t('evidence')} />
+          </details> : null}
+        </li>)}
+      </ul> : null}
+      <a className="mcp-draft-review" href="#knowledge">{t('reviewDrafts')}</a>
+    </> : null}
+  </section>;
+}
+
+function SopWorkspace({ knowledge, retryKnowledge }: DraftViewProps) {
+  const t = useT(TEXT);
   const [sops, setSops] = useState<SopSummary[] | null>(null);
-  const [unavailable, setUnavailable] = useState('');
+  const [unavailable, setUnavailable] = useState(false);
   const [sopId, setSopId] = useState('');
   const [newSopId, setNewSopId] = useState('');
   const [versions, setVersions] = useState<SopVersionView[]>([]);
   const [tools, setTools] = useState<ToolRow[]>([]);
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
-  const [knowledge, setKnowledge] = useState<{ recs: KnowledgeRecommendation[] } | { error: string } | null>(null);
   const [draft, setDraft] = useState<SopGraph>({ nodes: [], edges: [] });
   const [pack, setPack] = useState<SopPack | undefined>();
   const [rules, setRules] = useState<RulesForm>(rulesFrom(undefined));
@@ -136,23 +227,20 @@ function SopWorkspace() {
   const [msg, setMsg] = useState('');
 
   const loadList = useCallback(async () => {
-    const r = await api<{ sops: SopSummary[] }>('/api/v1/sop');
-    if (r.status !== 200) {
-      setUnavailable(r.status === 404 ? 'SOP 运行时尚未接入（T-41），暂时只能查看。' : `无法读取流程（${r.status}）`);
-      setSops([]);
-      return;
+    setUnavailable(false);
+    try {
+      const r = await api<{ sops: SopSummary[] }>('/api/v1/sop', { signal: AbortSignal.timeout(READ_TIMEOUT_MS) });
+      if (r.status !== 200 || !Array.isArray(r.body?.sops)) throw new Error('SOP list unavailable');
+      setSops(r.body.sops);
+    } catch {
+      setUnavailable(true);
     }
-    setUnavailable('');
-    setSops(Array.isArray(r.body.sops) ? r.body.sops : []);
   }, []);
 
   useEffect(() => {
     void loadList();
-    void api<ToolRow[]>('/api/v1/tools/').then((r) => r.status === 200 && setTools(r.body));
-    void api<EmployeeRow[]>('/api/v1/employees/').then((r) => r.status === 200 && setEmployees(r.body));
-    void api<{ recommendations?: KnowledgeRecommendation[]; message?: string }>('/api/v1/knowledge/overview').then((r) =>
-      setKnowledge(r.status === 200 ? { recs: r.body.recommendations ?? [] } : { error: r.status === 503 ? '企业知识存储尚未配置，暂无流程包。' : r.body.message ?? `无法读取知识（${r.status}）` }),
-    );
+    void api<ToolRow[]>('/api/v1/tools/').then((r) => r.status === 200 && setTools(r.body)).catch(() => undefined);
+    void api<EmployeeRow[]>('/api/v1/employees/').then((r) => r.status === 200 && setEmployees(r.body)).catch(() => undefined);
   }, [loadList]);
 
   const loadVersions = useCallback(async (id: string) => {
@@ -186,8 +274,9 @@ function SopWorkspace() {
       JSON.stringify(rulesFrom(saved.definition)) !== JSON.stringify(rules));
   const vstate = validationState(openDraft, dirty);
   const unconfirmed = unconfirmedItems(pack);
-  const packs = 'recs' in (knowledge ?? {}) ? (knowledge as { recs: KnowledgeRecommendation[] }).recs.filter((r) => r.kind === 'sop').map(packFromRecommendation) : [];
-  const impact = 'recs' in (knowledge ?? {}) ? knowledgeImpact(pack, (knowledge as { recs: KnowledgeRecommendation[] }).recs) : [];
+  const recs = knowledge.status === 'ready' ? knowledge.drafts.recommendations : [];
+  const packs = recs.filter((r) => r.kind === 'sop').map(packFromRecommendation);
+  const impact = knowledge.status === 'ready' ? knowledgeImpact(pack, recs) : [];
   const node = draft.nodes.find((n) => n.id === selected);
   const canValidate = !!openDraft && !dirty && !issues.length && !unconfirmed.length;
   const canPublish = canValidate && vstate.kind === 'valid';
@@ -240,16 +329,18 @@ function SopWorkspace() {
     await save(graphFromPack(fresh), fresh, target);
   }
 
-  if (sops === null) return <p className="helper">读取中…</p>;
   return (
     <div className="sop-workspace">
-      {unavailable ? <p className="warn">{unavailable}</p> : null}
       <section className="panel stack">
+        {unavailable ? <div className="draft-load-error">
+          <p className="warn" role="alert">{t('sopError')}</p>
+          <button type="button" className="btn" onClick={() => void loadList()}>{t('retry')}</button>
+        </div> : sops === null ? <p className="helper" role="status">{t('loadingSops')}</p> : null}
         <label className="field">
           <span>流程</span>
-          <select aria-label="选择流程" value={sopId} onChange={(e) => setSopId(e.target.value)}>
+          <select aria-label="选择流程" disabled={sops === null || unavailable} value={sopId} onChange={(e) => setSopId(e.target.value)}>
             <option value="">请选择</option>
-            {sops.map((s) => (
+            {sops?.map((s) => (
               <option key={s.sopId} value={s.sopId}>{s.sopId}{s.latest ? `（v${s.latest.number} ${STATUS_LABEL[s.latest.status]}）` : ''}</option>
             ))}
           </select>
@@ -264,13 +355,13 @@ function SopWorkspace() {
 
       <section className="panel stack" aria-label="流程包">
         <h2 className="h2">流程包（来自企业知识分析）</h2>
-        {knowledge && 'error' in knowledge ? <p className="helper">{knowledge.error}</p> : null}
-        {knowledge && 'recs' in knowledge && !packs.length ? <p className="helper">分析还没有给出有依据的流程建议。</p> : null}
+        <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />
+        {knowledge.status === 'ready' && !packs.length ? <p className="helper">分析还没有给出有依据的流程建议。</p> : null}
         <ul className="onto-list">
           {packs.map((p) => (
             <li key={p.key} data-pack={p.key}>
               <strong>{p.name}</strong> <span className="helper">{p.items.length} 项（触发 1，规则 {p.items.length - 1}），套用后逐项确认</span>
-              <button className="btn" type="button" onClick={() => requestPack(p)}>套用到草稿</button>
+              <button className="btn" type="button" disabled={sops === null || unavailable} onClick={() => requestPack(p)}>套用到草稿</button>
             </li>
           ))}
         </ul>
@@ -460,18 +551,9 @@ function GraphEditor({ graph, tools, employees, onChange }: { graph: SopGraph; t
 }
 
 /** Objects/entities and relations from the knowledge analysis, each with its evidence. Mobile: a readable list. */
-export function OntologyView() {
-  const [recs, setRecs] = useState<Recommendation[] | null>(null);
-  const [error, setError] = useState('');
-  useEffect(() => {
-    void api<{ recommendations?: Recommendation[]; message?: string }>('/api/v1/knowledge/overview').then((r) => {
-      if (r.status === 200) setRecs((r.body.recommendations ?? []).filter((x) => x.kind === 'object' || x.kind === 'relation'));
-      else setError(r.status === 503 ? '企业知识存储尚未配置，无法生成本体。' : r.body.message ?? `无法读取（${r.status}）`);
-    });
-  }, []);
-  if (error) return <p className="warn">{error}</p>;
-  if (!recs) return <p className="helper">读取中…</p>;
-  return <OntologyList items={recs} />;
+function OntologyView({ knowledge, retryKnowledge }: DraftViewProps) {
+  if (knowledge.status !== 'ready') return <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />;
+  return <OntologyList items={knowledge.drafts.recommendations} />;
 }
 
 export function OntologyList({ items }: { items: Recommendation[] }) {
@@ -509,9 +591,9 @@ export function OntologyList({ items }: { items: Recommendation[] }) {
   );
 }
 
-function Evidences({ ev }: { ev: Evidence[] }) {
+function Evidences({ ev, label = '依据' }: { ev: Evidence[]; label?: string }) {
   return (
-    <ul className="evidence" aria-label="依据">
+    <ul className="evidence" aria-label={label}>
       {ev.map((e, i) => <li key={i}><cite>{e.locator}</cite> “{e.quote}”</li>)}
     </ul>
   );

@@ -20,6 +20,10 @@ export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = asy
     reply.header('Cache-Control', 'no-store');
     return service!.overview(req.user!);
   });
+  app.get('/recommendations', (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return service!.recommendations(req.user!);
+  });
   const mcp = () => {
     if (!opts.deps?.liveMcp) throw new KnowledgeError('mcp_unavailable', 'MCP 知识连接尚未配置。', 503);
     return opts.deps.liveMcp;
