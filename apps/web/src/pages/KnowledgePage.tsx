@@ -9,7 +9,7 @@ import type { McpConnection } from './McpKnowledge';
 import { OntologyGraphView } from '../components/OntologyGraphView';
 import { AnalysisResults, SopWorkspace, useDraftRead } from './SuperAgentPage';
 import { AssertionFacts, DimensionChips, KnowledgeTimeline, RuleCard, TimeBar, dimensionsOf, objectNames, timeFromParams, visibleDraft, type Dimension, type KnowledgeTime } from './KnowledgeLenses';
-import { sopTabView } from './knowledge-sop-tab';
+import { sopTabView, type LoadCount } from './knowledge-sop-tab';
 
 interface Evidence { sourceId: string; version: string; start: number; end: number; locator: string; quote: string; retrievedAt?: string }
 interface Plugin { id: string; name: string; enabled: boolean; configured: boolean; capabilities: string[] }
@@ -192,6 +192,7 @@ const TEXT = {
     sopFlows: 'Published & draft graphs', sopCandidates: 'Extract SOP from knowledge', sopSwitch: 'Workflow view',
     sopEmptyTitle: 'No workflows yet', sopEmptyBody: 'Workflows come from your materials. Add and confirm materials in the Library, run an analysis, and the workflows it finds are drawn here as flowcharts with their sources.',
     sopEmptyLibrary: 'Open the Library', sopEmptyAnalyze: 'Open Classification & candidates', sopLoading: 'Loading workflows…',
+    sopListError: 'Could not load published and draft workflows.',
     graphIntro: 'The graph shows concrete entities and evidenced relationships. Select a node for identity, time and sources; the relationship table is keyboard-operable.',
     closeSources: 'Back to materials',
     analysisHistory: 'Earlier runs',
@@ -444,6 +445,7 @@ const TEXT = {
     sopFlows: '已发布图与草稿图', sopCandidates: '从知识提取 SOP', sopSwitch: '工作流视图',
     sopEmptyTitle: '还没有工作流', sopEmptyBody: '工作流来自企业资料。先在资料库添加并确认资料，再运行分析，找到的流程会以带来源的流程图显示在这里。',
     sopEmptyLibrary: '打开资料库', sopEmptyAnalyze: '打开分类与候选', sopLoading: '正在读取工作流…',
+    sopListError: '无法读取已发布图与草稿图。',
     graphIntro: '图表达具体实体与有证据的关系。选择节点查看标识、时间与来源；关系表可键盘操作。',
     closeSources: '返回资料',
     analysisHistory: '历史分析',
@@ -638,29 +640,38 @@ function KnowledgeFlows({ t }: { t: Translate }) {
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, []);
-  // How many saved workflows (published or draft) exist; an empty list means the editor has nothing to show yet.
-  const [saved, setSaved] = useState<number | null>(null);
+  const [saved, setSaved] = useState<LoadCount>({ status: 'loading' });
+  const [sopAttempt, setSopAttempt] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    void api<{ sops?: unknown[] }>('/api/v1/sop').then(r => { if (!cancelled) setSaved(r.status === 200 && Array.isArray(r.body?.sops) ? r.body.sops.length : 0); })
-      .catch(() => { if (!cancelled) setSaved(0); });
+    setSaved({ status: 'loading' });
+    void api<{ sops?: unknown[] }>('/api/v1/sop').then(r => {
+      if (cancelled) return;
+      setSaved(r.status === 200 && Array.isArray(r.body?.sops) ? { status: 'ready', count: r.body.sops.length } : { status: 'error' });
+    }).catch(() => { if (!cancelled) setSaved({ status: 'error' }); });
     return () => { cancelled = true; };
-  }, []);
-  const candidates = knowledge.status === 'ready'
-    ? [...knowledge.drafts.recommendations, ...knowledge.drafts.mcpRecommendations].filter(draft => draft.kind === 'sop').length : null;
-  const { sub, empty } = sopTabView(saved, candidates, route.sub);
+  }, [sopAttempt]);
+  const candidates: LoadCount = knowledge.status !== 'ready'
+    ? { status: knowledge.status }
+    : { status: 'ready', count: [...knowledge.drafts.recommendations, ...knowledge.drafts.mcpRecommendations].filter(draft => draft.kind === 'sop').length };
+  const { sub, empty, waiting } = sopTabView(saved, candidates, route.sub);
+  const candidateCount = candidates.status === 'ready' ? candidates.count : 0;
   return <div className="knowledge-flows">
     <p className="helper knowledge-tab-intro">{t('sopIntro')}</p>
     <div className="knowledge-flow-switch" role="group" aria-label={t('sopSwitch')}>
       {(['flows', 'candidates'] as const).map(entry => <button key={entry} type="button" className="lens-chip" aria-pressed={sub === entry}
         onClick={() => { window.location.hash = `knowledge?view=sop&sub=${entry}`; }}>
-        {t(entry === 'flows' ? 'sopFlows' : 'sopCandidates')}{entry === 'candidates' && candidates ? ` (${candidates})` : ''}</button>)}
+        {t(entry === 'flows' ? 'sopFlows' : 'sopCandidates')}{entry === 'candidates' && candidateCount ? ` (${candidateCount})` : ''}</button>)}
     </div>
+    {saved.status === 'error' ? <div className="draft-load-error">
+      <p className="warn" role="alert">{t('sopListError')}</p>
+      <button className="btn" type="button" onClick={() => setSopAttempt(n => n + 1)}>{t('retryLoadBtn')}</button>
+    </div> : null}
     {empty ? <section className="panel knowledge-flow-empty" role="status">
       <h2>{t('sopEmptyTitle')}</h2>
       <p className="helper">{t('sopEmptyBody')}</p>
       <div className="knowledge-actions"><a className="btn primary" href="#knowledge">{t('sopEmptyLibrary')}</a><a className="btn" href="#knowledge?view=analysis">{t('sopEmptyAnalyze')}</a></div>
-    </section> : sub === 'auto' ? <p className="helper" role="status">{t('sopLoading')}</p> : sub === 'candidates'
+    </section> : waiting ? <p className="helper" role="status">{t('sopLoading')}</p> : sub === 'candidates'
       ? <AnalysisResults knowledge={knowledge} retryKnowledge={retryKnowledge} initialKind="" fromOrganization={false} route="knowledge" />
       : <SopWorkspace key={`${route.sop}|${route.candidate}`} knowledge={knowledge} retryKnowledge={retryKnowledge} initialSop={route.sop} candidate={route.candidate} route="knowledge" />}
   </div>;

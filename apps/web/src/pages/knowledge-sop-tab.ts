@@ -1,9 +1,12 @@
 export type SopTabSub = 'auto' | 'flows' | 'candidates';
+export type LoadCount = { status: 'loading' } | { status: 'error' } | { status: 'ready'; count: number };
 
-/** Pick the Workflows / SOP pane. Do not open the empty editor while counts are still loading. */
-export function sopTabView(saved: number | null, candidates: number | null, explicit: SopTabSub) {
-  const loading = saved === null || candidates === null;
-  const empty = saved === 0 && candidates === 0;
-  const sub: SopTabSub = explicit !== 'auto' ? explicit : loading ? 'auto' : saved > 0 ? 'flows' : 'candidates';
-  return { loading, empty, sub };
+/** Pick the Workflows / SOP pane. Empty only when both lists loaded as zero; a failed read is not zero. */
+export function sopTabView(saved: LoadCount, candidates: LoadCount, explicit: SopTabSub) {
+  const empty = saved.status === 'ready' && saved.count === 0 && candidates.status === 'ready' && candidates.count === 0;
+  if (explicit !== 'auto') return { empty, sub: explicit, waiting: false };
+  if (saved.status === 'ready' && saved.count > 0) return { empty: false, sub: 'flows' as const, waiting: false };
+  if (candidates.status === 'ready' && candidates.count > 0) return { empty: false, sub: 'candidates' as const, waiting: false };
+  if (saved.status === 'loading' || candidates.status === 'loading') return { empty: false, sub: 'auto' as const, waiting: true };
+  return { empty, sub: (saved.status === 'error' && candidates.status !== 'ready' ? 'flows' : 'candidates') as SopTabSub, waiting: false };
 }

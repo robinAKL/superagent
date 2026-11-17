@@ -428,6 +428,15 @@ test('Workflows / SOP opens on the extracted flowchart when the only workflow is
   await expect(page).toHaveURL(/sub=flows/);
 });
 
+test('Workflows / SOP does not treat a failed workflow list as empty', async ({ page }) => {
+  await page.route('**/api/v1/sop', route => route.fulfill({ status: 200, json: { error: 'unavailable' } }));
+  await page.goto('/#knowledge?view=sop');
+  await page.reload();
+  await expect(page.getByRole('alert')).toContainText('无法读取已发布图与草稿图');
+  await expect(page.getByRole('heading', { name: '还没有工作流' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '重试读取知识状态' })).toBeVisible();
+});
+
 test('Workflows / SOP says how to get a workflow when there is none', async ({ page }) => {
   await page.route('**/api/v1/sop', route => route.fulfill({ status: 200, json: { sops: [] } }));
   await page.goto('/#knowledge?view=sop');
