@@ -130,7 +130,7 @@ test('ontology renders objects, a relation and their evidence on the real page (
   const ontology = page.getByRole('region', { name: '本体关系图', exact: true });
   const canvas = ontology.getByRole('img', { name: /个实体 ·/ });
   await expect(canvas.locator('.onto-node')).toHaveCount(4); // 2 objects + employee + source document
-  await expect(canvas.locator('.onto-node-type')).toContainText('数字员工');
+  await expect(canvas.getByLabel('应付专员, 数字员工')).toBeVisible();
   await expect(canvas.locator('.onto-link-line')).toHaveAttribute('marker-end', /onto-arrow/);
   const inspector = ontology.locator('.onto-panel');
   await inspector.getByRole('button', { name: /供应商发票/ }).click();
