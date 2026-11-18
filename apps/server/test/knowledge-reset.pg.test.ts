@@ -89,8 +89,10 @@ live('real Postgres: reset clears tenant A knowledge_tenants & knowledge_chunks 
     const pool = boundPool(rawPool);
     const repo = new PgKnowledgeRepository(pool);
     const service = new KnowledgeService({ repo });
-    const ctxA: UserContext = { tenantId: 'tenant-a', userId: 'admin-a', roles: ['admin'], projectScopes: ['*'] };
-    const ctxB: UserContext = { tenantId: 'tenant-b', userId: 'admin-b', roles: ['admin'], projectScopes: ['*'] };
+    const tenantA = randomUUID();
+    const tenantB = randomUUID();
+    const ctxA: UserContext = { tenantId: tenantA, userId: 'admin-a', roles: ['admin'], projectScopes: ['*'] };
+    const ctxB: UserContext = { tenantId: tenantB, userId: 'admin-b', roles: ['admin'], projectScopes: ['*'] };
 
     for (const [ctx, prefix] of [[ctxA, 'a'], [ctxB, 'b']] as const) {
       await repo.transact(ctx, s => {
@@ -104,7 +106,7 @@ live('real Postgres: reset clears tenant A knowledge_tenants & knowledge_chunks 
     }
 
     await pool.query(`INSERT INTO sop_versions (id, sop_id, number, definition, status, revision) VALUES ('v-pub', 'sop-shared', 1, '{}'::jsonb, 'published', 1), ('v-draft', 'sop-draft', 1, '{}'::jsonb, 'draft', 1)`);
-    await pool.query(`INSERT INTO sop_instances (id, tenant_id, sop_id, sop_version_id, version_number, event_key, status) VALUES ('inst-a', 'tenant-a', 'sop-shared', 'v-pub', 1, 'k-a', 'running')`);
+    await pool.query(`INSERT INTO sop_instances (id, tenant_id, sop_id, sop_version_id, version_number, event_key, status) VALUES ('inst-a', $1, 'sop-shared', 'v-pub', 1, 'k-a', 'running')`, [tenantA]);
 
     await service.resetKnowledge(ctxA, { confirmText: 'RESET' });
 
@@ -117,7 +119,7 @@ live('real Postgres: reset clears tenant A knowledge_tenants & knowledge_chunks 
     expect(bState.source.items).toHaveLength(1);
     expect(bState.recommendations).toHaveLength(1);
 
-    const aChunks = await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM knowledge_chunks WHERE tenant_id='tenant-a'`);
+    const aChunks = await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM knowledge_chunks WHERE tenant_id=$1`, [tenantA]);
     expect(aChunks.rows[0]?.n).toBe(0);
 
     const sopVers = await pool.query<{ id: string }>(`SELECT id FROM sop_versions ORDER BY id`);
