@@ -19,7 +19,7 @@ export type WorkerKind = (typeof WORKER_KINDS)[number];
 export type WorkerStatus = 'registered' | 'live' | 'waiting_auth' | 'offline' | 'revoked';
 
 /** A missed heartbeat window plus slack. Link polls at most every LONG_POLL_MAX_MS, which also counts as a heartbeat. */
-export const OFFLINE_AFTER_MS = 90_000;
+export const OFFLINE_AFTER_MS = 60_000;
 
 export interface RoomAssignment {
   employeeId: string;

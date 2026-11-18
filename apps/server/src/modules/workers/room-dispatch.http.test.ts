@@ -1,6 +1,9 @@
 import Fastify from 'fastify';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, it } from 'vitest';
-import { bindRoomStore, createCommandRoom, roomModule, roomState } from '../room/index.js';
+import { bindRoomStore, createCommandRoom, reloadRoom, roomModule, roomState } from '../room/index.js';
 import { registerWorker, resetWorkers, workerLinkModule, workersState } from './index.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
@@ -18,8 +21,10 @@ it('assigns once to the bound device while offline and accepts only its report',
   }, Date.now());
   const target = await worker(tenantId, projectId);
   const wrongProject = await worker(tenantId, 'project-b');
+  await workersState.registry.patchCapabilities(tenantId, wrongProject.worker.id, { allowProjects: ['project-c'] });
   const wrongTenant = await worker(otherTenant, projectId);
   const app = Fastify();
+  const directory = await mkdtemp(join(tmpdir(), 'superagent-room-link-'));
   app.addHook('preHandler', async (request) => {
     request.user = { tenantId, userId: 'owner', roles: ['owner'], projectScopes: [] };
   });
@@ -27,11 +32,12 @@ it('assigns once to the bound device while offline and accepts only its report',
   await app.register(workerLinkModule, { prefix: '/link' });
   const auth = (token: string) => ({ authorization: 'Bearer ' + token });
   try {
-    const payload = { roomId: 'room-1', projectId, body: '@Analyst Review the repository', clientMessageId: 'request-1' };
+    const payload = { roomId: 'room-1', body: '@Analyst Review the repository', clientMessageId: 'request-1' };
     const first = await app.inject({ method: 'POST', url: '/room/messages', payload });
     expect(first.statusCode).toBe(200);
     const { task } = first.json();
     expect(task.status).toBe('waiting');
+    expect(task.projectId).toBe(projectId);
     const duplicate = await app.inject({ method: 'POST', url: '/room/messages', payload });
     expect(duplicate.json().duplicate).toBe(true);
 
@@ -54,15 +60,40 @@ it('assigns once to the bound device while offline and accepts only its report',
     expect(progress.json()).toMatchObject({ kind: 'reply', taskIds: [task.id], body: 'Review started.' });
     const report = (token: string) => app.inject({
       method: 'POST', url: '/link/room-tasks/' + task.id + '/report', headers: auth(token),
-      payload: { body: 'Repository review complete.' },
+      payload: { body: 'Review the repository complete.' },
     });
     expect((await report(wrongProject.token)).statusCode).toBe(404);
     expect((await report(wrongTenant.token)).statusCode).toBe(404);
+    const executable = join(directory, 'test-agent.mjs');
+    const stateFile = join(directory, 'worker-state.json');
+    await writeFile(executable, `
+      let prompt = '';
+      for await (const chunk of process.stdin) prompt += chunk;
+      console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: prompt + ' complete.' } }));
+    `);
+    const moduleUrl = new URL('../../../../link/link.mjs', import.meta.url).href;
+    const { WorkerLink } = await import(moduleUrl);
+    const dispatchFetcher = async (url: URL, init: RequestInit) => {
+      const response = await app.inject({
+        method: 'POST', url: url.pathname.replace('/api/v1/worker-link', '/link'),
+        headers: init.headers as Record<string, string>, payload: init.body as string,
+      });
+      return new Response(response.body, { status: response.statusCode });
+    };
+    const link = new WorkerLink({
+      endpoint: 'http://127.0.0.1', stateFile,
+      projects: { [projectId]: { directory, executable, agent: 'codex' } },
+    }, target.token, { fetcher: dispatchFetcher });
+    await link.poll(undefined, 0);
+    reloadRoom(roomState.current.snapshot());
+    await link.runNext();
+    expect(roomState.current.snapshot().messages.filter(message => message.kind === 'report')).toHaveLength(1);
     const result = await report(target.token);
     expect(result.statusCode).toBe(200);
     expect(result.json()).toMatchObject({ kind: 'report', taskIds: [task.id] });
     expect((await report(target.token)).json().id).toBe(result.json().id);
   } finally {
     await app.close();
+    await rm(directory, { recursive: true, force: true });
   }
 });

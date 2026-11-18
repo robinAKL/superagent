@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import type { FastifyPluginAsync } from 'fastify';
 import { loadRoomRows, saveRoomRows, type Queryable } from './pg-room.js';
 import { employeesState } from '../employees/index.js';
-import { queueRoomDispatch } from '../workers/index.js';
+import { queueRoomDispatch, resolveRoomDispatch } from '../workers/index.js';
 import { CommandRoom, type EmployeeRef, type EmployeeSource, type RoomSnapshot, type Viewer } from './room.js';
 
 const ROLES = new Set<Viewer['roles'][number]>(['admin', 'owner', 'employee', 'reviewer']);
@@ -166,13 +166,15 @@ export const roomModule: FastifyPluginAsync = async (app) => {
       clientMessageId: body.clientMessageId,
       followupTo: typeof body.followupTo === 'string' && body.followupTo ? body.followupTo : null,
     });
-    await flushRoom();
     const task = posted.task;
-    const canDispatch = task?.projectId && (viewer.roles.includes('owner') || viewer.roles.includes('admin') || viewer.projectScopes.includes(task.projectId));
-    if (req.user && canDispatch && task.tenantId === req.user.tenantId && task.createdByUserId === viewer.userId
-      && roomState.current.roster(viewer).some((employee) => employee.id === task.employeeId && employee.status !== 'paused')) {
-      await queueRoomDispatch(task);
-    }
+    const scopes = viewer.roles.includes('owner') || viewer.roles.includes('admin') ? null : viewer.projectScopes;
+    const target = req.user && task && task.tenantId === req.user.tenantId && task.createdByUserId === viewer.userId
+      && roomState.current.roster(viewer).some((employee) => employee.id === task.employeeId && employee.status !== 'paused')
+      ? await resolveRoomDispatch(task, scopes)
+      : undefined;
+    if (task && target) task.projectId = target.projectId;
+    await flushRoom();
+    if (task && target) await queueRoomDispatch(task, target);
     return posted;
   });
 

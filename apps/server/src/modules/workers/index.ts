@@ -101,17 +101,27 @@ const approvalDeps: ApprovalDeps = {
   stepMs: () => (workSignal.listening ? workersState.notifiedScanMs : workersState.pollStepMs),
 };
 
-/** Granting a project/employee binding is an administrator action. */
-export async function queueRoomDispatch(task: RoomTask): Promise<void> {
-  if (!task.projectId || task.approval !== 'none' || !['assigned', 'waiting'].includes(task.status) || task.hold) return;
+/** A room message can use a single unambiguous, administrator-granted binding. */
+export async function resolveRoomDispatch(task: RoomTask, projectScopes: readonly string[] | null) {
+  if (task.approval !== 'none' || !['assigned', 'waiting'].includes(task.status) || task.hold) return;
   const workerList = await workersState.registry.list(task.tenantId);
-  const targets = workerList.filter((worker) => worker.revokedAt === null && worker.capabilities.roomAssignments?.some(
-    (assignment) => assignment.employeeId === task.employeeId && assignment.projectId === task.projectId,
-  ));
-  if (targets.length !== 1) return;
-  await workersState.registry.appendEvent(task.tenantId, targets[0]!.id, 'wake', {
+  const targets = workerList.flatMap(worker => {
+    if (worker.revokedAt !== null) return [];
+    const projects = new Set(worker.capabilities.roomAssignments?.filter(assignment =>
+      assignment.employeeId === task.employeeId &&
+      (!task.projectId || assignment.projectId === task.projectId) &&
+      (!projectScopes || projectScopes.includes(assignment.projectId)) &&
+      workerMayRun(worker, assignment),
+    ).map(assignment => assignment.projectId));
+    return [...projects].map(projectId => ({ workerId: worker.id, projectId }));
+  });
+  if (targets.length === 1) return targets[0];
+}
+
+export async function queueRoomDispatch(task: RoomTask, target: { workerId: string; projectId: string }): Promise<void> {
+  await workersState.registry.appendEvent(task.tenantId, target.workerId, 'wake', {
     roomTaskId: task.id,
-    projectId: task.projectId,
+    projectId: target.projectId,
     prompt: task.title,
   }, 'super-agent', workersState.now(), task.id);
 }
@@ -200,8 +210,8 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
     const { id } = req.params as { id: string };
     if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
-    const body = (req.body ?? {}) as { allowEmployees?: unknown; allowProjects?: unknown };
-    const patch = cleanCapabilities({ allowEmployees: body.allowEmployees, allowProjects: body.allowProjects });
+    const body = (req.body ?? {}) as { allowEmployees?: unknown; allowProjects?: unknown; roomAssignments?: unknown };
+    const patch = cleanCapabilities({ allowEmployees: body.allowEmployees, allowProjects: body.allowProjects, roomAssignments: body.roomAssignments });
     const worker = await workersState.registry.patchCapabilities(user.tenantId, id, patch);
     if (!worker) return reply.code(404).send({ error: 'not_found' });
     return { worker: toView(worker, workersState.now()) };
@@ -328,7 +338,7 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     }
     const since = (body.since as number | undefined) ?? 0;
     let closed = false;
-    req.raw.once('close', () => { closed = true; });
+    reply.raw.once('close', () => { closed = true; });
     const start = workersState.now();
     const keys = [tenantKey(worker.tenantId), workerKey(worker.id)];
     for (;;) {
@@ -375,7 +385,12 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     const digest = createHash('sha256').update(body).digest('hex');
     let message;
     try {
-      message = roomState.current.updateFromWorker(id, worker.tenantId, body, 'worker-' + action + ':' + id + ':' + digest, action === 'report');
+      message = roomState.current.updateFromWorker(
+        id, worker.tenantId, body, 'worker-' + action + ':' + id + ':' + digest, action === 'report',
+        task => workerMayRun(worker, task) && !!worker.capabilities.roomAssignments?.some(assignment =>
+          assignment.employeeId === task.employeeId && assignment.projectId === task.projectId,
+        ),
+      );
     } catch (error) {
       const reason = (error as Error).message;
       return reply.code(reason === 'task_not_found' ? 404 : 409).send({ error: reason });

@@ -321,9 +321,10 @@ export class CommandRoom {
     return { message, reply, task, duplicate: false };
   }
 
-  updateFromWorker(taskId: string, tenantId: string, body: string, clientMessageId: string, final: boolean): RoomMessage {
+  updateFromWorker(taskId: string, tenantId: string, body: string, clientMessageId: string, final: boolean, permitted: (task: RoomTask) => boolean): RoomMessage {
     const task = this.tasks.find((item) => item.id === taskId && item.tenantId === tenantId);
-    if (!task || task.approval !== 'none') throw new Error('task_not_found');
+    if (!task || task.approval !== 'none' || !permitted(task)) throw new Error('task_not_found');
+    if (task.hold) throw new Error('task_held');
     if (final) return this.report(task.id, task.assigneeUserId, body, clientMessageId);
     const key = task.roomId + ':' + clientMessageId;
     const previous = this.byClientId.get(key);

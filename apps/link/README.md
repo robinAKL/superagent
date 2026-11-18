@@ -1,6 +1,8 @@
 # Super Agent Link prototype
 
-Run from a machine with Node.js 22+ and an authenticated Codex or Claude Code CLI. A worker registration must grant the project and employee pairing using `capabilities.roomAssignments`. Store the one-time worker token in the Link process environment as `SUPERAGENT_WORKER_TOKEN`.
+Run from a machine with Node.js 22+ and an authenticated Codex or Claude Code CLI. Link opens the sign-in and pairing page on first run, then stores its worker credential locally. For an existing manually registered worker, set `SUPERAGENT_WORKER_TOKEN` in the Link process environment instead.
+
+An administrator authorizes room dispatch by setting the worker's `roomAssignments` capability to pairs of `projectId` and `employeeId`. Supply it in `capabilities` when registering a worker or as the `roomAssignments` field on `PATCH /api/v1/workers/:id` after pairing. Configure the same project IDs on the local machine. Dispatch uses the single worker bound to a pair and observes employee and project restrictions.
 
 Create a private configuration file with absolute paths and a separate state file per worker.
 
@@ -27,6 +29,6 @@ node apps/link/start.mjs path/to/config.json
 node --test apps/link/link.test.mjs
 ```
 
-Keep the state file in an account-private directory. It stores the last event cursor, pending jobs, and CLI session IDs. Only run one Link process for a worker. After signing in to a CLI that reported an authentication failure, restart Link to retry that task. Ctrl+C stops Link and attempts to cancel the running process tree.
+The Windows desktop wrapper reads `link-runtime.json` from its per-user data directory (`%LOCALAPPDATA%\SuperAgentLink`). Without that file it maintains presence only. Keep the state file in an account-private directory. By default Link puts `worker-state.json` next to the configuration. It stores the last event cursor, pending jobs, and CLI session IDs. Only run one Link process for a worker. After signing in to a CLI that reported an authentication failure, restart Link to retry that task. Ctrl+C stops Link and attempts to cancel the running process tree.
 
 CLI protocol references [Codex non-interactive mode](https://developers.openai.com/codex/noninteractive) and [Claude Code programmatic usage](https://code.claude.com/docs/en/headless).

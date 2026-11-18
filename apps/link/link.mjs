@@ -1,9 +1,12 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { launchAgent, launchCodexWithApprovals, projectDirectory } from './agent.mjs';
 
 const IDLE_ERROR_DELAY_MS = 2_000;
+const FIRST_POLL_RETRY_MS = 1_000;
+const MAX_POLL_RETRY_MS = 5_000;
 const STATE_TEMP_SUFFIX = '.tmp';
 
 export class WorkerLink {
@@ -14,8 +17,11 @@ export class WorkerLink {
   #stateFile;
   #launch;
   #launchWithApprovals;
+  #sleep;
+  #onStatus;
+  #onTask;
 
-  constructor(config, token, { fetcher = fetch, launch = launchAgent, launchWithApprovals = launchCodexWithApprovals } = {}) {
+  constructor(config, token, { fetcher = fetch, launch = launchAgent, launchWithApprovals = launchCodexWithApprovals, sleep = delay, onStatus = () => {}, onTask = () => {} } = {}) {
     const endpoint = new URL(config.endpoint);
     if ((endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(endpoint.hostname)))
       || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Configure a trusted HTTPS endpoint.');
@@ -29,11 +35,17 @@ export class WorkerLink {
     }
     this.#launch = launch;
     this.#launchWithApprovals = launchWithApprovals;
+    this.#sleep = sleep;
+    this.#onStatus = onStatus;
+    this.#onTask = onTask;
     try { this.#state = JSON.parse(readFileSync(config.stateFile, 'utf8')); }
     catch (error) {
       if (error.code !== 'ENOENT') throw error;
       this.#state = { cursor: 0, jobs: [] };
     }
+    const identity = createHash('sha256').update(endpoint.origin).update('\0').update(token).digest('hex');
+    if (this.#state.identity && this.#state.identity !== identity) this.#state = { cursor: 0, jobs: [] };
+    this.#state.identity = identity;
     for (const job of this.#state.jobs) {
       if (job.status === 'waiting_auth') job.status = 'queued';
     }
@@ -157,12 +169,14 @@ export class WorkerLink {
           ? this.#launchWithApprovals(project, job.prompt, job.session, notify, (request, signal) => this.#approve(job, request, signal))
           : this.#launch(project, job.prompt, job.session, notify);
         this.#active = { job, process };
+        this.#onTask(true);
         void this.#api('/heartbeat', { busy: true, waitingAuthReason: null }, AbortSignal.timeout(10_000)).catch(() => {});
         void this.#update(job, 'progress', 'Agent started.').catch(() => {});
         job.outcome = await process.completed;
       } catch {
         job.outcome = { failure: 'Project directory or local agent is unavailable.' };
       } finally {
+        if (this.#active) this.#onTask(false);
         this.#active = null;
       }
       if (job.status === 'cancelled' || job.outcome.cancelled) {
@@ -189,6 +203,13 @@ export class WorkerLink {
   async start(externalSignal) {
     const shutdown = new AbortController();
     const signal = AbortSignal.any([externalSignal, shutdown.signal]);
+    let retryMs = FIRST_POLL_RETRY_MS;
+    let lastStatus;
+    const markStatus = (status) => {
+      if (status === lastStatus) return;
+      lastStatus = status;
+      this.#onStatus(status);
+    };
     let work;
     const drain = async () => {
       while (!signal.aborted && this.#state.jobs.some((job) => job.status === 'queued' || job.status === 'reporting')) {
@@ -204,13 +225,20 @@ export class WorkerLink {
       while (!signal.aborted) {
         schedule();
         try {
-          await this.poll(AbortSignal.any([signal, AbortSignal.timeout(35_000)]));
+          await this.poll(AbortSignal.any([signal, AbortSignal.timeout(28_000)]));
+          markStatus('connected');
+          retryMs = FIRST_POLL_RETRY_MS;
           schedule();
         } catch (error) {
           if (signal.aborted) break;
-          if (error.status === 401) throw error;
+          if (error.status === 401) {
+            markStatus('revoked');
+            throw error;
+          }
+          markStatus('reconnecting');
           console.error(error.message);
-          await delay(IDLE_ERROR_DELAY_MS, undefined, { signal }).catch(() => {});
+          await this.#sleep(retryMs, undefined, { signal }).catch(() => {});
+          retryMs = Math.min(retryMs * 2, MAX_POLL_RETRY_MS);
         }
       }
     } finally {

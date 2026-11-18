@@ -39,12 +39,19 @@ async function fixture(t, agent = 'codex', options = {}) {
   if (options.launchWithApprovals) config.projects.p1.approvals = 'room';
   const events = [];
   const requests = [];
-  const control = { refuseDispatch: false };
+  const control = { refuseDispatch: false, pollFailures: 0 };
   const fetcher = async (url, init) => {
     const path = url.pathname;
     const body = JSON.parse(init.body);
     requests.push({ path, body });
-    if (path.endsWith('/poll')) return Response.json({ events: events.filter((event) => event.seq > body.since) });
+    if (path.endsWith('/poll')) {
+      if (control.pollFailures > 0) {
+        control.pollFailures -= 1;
+        throw new Error('synthetic disconnect');
+      }
+      if (await control.stopAfterPoll?.()) return Response.json({ events: [] });
+      return Response.json({ events: events.filter((event) => event.seq > body.since) });
+    }
     if (path.endsWith('/approvals')) return Response.json({ approval: { id: 'approval-1', expiresAt: Date.now() + 60_000 } }, { status: 201 });
     if (path.endsWith('/approvals/approval-1/wait')) {
       return Response.json({ approval: { status: options.approvalStatus } });
@@ -53,7 +60,7 @@ async function fixture(t, agent = 'codex', options = {}) {
     return Response.json({});
   };
   return {
-    make: () => new WorkerLink(config, 'test-token', { fetcher, launchWithApprovals: options.launchWithApprovals }),
+    make: () => new WorkerLink(config, 'test-token', { fetcher, launchWithApprovals: options.launchWithApprovals, sleep: options.sleep }),
     args: async () => (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse),
     state: async () => JSON.parse(await readFile(stateFile, 'utf8')),
     save: async (state) => writeFile(stateFile, JSON.stringify(state)),
@@ -90,6 +97,25 @@ test('runs Claude Code with a fixed headless adapter', async (t) => {
   await link.runNext();
   assert.deepEqual((await f.args())[0].argv, ['--print', '--output-format', 'stream-json', '--verbose']);
   assert.ok(f.requests.some(({ path, body }) => path.endsWith('/report') && body.body === 'Result: Summarise'));
+});
+
+test('reconnects with backoff and delivers a queued task after a network interruption', { timeout: 8_000 }, async (t) => {
+  const retryDelays = [];
+  const f = await fixture(t, 'codex', { sleep: async (ms) => { retryDelays.push(ms); } });
+  const shutdown = new AbortController();
+  f.control.pollFailures = 2;
+  f.wake(1, 'Review the sample');
+  // Yield to the child process when the fake server would be holding the poll.
+  f.control.stopAfterPoll = async () => {
+    await delay(10);
+    if (!f.requests.some(({ path }) => path.endsWith('/report'))) return false;
+    shutdown.abort();
+    return true;
+  };
+  await f.make().start(shutdown.signal);
+  assert.deepEqual(retryDelays, [1_000, 2_000]);
+  assert.equal((await f.state()).cursor, 1);
+  assert.ok(f.requests.some(({ path, body }) => path.endsWith('/report') && body.body === 'Result: Review the sample'));
 });
 
 test('restarts an unfinished task through its explicit saved session', async (t) => {

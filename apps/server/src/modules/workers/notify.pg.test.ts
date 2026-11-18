@@ -28,6 +28,7 @@ live('migration 0015 triggers NOTIFY on commit, and the listener wakes the match
     await setup.query(`CREATE SCHEMA "${SCHEMA}"; SET search_path TO "${SCHEMA}";`);
     await setup.query(TASKS_DDL);
     await setup.query(migration('0013_workers.sql'));
+    await setup.query(migration('0014_room_worker_dispatch.sql'));
     await setup.query(migration('0015_worker_notify.sql'));
     for (let i = 0; i < 100 && !signal.listening; i++) await new Promise((r) => setTimeout(r, 20));
     expect(signal.listening).toBe(true);
