@@ -182,7 +182,13 @@ export function OntologyGraphView({ shared, personal = [], height = 560, time, c
   const t = useT(TEXT);
   const sharedGraph = useMemo(() => buildOntologyGraph(shared, companyName), [shared, companyName]);
   const personalGraph = useMemo(() => buildOntologyGraph(personal), [personal]);
-  const [scope, setScope] = useState<Scope>(() => (sharedGraph.nodes.length || !personalGraph.nodes.length ? 'shared' : 'personal'));
+  const [scope, setScope] = useState<Scope>(() => (shared.length > 0 || personal.length === 0 ? 'shared' : 'personal'));
+  const userSelectedScope = useRef(false);
+  useEffect(() => {
+    if (userSelectedScope.current) return;
+    if (shared.length === 0 && personal.length > 0) setScope('personal');
+    else if (shared.length > 0 && personal.length === 0) setScope('shared');
+  }, [shared.length, personal.length]);
   const graph = scope === 'shared' ? sharedGraph : personalGraph;
   const [selected, setSelected] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -324,7 +330,7 @@ export function OntologyGraphView({ shared, personal = [], height = 560, time, c
   return <section className="onto" aria-label={t('canvas')}>
     <header className="onto-bar">
       {sharedGraph.nodes.length && personalGraph.nodes.length ? <div className="onto-scope" role="tablist" aria-label={t('canvas')}>
-        {(['shared', 'personal'] as const).map(s => <button key={s} type="button" role="tab" aria-selected={scope === s} onClick={() => setScope(s)}>
+        {(['shared', 'personal'] as const).map(s => <button key={s} type="button" role="tab" aria-selected={scope === s} onClick={() => { userSelectedScope.current = true; setScope(s); }}>
           {t(s)} <span>{(s === 'shared' ? sharedGraph : personalGraph).nodes.length}</span>
         </button>)}
       </div> : <strong className="onto-scope-label">{t(scope)}</strong>}
