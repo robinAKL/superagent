@@ -152,7 +152,7 @@ describe('tenant knowledge reset', () => {
     await app.close();
   });
 
-  it('PgKnowledgeRepository.resetTenant deletes knowledge_chunks and tenant-exclusive sop_versions in one transaction', async () => {
+  it('PgKnowledgeRepository.transact deletes only knowledge_chunks for tenant_id and never touches sop_versions', async () => {
     const queries: { sql: string; params?: unknown[] }[] = [];
     const client = {
       async query(sql: string, params?: unknown[]) {
@@ -160,21 +160,18 @@ describe('tenant knowledge reset', () => {
         if (sql.includes('FOR UPDATE')) {
           return { rows: [{ doc: { spaceName: '企业知识', installedPlugins: ['local-file'], revision: 1, source: { connections: [], items: [], chunks: [], citations: [], flagged: [] }, connectionMeta: {}, confirmations: {}, analyses: [], recommendations: [], uploads: [], disabledPlugins: [], parseJobs: [], queryTemplates: [], profiles: {}, liveMcp: {}, veraMcp: {} } }] };
         }
-        if (sql.includes('to_regclass')) return { rows: [{ v: 'sop_versions', i: 'sop_instances', e: 'sop_events' }] };
-        if (sql.startsWith('DELETE FROM sop_versions')) return { rows: [], rowCount: 2 };
         return { rows: [], rowCount: 0 };
       },
       release() {},
     };
     const pool = { connect: async () => client } as unknown as import('pg').Pool;
     const repo = new PgKnowledgeRepository(pool);
-    const result = await repo.resetTenant(ctxFor('t-pg', 'u-pg', ['admin']), () => ({ ok: true }));
-    expect(result.sopVersionsDeleted).toBe(2);
+    await repo.transact(ctxFor('t-pg', 'u-pg', ['admin']), s => {
+      s.source.items = [];
+    });
     expect(queries[0]!.sql).toBe('BEGIN');
     expect(queries.some(q => q.sql.includes('DELETE FROM knowledge_chunks WHERE tenant_id=$1') && q.params?.[0] === 't-pg')).toBe(true);
-    const sopDelete = queries.find(q => q.sql.startsWith('DELETE FROM sop_versions'));
-    expect(sopDelete?.sql).toContain('tenant_id <> $1');
-    expect(sopDelete?.params).toEqual(['t-pg']);
+    expect(queries.some(q => q.sql.includes('sop_versions'))).toBe(false);
     expect(queries.at(-1)!.sql).toBe('COMMIT');
   });
 });
