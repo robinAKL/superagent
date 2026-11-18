@@ -47,6 +47,8 @@ interface EmployeeRow {
   status: string;
 }
 interface Evidence {
+  sourceId?: string;
+  version?: string;
   locator: string;
   quote: string;
 }
@@ -60,6 +62,7 @@ interface Recommendation {
   relation?: { from: string; to: string; label: string };
   assignment?: { tools: string[]; sops: string[] };
   workflow?: RecommendedWorkflow;
+  ruleLike?: boolean;
 }
 
 interface Organization {
@@ -268,6 +271,21 @@ export function useDraftRead(): [DraftRead, () => void] {
 
 /** Where workflow links point: the knowledge page's 工作流/SOP tab, or this page's tabs. */
 export type FlowRoute = 'brain' | 'knowledge';
+export function knowledgeWorkflowCandidates({ recommendations, mcpRecommendations }: Drafts) {
+  return [...mcpRecommendations.map(draft => ({ ...draft, privateMcp: true })), ...recommendations]
+    .filter(draft => {
+      const steps = draft.workflow?.steps;
+      if (draft.kind !== 'sop' || draft.ruleLike || !steps || steps.length < 3 || steps[0]?.kind !== 'trigger') return false;
+      if (/(?:操作指南|系统规则|操作规则|operating guide|user guide|system rules)$/iu.test(draft.name.trim())) return false;
+      const excerpts = steps.flatMap(step => step.citations).flatMap(index => {
+        const evidence = draft.evidence[index - 1];
+        return evidence ? [JSON.stringify([evidence.sourceId, evidence.version, evidence.locator, evidence.quote])] : [];
+      });
+      return new Set(excerpts).size >= 2;
+    })
+    .slice(0, 3);
+}
+
 function flowHref(route: FlowRoute, params: string) {
   return route === 'knowledge' ? `#knowledge?view=sop&${params}` : `#brain?tab=sop&${params}`;
 }
@@ -284,18 +302,18 @@ function DraftLoadStatus({ knowledge, retryKnowledge }: DraftViewProps) {
 
 export function AnalysisResults({ knowledge, retryKnowledge, initialKind, fromOrganization, route = 'brain' }: DraftViewProps & { initialKind: string; fromOrganization: boolean; route?: FlowRoute }) {
   const t = useT(TEXT);
-  const drafts = knowledge.status === 'ready' ? [
+  const drafts = knowledge.status !== 'ready' ? [] : route === 'knowledge' && !initialKind ? knowledgeWorkflowCandidates(knowledge.drafts) : [
     ...knowledge.drafts.mcpRecommendations.map(draft => ({ ...draft, privateMcp: true })),
     ...knowledge.drafts.recommendations,
-  ].filter(draft => initialKind || draft.kind === 'sop').sort((a, b) => Number(b.kind === 'sop') - Number(a.kind === 'sop')) : [];
+  ].filter(draft => initialKind || draft.kind === 'sop').sort((a, b) => Number(b.kind === 'sop') - Number(a.kind === 'sop'));
   return <section className="panel stack agent-results-page" aria-labelledby="agent-results-heading">
     <div className="agent-results-head">
       <h2 className="h2" id="agent-results-heading">{t(initialKind ? 'results' : 'candidates')}</h2>
       <div className="workflow-actions">
         {route === 'brain' && !initialKind && knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.length
           ? <a href={`#brain?tab=results&type=all${fromOrganization ? '&org=1' : ''}`}>{t('allDrafts')}</a> : null}
-        {knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.some(draft => draft.kind === 'sop')
-          ? <a href={route === 'knowledge' ? '#knowledge?view=sop&sub=candidates' : `#brain?type=sop${fromOrganization ? '&org=1' : ''}`}>{t('viewPrivateWorkflows')}</a> : null}
+        {route === 'brain' && knowledge.status === 'ready' && knowledge.drafts.mcpRecommendations.some(draft => draft.kind === 'sop')
+          ? <a href={`#brain?type=sop${fromOrganization ? '&org=1' : ''}`}>{t('viewPrivateWorkflows')}</a> : null}
         {route === 'brain' ? <a href="#knowledge?view=analysis">{t('reviewDrafts')}</a> : null}
       </div>
     </div>

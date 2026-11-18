@@ -117,14 +117,15 @@ export function createKnowledgeFixture(): { deps: KnowledgeDeps; attach(app: Fas
           proposals.push({ key: 'schema-query-tool', kind: 'tool', name: '只读批次查询', description: `只使用批准的参数化 SELECT 模板；仍为待配置工具草案。${modelSuffix}`, evidence: [{ ...schema }] });
         }
         const handbook = input.evidence.find(evidence => evidence.locator.endsWith('handbook://procedures/returns'));
-        if (handbook) {
+        const refund = input.evidence.find(evidence => evidence.locator.endsWith('handbook://procedures/refunds'));
+        if (handbook && refund) {
           const role = proposals.find(proposal => proposal.name === '退货专员')?.key;
           proposals.push({
-            key: 'returns', kind: 'sop', name: '退货审核流程', description: '核对收货记录后登记退款。', evidence: [handbook],
+            key: 'returns', kind: 'sop', name: '退货审核流程', description: '核对收货记录后登记退款。', evidence: [handbook, refund],
             workflow: { steps: [
               { key: 'arrived', kind: 'trigger', label: '收到退货', after: [], citations: [1] },
               { key: 'check', kind: 'employee', label: '核对收货记录', after: ['arrived'], citations: [1], employeeKey: role },
-              { key: 'record', kind: 'tool', label: '登记退款', after: ['check'], citations: [1] },
+              { key: 'record', kind: 'tool', label: '登记退款', after: ['check'], citations: [2] },
             ] },
           });
           proposals.push({ key: 'return-document', kind: 'object', name: '退货记录', description: '记录已收到的退货。', evidence: [handbook] });
@@ -163,15 +164,16 @@ export function createKnowledgeFixture(): { deps: KnowledgeDeps; attach(app: Fas
       testApp.post('/seed-live-mcp', async () => {
         const endpoint = 'https://handbook.synthetic.example/mcp';
         const uri = 'handbook://procedures/returns';
+        const refundUri = 'handbook://procedures/refunds';
         const network: typeof fetch = async (input, init) => {
           if (String(input) !== endpoint || init?.method !== 'POST') return new Response(null, { status: 405 });
           const { id, method, params } = JSON.parse(String(init.body));
           if (method === 'notifications/initialized') return new Response(null, { status: 202 });
           const results: Record<string, unknown> = {
             initialize: { protocolVersion: params?.protocolVersion, serverInfo: { name: '退货手册 MCP', version: 'test' }, capabilities: { resources: {} } },
-            'resources/list': { resources: [{ uri, name: '退货流程' }] },
+            'resources/list': { resources: [{ uri, name: '退货流程' }, { uri: refundUri, name: '退款登记' }] },
             'resources/templates/list': { resourceTemplates: [] },
-            'resources/read': { contents: [{ uri, text: '角色：退货专员；责任：核对收货记录后登记退款。' }] },
+            'resources/read': { contents: [{ uri: params?.uri, text: params?.uri === refundUri ? '收货核对完成后，在退款台账登记退款。' : '角色：退货专员；责任：核对收货记录后登记退款。' }] },
           };
           return Response.json({ jsonrpc: '2.0', id, result: results[method] });
         };

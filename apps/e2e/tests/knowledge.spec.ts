@@ -16,6 +16,19 @@ const ROLE_FILE = [
 
 interface Item { id: string; title: string; version: string; confirmed: boolean; locator: string }
 interface Recommendation { id: string; key: string; kind: string; name: string; description: string; humanLocked: boolean; origin?: string; evidence: { sourceId: string; version: string; start: number; end: number; locator: string; quote: string }[]; proposedChange?: { name: string; description: string }; stale?: boolean }
+async function addLegacyWorkflowDrafts(page: Page) {
+  await page.route('**/api/v1/knowledge/recommendations', async route => {
+    const body = await (await route.fetch()).json();
+    const workflow = body.mcpRecommendations.find((draft: Recommendation) => draft.key === 'returns');
+    body.mcpRecommendations.unshift(
+      { ...workflow, id: 'old-guide', key: 'old-guide', name: 'CRM操作指南', workflow: undefined },
+      { ...workflow, id: 'old-rule', key: 'old-rule', name: '系统规则', ruleLike: true },
+      { ...workflow, id: 'old-object', key: 'old-object', name: '客户对象', kind: 'object' },
+      { ...workflow, id: 'single-excerpt', key: 'single-excerpt', name: '订单流程', evidence: workflow.evidence.slice(0, 1) },
+    );
+    await route.fulfill({ json: body });
+  });
+}
 interface Overview { spaceName: string; plugins: { id: string; installed: boolean; builtIn: boolean; enabled: boolean }[]; connections: { id: string; name: string; pluginId: string; status: string }[]; items: Item[]; recommendations: Recommendation[]; analyses: { id: string; status: string }[]; databaseResources: { id: string; tables: Record<string, { columns: string[] }> }[]; sourceResources: { id: string; projectIds: string[] }[] }
 interface Preview { items: { id: string; title: string; version: string; locator: string }[]; blocked: number; scope: Record<string, unknown> }
 const ROOT = '/api/v1/knowledge';
@@ -478,6 +491,7 @@ test('Workflows / SOP opens on the extracted flowchart when the only workflow is
   await expect(page.getByRole('button', { name: '分析进行中', exact: true })).toBeDisabled();
   await response(page.request.post('/__test/knowledge/advance', { data: {} }));
   // No saved (published or draft) workflow in this workspace yet.
+  await addLegacyWorkflowDrafts(page);
   await page.route('**/api/v1/sop', route => route.fulfill({ status: 200, json: { sops: [] } }));
   await page.goto('/#knowledge?view=sop');
   await page.reload();
@@ -487,6 +501,8 @@ test('Workflows / SOP opens on the extracted flowchart when the only workflow is
   const drafts = page.getByRole('region', { name: /候选流程|分析结果/ });
   await expect(drafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
   await expect(drafts.getByRole('group', { name: '流程图', exact: true }).locator('[data-edge="check:record"]')).toHaveAttribute('marker-end', /url/);
+  await expect(drafts.getByText(/CRM操作指南|系统规则|客户对象|订单流程/)).toHaveCount(0);
+  if (process.env.T23_SHOTS) await page.screenshot({ path: '../../deliverables/v12-compare-t23/workflow-candidates-zh.png', fullPage: true });
   // An explicit choice is kept.
   await sw.getByRole('button', { name: '已发布图与草稿图' }).click();
   await expect(sw.getByRole('button', { name: '已发布图与草稿图' })).toHaveAttribute('aria-pressed', 'true');
@@ -522,6 +538,7 @@ test.describe('English Workflows / SOP empty and MCP-only panes', () => {
     await page.getByRole('button', { name: 'Start analysis', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Analysis running', exact: true })).toBeDisabled();
     await response(page.request.post('/__test/knowledge/advance', { data: {} }));
+    await addLegacyWorkflowDrafts(page);
     await page.route('**/api/v1/sop', route => route.fulfill({ status: 200, json: { sops: [] } }));
     await page.goto('/#knowledge?view=sop');
     await page.reload();
@@ -531,6 +548,8 @@ test.describe('English Workflows / SOP empty and MCP-only panes', () => {
     const drafts = page.getByRole('region', { name: /Workflow candidates|Analysis results/ });
     await expect(drafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
     await expect(drafts.getByRole('group', { name: 'Flow chart', exact: true }).locator('[data-edge="check:record"]')).toHaveAttribute('marker-end', /url/);
+    await expect(drafts.getByText(/CRM操作指南|系统规则|客户对象|订单流程/)).toHaveCount(0);
+    if (process.env.T23_SHOTS) await page.screenshot({ path: '../../deliverables/v12-compare-t23/workflow-candidates-en.png', fullPage: true });
   });
 
   test('Workflows / SOP says how to get a workflow when there is none (en)', async ({ page }) => {
