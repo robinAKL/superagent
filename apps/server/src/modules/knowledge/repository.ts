@@ -8,8 +8,6 @@ export interface KnowledgeRepository {
   read(ctx: UserContext): Promise<KnowledgeState>;
   transact<T>(ctx: UserContext, change: (state: KnowledgeState) => T | Promise<T>): Promise<T>;
   search(ctx: UserContext, query: string, limit: number): Promise<SearchHit[]>;
-  countTenantSopVersions?(tenantId: string): Promise<number>;
-  resetTenant?<T>(ctx: UserContext, change: (state: KnowledgeState) => T | Promise<T>): Promise<{ value: T; sopVersionsDeleted: number }>;
 }
 interface IndexedChunk extends Evidence { title: string; principals: string[]; projectIds: string[] }
 const normalized = (value: KnowledgeState): KnowledgeState => ({ ...emptyState(), ...value, installedPlugins: value.installedPlugins ?? [...new Set(['local-file', ...value.source.connections.map(c => c.pluginId)])] });
@@ -27,26 +25,6 @@ export function indexableChunks(state: KnowledgeState): IndexedChunk[] {
   }
   return result;
 }
-const OWNED_SOP_IDS_SQL = `
-  SELECT sop_id FROM (
-    SELECT sop_id FROM sop_instances WHERE tenant_id = $1
-    UNION
-    SELECT sop_id FROM sop_events WHERE tenant_id = $1
-  ) owned
-  WHERE sop_id NOT IN (
-    SELECT sop_id FROM sop_instances WHERE tenant_id <> $1
-    UNION
-    SELECT sop_id FROM sop_events WHERE tenant_id <> $1
-  )
-`;
-
-async function hasSopTables(q: Pick<PoolClient, 'query'>): Promise<boolean> {
-  const r = await q.query<{ v: string | null; i: string | null; e: string | null }>(
-    `SELECT to_regclass('sop_versions')::text AS v, to_regclass('sop_instances')::text AS i, to_regclass('sop_events')::text AS e`,
-  );
-  return !!(r.rows[0]?.v && r.rows[0]?.i && r.rows[0]?.e);
-}
-
 /** One tenant lock makes source invalidation and the search projection atomic across workers. */
 export class PgKnowledgeRepository implements KnowledgeRepository {
   constructor(readonly pool: Pool) {}
@@ -54,17 +32,6 @@ export class PgKnowledgeRepository implements KnowledgeRepository {
     const r = await this.pool.query<{ doc: KnowledgeState }>('SELECT doc FROM knowledge_tenants WHERE tenant_id=$1', [ctx.tenantId]); return r.rows[0] ? normalized(r.rows[0].doc) : emptyState();
   }
   async transact<T>(ctx: UserContext, change: (state: KnowledgeState) => T | Promise<T>): Promise<T> {
-    return (await this.runTx(ctx, change, false)).value;
-  }
-  async countTenantSopVersions(tenantId: string): Promise<number> {
-    if (!(await hasSopTables(this.pool))) return 0;
-    const r = await this.pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM sop_versions WHERE sop_id IN (${OWNED_SOP_IDS_SQL})`, [tenantId]);
-    return r.rows[0]?.n ?? 0;
-  }
-  async resetTenant<T>(ctx: UserContext, change: (state: KnowledgeState) => T | Promise<T>): Promise<{ value: T; sopVersionsDeleted: number }> {
-    return this.runTx(ctx, change, true);
-  }
-  private async runTx<T>(ctx: UserContext, change: (state: KnowledgeState) => T | Promise<T>, purgeSopVersions: boolean): Promise<{ value: T; sopVersionsDeleted: number }> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -73,14 +40,7 @@ export class PgKnowledgeRepository implements KnowledgeRepository {
       const state = normalized(result.rows[0]!.doc), before = auditSnapshot(state), value = await change(state);
       for (const entry of auditDiff(before,auditSnapshot(state))) await appendPgAudit(client,{...entry,tenantId:ctx.tenantId,actor:ctx.userId});
       await client.query('UPDATE knowledge_tenants SET doc=$2::jsonb,updated_at=now() WHERE tenant_id=$1', [ctx.tenantId, JSON.stringify(state)]);
-      await this.replaceIndex(client, ctx.tenantId, state);
-      let sopVersionsDeleted = 0;
-      if (purgeSopVersions && (await hasSopTables(client))) {
-        const del = await client.query(`DELETE FROM sop_versions WHERE sop_id IN (${OWNED_SOP_IDS_SQL})`, [ctx.tenantId]);
-        sopVersionsDeleted = del.rowCount ?? 0;
-      }
-      await client.query('COMMIT');
-      return { value, sopVersionsDeleted };
+      await this.replaceIndex(client, ctx.tenantId, state); await client.query('COMMIT'); return value;
     } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
   }
   private async replaceIndex(client: PoolClient, tenantId: string, state: KnowledgeState) {
