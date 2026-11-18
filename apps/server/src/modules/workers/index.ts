@@ -228,10 +228,10 @@ async function claimFor(worker: WorkerRecord, now: number) {
   if (!kinds.length) return null; // no granted kinds: nothing to claim, but the poll still keeps it present
   const matches = (task: { employeeId?: string | null; projectId?: string | null }) => workerMayRun(worker, task);
   if (runtimeState.db) {
-    return claimTask(runtimeState.db, worker.id, LEASE_MS, MAX_ATTEMPTS, worker.tenantId, kinds, {
-      employees: worker.capabilities.allowEmployees,
-      projects: worker.capabilities.allowProjects,
-    });
+    const employees = worker.capabilities.allowEmployees;
+    const projects = worker.capabilities.allowProjects;
+    const scope = employees?.length || projects?.length ? { employees, projects } : undefined;
+    return claimTask(runtimeState.db, worker.id, LEASE_MS, MAX_ATTEMPTS, worker.tenantId, kinds, scope);
   }
   return runtimeState.queue.claim(worker.id, now, kinds, worker.tenantId, (task) => matches(task));
 }

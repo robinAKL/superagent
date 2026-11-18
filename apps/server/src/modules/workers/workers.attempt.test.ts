@@ -2,7 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { beforeEach, expect, it } from 'vitest';
 import { bindRuntimeDb, resetRuntime, runtimeState } from '../runtime/index.js';
 import type { Queryable } from '../runtime/pg-queue.js';
-import { CLAIM_TASK_KIND_SQL, DEAD_LETTER_SQL, HEARTBEAT_TASK_SQL, RELEASE_TASK_SQL, SUCCEED_TASK_SQL } from '../runtime/sql.js';
+import { CLAIM_TASK_KIND_SCOPE_SQL, CLAIM_TASK_KIND_SQL, DEAD_LETTER_SQL, HEARTBEAT_TASK_SQL, RELEASE_TASK_SQL, SUCCEED_TASK_SQL } from '../runtime/sql.js';
 import { registerWorker, resetWorkers, workerLinkModule, workersState } from './index.js';
 
 /** T-04: the worker channel forwards the claim attempt (T-02 fencing) and refuses calls from an older attempt. */
@@ -43,7 +43,7 @@ function fakeDb(workerId: () => string) {
   const db: Queryable = {
     async query<T>(sql: string, params: readonly unknown[]) {
       calls.push({ sql, params });
-      if (sql === CLAIM_TASK_KIND_SQL) return { rows: [{ ...row, lease_owner: params[0] }] as T[] };
+      if (sql === CLAIM_TASK_KIND_SQL || sql === CLAIM_TASK_KIND_SCOPE_SQL) return { rows: [{ ...row, lease_owner: params[0] }] as T[] };
       if ([HEARTBEAT_TASK_SQL, SUCCEED_TASK_SQL, RELEASE_TASK_SQL, DEAD_LETTER_SQL].includes(sql)) {
         return { rows: (holds(params) ? [{ id: row.id, task_id: row.id }] : []) as T[] };
       }

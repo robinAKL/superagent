@@ -175,12 +175,12 @@ live('a scoped claim skips other employees and projects in one SKIP LOCKED state
       await client.query(`SET search_path TO "${SCHEMA}"`);
       await client.query(
         `INSERT INTO tasks (id, tenant_id, status, attempt, dead_letter, kind, employee_id, payload, created_at)
-         VALUES (gen_random_uuid(), $1::uuid, 'assigned', 0, false, 'knowledge.parse', 'emp-b', '{"projectId":"proj-2"}'::jsonb, now())`,
+         VALUES (gen_random_uuid(), $1::uuid, 'assigned', 0, false, 'knowledge.parse', 'emp-b', '{"projectId":"proj-2","operationId":"other"}'::jsonb, now())`,
         [LIVE_TENANT],
       );
       const mine = await client.query<{ id: string }>(
         `INSERT INTO tasks (id, tenant_id, status, attempt, dead_letter, kind, employee_id, payload, created_at)
-         VALUES (gen_random_uuid(), $1::uuid, 'assigned', 0, false, 'knowledge.parse', 'emp-a', '{"projectId":"proj-1","itemId":"mine"}'::jsonb, now() + interval '1 millisecond')
+         VALUES (gen_random_uuid(), $1::uuid, 'assigned', 0, false, 'knowledge.parse', 'emp-a', '{"projectId":"proj-1","itemId":"mine","operationId":"mine"}'::jsonb, now() + interval '1 millisecond')
          RETURNING id`,
         [LIVE_TENANT],
       );
