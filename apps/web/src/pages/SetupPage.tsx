@@ -54,6 +54,21 @@ const TEXT = {
     capCurrent: 'Current cap: {value}', capValue: 'US${amount} / month', capUnset: 'Not set (model calls will be refused)',
     capNew: 'New cap (USD, up to two decimals)', saveCap: 'Save cap',
     capSaved: 'Saved; applies to this month right away', capNotSaved: 'Not saved: Enter a positive USD amount with up to two decimals.',
+    resetHeading: 'Reset tenant knowledge base',
+    resetLead: 'Delete this tenant’s knowledge documents, excerpts, analyses, drafts, ontology, SOP drafts and rules. Accounts, company info and MCP connections are kept.',
+    resetAction: 'Reset tenant knowledge base',
+    resetPreviewLoading: 'Loading preview…',
+    resetDialogTitle: 'Confirm tenant knowledge base reset',
+    resetDialogBody: 'This permanently deletes the following items for this tenant:',
+    resetCounts: 'Sources: {sources} · Excerpts: {chunks} · Analyses: {analyses} · SOP drafts: {sops} · Rules: {rules} · Ontology: {ontology} · Other drafts: {otherDrafts} · Tenant SOP versions: {sopVersions}',
+    resetPreserved: 'Preserved: accounts, company info{company}, and {connections} source/MCP connection(s).',
+    resetPrompt: 'Type RESET or {target} to confirm',
+    resetPromptOnly: 'Type RESET to confirm',
+    resetConfirmBtn: 'Confirm reset',
+    resetCancelBtn: 'Cancel',
+    resetting: 'Resetting…',
+    resetDone: 'Tenant knowledge base cleared. Return to Enterprise Knowledge to upload materials and run analysis.',
+    resetFailed: 'Could not reset the knowledge base. Check permissions and try again.',
   },
   zh: {
     title: '管理设置', lead: '连接模型并设置月度预算',
@@ -89,6 +104,21 @@ const TEXT = {
     capCurrent: '当前上限：{value}', capValue: 'US${amount} / 月', capUnset: '未设置（模型调用会被拒绝）',
     capNew: '新的上限（美元，最多两位小数）', saveCap: '保存上限',
     capSaved: '已保存，立即对本月生效', capNotSaved: '未保存：请输入大于零且最多含两位小数的美元金额。',
+    resetHeading: '清空本租户知识库',
+    resetLead: '清空本租户的知识文档、摘录、分析记录、草稿、本体实体/关系、SOP 草案与规则。账号、企业信息和 MCP 连接配置会保留。',
+    resetAction: '清空本租户知识库',
+    resetPreviewLoading: '正在统计将删除的数据…',
+    resetDialogTitle: '确认清空本租户知识库',
+    resetDialogBody: '此操作不可恢复，将清空本租户以下数据：',
+    resetCounts: '知识源 {sources} · 摘录 {chunks} · 分析 {analyses} · SOP 草案 {sops} · 规则 {rules} · 本体 {ontology} · 其他草案 {otherDrafts} · 本租户 SOP 版本 {sopVersions}',
+    resetPreserved: '保留：账号、企业信息{company}，以及 {connections} 个来源/MCP 连接配置。',
+    resetPrompt: '输入 RESET 或「{target}」以确认清空',
+    resetPromptOnly: '输入 RESET 以确认清空',
+    resetConfirmBtn: '确认清空',
+    resetCancelBtn: '取消',
+    resetting: '正在清空…',
+    resetDone: '已清空本租户知识库，可前往「企业知识」重新上传资料并分析。',
+    resetFailed: '清空知识库失败，请检查管理员权限后重试。',
   },
 } satisfies Dict<string>;
 type Key = keyof typeof TEXT.en;
@@ -101,6 +131,22 @@ const PROVIDERS: { id: string; label: Key }[] = [
 const STATUS: Record<string, Key> = { unconfigured: 'statusUnconfigured', configured: 'statusConfigured', revoked: 'statusRevoked', key_invalid: 'statusKeyInvalid' };
 const AUTH_ERROR: Record<string, Key> = { invalid_key: 'invalidKey', quota: 'quota', network: 'network' };
 
+interface ResetPreview {
+  tenantId: string;
+  companyName: string;
+  counts: {
+    sources: number;
+    chunks: number;
+    analyses: number;
+    sops: number;
+    rules: number;
+    ontology: number;
+    otherDrafts: number;
+    parseJobs: number;
+    sopVersions: number;
+    preserved: { connections: number; mcpUsers: number };
+  };
+}
 type SetupTab = 'run' | 'audit' | 'arch';
 function setupTab(): SetupTab {
   const params = new URLSearchParams(typeof window === 'undefined' ? undefined : window.location.hash.split('?')[1]);
@@ -125,7 +171,21 @@ export function SetupPage() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [capUsd, setCapUsd] = useState('');
   const [capNotice, setCapNotice] = useState<Notice | null>(null);
-  const [pending, setPending] = useState<'test' | 'activate' | 'budget' | null>(null);
+  const [pending, setPending] = useState<'test' | 'activate' | 'budget' | 'resetPreview' | 'reset' | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [resetPreview, setResetPreview] = useState<ResetPreview | null>(null);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [resetNotice, setResetNotice] = useState<Notice | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void api<{ viewer?: { roles?: string[] } }>('/api/v1/room/roster').then(response => {
+      if (!active || response.status !== 200) return;
+      const roles = response.body.viewer?.roles ?? [];
+      setIsAdmin(roles.some(role => role === 'admin' || role === 'owner'));
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -202,6 +262,43 @@ export function SetupPage() {
       setCapUsd('');
       setCapNotice({ key: 'capSaved' });
     } catch { setCapNotice({ key: 'requestFailed', error: true }); }
+    finally { setPending(null); }
+  }
+
+  async function onOpenReset() {
+    if (pending || !isAdmin) return;
+    setPending('resetPreview');
+    setResetNotice(null);
+    setResetConfirmText('');
+    try {
+      const response = await api<ResetPreview>('/api/v1/knowledge/reset/preview');
+      if (response.status !== 200) { setResetNotice({ key: 'resetFailed', error: true }); return; }
+      setResetPreview(response.body);
+    } catch { setResetNotice({ key: 'resetFailed', error: true }); }
+    finally { setPending(null); }
+  }
+
+  const trimmedResetConfirm = resetConfirmText.trim();
+  const canConfirmReset = !!resetPreview && (
+    trimmedResetConfirm === 'RESET' ||
+    (!!resetPreview.companyName && trimmedResetConfirm === resetPreview.companyName)
+  );
+
+  async function onConfirmReset(event: FormEvent) {
+    event.preventDefault();
+    if (pending || !canConfirmReset) return;
+    setPending('reset');
+    setResetNotice(null);
+    try {
+      const response = await api<{ ok: boolean }>('/api/v1/knowledge/reset', {
+        method: 'POST',
+        body: JSON.stringify({ confirmText: trimmedResetConfirm }),
+      });
+      if (response.status !== 200) { setResetNotice({ key: 'resetFailed', error: true }); return; }
+      setResetPreview(null);
+      setResetConfirmText('');
+      setResetNotice({ key: 'resetDone' });
+    } catch { setResetNotice({ key: 'resetFailed', error: true }); }
     finally { setPending(null); }
   }
 
@@ -300,6 +397,51 @@ export function SetupPage() {
       </div>
       {feedback(capNotice)}
     </form>
+    {isAdmin ? <section className="panel setup-card setup-danger" aria-labelledby="setup-knowledge-reset">
+      <header className="setup-card-head">
+        <h2 id="setup-knowledge-reset" className="h2">{t('resetHeading')}</h2>
+        <p className="helper">{t('resetLead')}</p>
+      </header>
+      <div className="setup-actions">
+        <button className="btn setup-danger-btn" type="button" disabled={!!pending} onClick={() => void onOpenReset()}>
+          {t(pending === 'resetPreview' ? 'resetPreviewLoading' : 'resetAction')}
+        </button>
+      </div>
+      {feedback(resetNotice)}
+    </section> : null}
+    {resetPreview ? <div className="setup-modal-backdrop" role="presentation">
+      <form className="panel setup-modal" role="dialog" aria-modal="true" aria-labelledby="setup-reset-dialog-title" onSubmit={onConfirmReset}>
+        <h2 id="setup-reset-dialog-title" className="h2">{t('resetDialogTitle')}</h2>
+        <p className="helper">{t('resetDialogBody')}</p>
+        <p className="setup-reset-counts">{t('resetCounts', {
+          sources: resetPreview.counts.sources,
+          chunks: resetPreview.counts.chunks,
+          analyses: resetPreview.counts.analyses,
+          sops: resetPreview.counts.sops,
+          rules: resetPreview.counts.rules,
+          ontology: resetPreview.counts.ontology,
+          otherDrafts: resetPreview.counts.otherDrafts,
+          sopVersions: resetPreview.counts.sopVersions,
+        })}</p>
+        <p className="helper">{t('resetPreserved', {
+          company: resetPreview.companyName ? `（${resetPreview.companyName}）` : '',
+          connections: resetPreview.counts.preserved.connections,
+        })}</p>
+        <label className="field">
+          <span>{resetPreview.companyName ? t('resetPrompt', { target: resetPreview.companyName }) : t('resetPromptOnly')}</span>
+          <input value={resetConfirmText} onChange={e => setResetConfirmText(e.target.value)} disabled={pending === 'reset'} placeholder="RESET" autoFocus />
+        </label>
+        <div className="setup-actions">
+          <button className="btn setup-danger-btn" type="submit" disabled={!canConfirmReset || pending === 'reset'}>
+            {t(pending === 'reset' ? 'resetting' : 'resetConfirmBtn')}
+          </button>
+          <button className="btn" type="button" disabled={pending === 'reset'} onClick={() => { setResetPreview(null); setResetConfirmText(''); }}>
+            {t('resetCancelBtn')}
+          </button>
+        </div>
+        {feedback(resetNotice)}
+      </form>
+    </div> : null}
     </>}
   </div>;
 }

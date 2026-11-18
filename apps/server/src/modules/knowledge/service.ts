@@ -18,6 +18,7 @@ import { liveMcpSelection, type LiveMcpKnowledge } from './live-mcp.js';
 import { MAX_MCP_ANALYSIS_SOURCES, mcpEvidenceValid, mcpSelectionsCurrent } from './mcp-analysis.js';
 import type { AnalysisGateway } from '../analysis/gateway-model.js';
 import { orgEmployeeId, type OrganizationSink } from '../employees/organization.js';
+import { companyContext, hydrateSop } from '../sop/index.js';
 import { mergeByOverlap, TEAM_SIZE_MAX, TeamPlanError, validateTeamPlan, type PlanRole, type PlanSourceRole, type TeamPlan } from './team-plan.js';
 export interface KnowledgeDeps {
   repo: KnowledgeRepository;
@@ -800,6 +801,80 @@ export class KnowledgeService {
     if (!fresh.queryTemplates.some(t => t.id === template.id)) throw new KnowledgeError('template_stale', '查询模板已被撤回。', 409);
     await this.deps.audit?.append({tenantId:ctx.tenantId,actor:ctx.userId,action:'knowledge.current_fact_queried',objectType:'knowledge',objectId:template.id,versionRef:hash(result.schemaVersion),result:'ok',detail:{connectionId,rowCount:result.rowCount,queriedAt:result.queriedAt}});
     return result;
+  }
+  private resetCounts(s: KnowledgeState, sopVersions: number) {
+    const sops = s.recommendations.filter(r => r.kind === 'sop' && !r.ruleLike).length;
+    const rules = s.recommendations.filter(r => !!r.ruleLike).length;
+    const ontology = s.recommendations.filter(r => !r.ruleLike && (r.kind === 'object' || r.kind === 'relation')).length;
+    const otherDrafts = s.recommendations.length - sops - rules - ontology;
+    return {
+      sources: s.source.items.length,
+      chunks: s.source.chunks.length,
+      analyses: s.analyses.length,
+      sops,
+      rules,
+      ontology,
+      otherDrafts,
+      parseJobs: s.parseJobs.length,
+      sopVersions,
+      preserved: {
+        connections: s.source.connections.length,
+        mcpUsers: Object.keys(s.liveMcp).length,
+      },
+    };
+  }
+  async resetPreview(ctx: UserContext) {
+    requireManager(ctx);
+    const [state, sopVersions, company] = await Promise.all([
+      this.deps.repo.read(ctx),
+      this.deps.repo.countTenantSopVersions?.(ctx.tenantId) ?? Promise.resolve(0),
+      companyContext.current.read(ctx.tenantId).catch(() => null),
+    ]);
+    return {
+      tenantId: ctx.tenantId,
+      companyName: company?.name?.trim() || '',
+      counts: this.resetCounts(state, sopVersions),
+    };
+  }
+  async resetKnowledge(ctx: UserContext, input: Record<string, unknown>) {
+    requireManager(ctx);
+    const confirmText = typeof input.confirmText === 'string' ? input.confirmText.trim() : '';
+    const company = await companyContext.current.read(ctx.tenantId).catch(() => null);
+    const companyName = company?.name?.trim() || '';
+    if (!confirmText || (confirmText !== 'RESET' && (!companyName || confirmText !== companyName))) {
+      throw new KnowledgeError('invalid_confirmation', '请输入 RESET 或当前企业名称以确认清空。', 400);
+    }
+    const clearState = (s: KnowledgeState) => {
+      const before = this.resetCounts(s, 0);
+      s.source = { connections: s.source.connections, items: [], chunks: [], citations: [], flagged: [] };
+      s.confirmations = {};
+      s.uploads = [];
+      s.parseJobs = [];
+      s.profiles = {};
+      s.analyses = [];
+      s.recommendations = [];
+      delete s.teamPlan;
+      s.revision += 1;
+      return before;
+    };
+    const { value: deleted, sopVersionsDeleted } = this.deps.repo.resetTenant
+      ? await this.deps.repo.resetTenant(ctx, clearState)
+      : { value: await this.deps.repo.transact(ctx, clearState), sopVersionsDeleted: 0 };
+    if (sopVersionsDeleted > 0) await hydrateSop();
+    await this.deps.audit?.append({
+      tenantId: ctx.tenantId,
+      actor: ctx.userId,
+      action: 'knowledge.tenant_reset',
+      objectType: 'knowledge',
+      objectId: ctx.tenantId,
+      result: 'ok',
+      detail: { ...deleted, sopVersions: sopVersionsDeleted },
+    });
+    return {
+      ok: true,
+      tenantId: ctx.tenantId,
+      deleted: { ...deleted, sopVersions: sopVersionsDeleted },
+    };
   }
 }
 

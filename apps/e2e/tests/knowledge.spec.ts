@@ -620,3 +620,90 @@ test.describe('T-24 ontology default scope with companyName and personal MCP dra
     });
   });
 });
+
+test.describe('T-27 admin tenant knowledge reset', () => {
+  test('zh: admin resets tenant knowledge base with preview, then re-uploads and analyzes', async ({ page }) => {
+    await page.request.post('/__test/knowledge/reset', { data: {} });
+    await localFile(page, true);
+    await response(page.request.post('/api/v1/knowledge/analyses', { data: {} }));
+    await response(page.request.post('/__test/knowledge/advance', { data: {} }));
+
+    await page.goto('/#settings');
+    await page.reload();
+    const resetBtn = page.getByRole('button', { name: '清空本租户知识库', exact: true });
+    await expect(resetBtn).toBeVisible();
+    await resetBtn.click();
+
+    const dialog = page.getByRole('dialog', { name: '确认清空本租户知识库' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('知识源 1');
+    if (process.env.T27_SHOTS) {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.screenshot({ path: '../../deliverables/v12-compare-t27/t27-reset-dialog-1440-zh.png', fullPage: true });
+    }
+
+    const confirmBtn = dialog.getByRole('button', { name: '确认清空', exact: true });
+    await expect(confirmBtn).toBeDisabled();
+    await dialog.getByRole('textbox').fill('RESET');
+    await expect(confirmBtn).toBeEnabled();
+    await confirmBtn.click();
+    await expect(page.getByRole('status').filter({ hasText: '已清空本租户知识库' })).toBeVisible();
+
+    await page.goto('/#knowledge');
+    await page.reload();
+    await expect(page.getByText('还没有资料。', { exact: true })).toBeVisible();
+    if (process.env.T27_SHOTS) {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.screenshot({ path: '../../deliverables/v12-compare-t27/t27-reset-empty-1440-zh.png', fullPage: true });
+    }
+
+    await localFile(page, true);
+    await response(page.request.post('/api/v1/knowledge/analyses', { data: {} }));
+    await response(page.request.post('/__test/knowledge/advance', { data: {} }));
+    const overview = await getOverview(page);
+    expect(overview.items.length).toBeGreaterThan(0);
+    expect(overview.recommendations.length).toBeGreaterThan(0);
+  });
+
+  test.describe('en', () => {
+    test.use({ lang: 'en' });
+    test('en: admin resets tenant knowledge base with preview and sees empty library', async ({ page }) => {
+      await page.request.post('/__test/knowledge/reset', { data: {} });
+      const connection = await post<{ id: string }>(page, '/connections', { name: 'Local materials', pluginId: 'local-file', scope: {} });
+      await post(page, `/connections/${connection.id}/confirm`);
+      await post(page, '/uploads', { connectionId: connection.id, name: 'ops.md', text: ROLE_FILE });
+      await confirmItems(page);
+      await response(page.request.post('/api/v1/knowledge/analyses', { data: {} }));
+      await response(page.request.post('/__test/knowledge/advance', { data: {} }));
+
+      await page.goto('/#settings');
+      await page.reload();
+      const resetBtn = page.getByRole('button', { name: 'Reset tenant knowledge base', exact: true });
+      await expect(resetBtn).toBeVisible();
+      await resetBtn.click();
+
+      const dialog = page.getByRole('dialog', { name: 'Confirm tenant knowledge base reset' });
+      await expect(dialog).toBeVisible();
+      await expect(dialog).toContainText('Sources: 1');
+      if (process.env.T27_SHOTS) {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.screenshot({ path: '../../deliverables/v12-compare-t27/t27-reset-dialog-1440-en.png', fullPage: true });
+      }
+
+      const confirmBtn = dialog.getByRole('button', { name: 'Confirm reset', exact: true });
+      await expect(confirmBtn).toBeDisabled();
+      await dialog.getByRole('textbox').fill('RESET');
+      await expect(confirmBtn).toBeEnabled();
+      await confirmBtn.click();
+      await expect(page.getByRole('status').filter({ hasText: 'Tenant knowledge base cleared.' })).toBeVisible();
+
+      await page.goto('/#knowledge');
+      await page.reload();
+      await expect(page.getByText('No materials yet.', { exact: true })).toBeVisible();
+      if (process.env.T27_SHOTS) {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.screenshot({ path: '../../deliverables/v12-compare-t27/t27-reset-empty-1440-en.png', fullPage: true });
+      }
+    });
+  });
+});
