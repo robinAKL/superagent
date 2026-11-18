@@ -1,6 +1,9 @@
 /** Real browser + Fastify/service/gateway E2E. Only external source/model/DB drivers are explicitly synthetic. */
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Page, APIResponse } from '@playwright/test';
 import { test, expect } from './fixtures.js';
+const t33Shot = (name: string) => path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../deliverables/v12-compare-t33', name);
 // Kept local so Playwright discovery does not load the server's Azure/PG dependency graph.
 const KNOWLEDGE_HEADER = 'e2e-knowledge-owner|owner|P-1';
 const DB_RESOURCE_ID = 'synthetic-dba-lots';
@@ -591,32 +594,32 @@ test.describe('T-24 ontology default scope with companyName and personal MCP dra
     await page.reload();
   }
 
-  test('defaults to personal MCP tab in zh when shared has only synthetic company node', async ({ page }) => {
+  test('defaults to all sources in zh so company and MCP share one graph', async ({ page }) => {
     await seedAndOpen(page);
     const ontology = page.locator('section.onto');
     await expect(ontology).toBeVisible();
-    await expect(ontology.getByRole('tab', { name: /我的 MCP 来源/ })).toHaveAttribute('aria-selected', 'true');
-    await expect(ontology.locator('.onto-node')).toHaveCount(3);
+    await expect(ontology.getByRole('tab', { name: /全部来源/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(ontology.locator('.onto-node')).toHaveCount(4);
     await expect(ontology.locator('.onto-link-line')).toHaveCount(3);
-    if (process.env.T24_SHOTS) {
-      await page.setViewportSize({ width: 1440, height: 900 });
-      await page.screenshot({ path: '../../deliverables/v12-compare-t24/t24-ontology-1440-zh.png', fullPage: true });
-    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.screenshot({ path: t33Shot('t33-ontology-1440-zh.png'), fullPage: true });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.screenshot({ path: t33Shot('t33-ontology-375-zh.png'), fullPage: true });
   });
 
   test.describe('en', () => {
     test.use({ lang: 'en' });
-    test('defaults to personal MCP tab in en when shared has only synthetic company node', async ({ page }) => {
+    test('defaults to all sources in en so company and MCP share one graph', async ({ page }) => {
       await seedAndOpen(page);
       const ontology = page.locator('section.onto');
       await expect(ontology).toBeVisible();
-      await expect(ontology.getByRole('tab', { name: /My MCP sources/ })).toHaveAttribute('aria-selected', 'true');
-      await expect(ontology.locator('.onto-node')).toHaveCount(3);
+      await expect(ontology.getByRole('tab', { name: /All sources/ })).toHaveAttribute('aria-selected', 'true');
+      await expect(ontology.locator('.onto-node')).toHaveCount(4);
       await expect(ontology.locator('.onto-link-line')).toHaveCount(3);
-      if (process.env.T24_SHOTS) {
-        await page.setViewportSize({ width: 1440, height: 900 });
-        await page.screenshot({ path: '../../deliverables/v12-compare-t24/t24-ontology-1440-en.png', fullPage: true });
-      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.screenshot({ path: t33Shot('t33-ontology-1440-en.png'), fullPage: true });
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.screenshot({ path: t33Shot('t33-ontology-375-en.png'), fullPage: true });
     });
   });
 });
