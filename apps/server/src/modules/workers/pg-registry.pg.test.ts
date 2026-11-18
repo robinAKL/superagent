@@ -12,7 +12,9 @@ const live = databaseUrl ? it : it.skip;
 const SCHEMA = `t03_${randomUUID().replace(/-/g, '')}`;
 const here = path.dirname(fileURLToPath(import.meta.url));
 // The real migration, minus the GRANT (the test role may not have superagent_app).
-const MIGRATION = readFileSync(path.resolve(here, '../../../migrations/0013_workers.sql'), 'utf8').replace(/^GRANT .*$/gm, '');
+const MIGRATION = ['0013_workers.sql', '0014_room_worker_dispatch.sql'].map((file) =>
+  readFileSync(path.resolve(here, '../../../migrations', file), 'utf8').replace(/^GRANT .*$/gm, ''),
+).join('\n');
 
 live('PgWorkerRegistry: register, authenticate, heartbeat, waiting_auth, offline, revoke against the real migration', async () => {
   const pool = new pg.Pool({ connectionString: databaseUrl });
@@ -62,6 +64,11 @@ live('PgWorkerRegistry: register, authenticate, heartbeat, waiting_auth, offline
     expect(all.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     expect((await reg.eventsAfter(worker.id, 9, 100)).map((e) => e.seq)).toEqual([10, 11]);
     expect(await reg.eventsAfter(worker.id, 11, 100)).toEqual([]);
+    const dispatch = await reg.appendEvent(tenant, worker.id, 'wake', { roomTaskId: 'task_1' }, 'super-agent', t0, 'task_1');
+    expect(dispatch?.seq).toBe(12);
+    expect(await reg.appendEvent(tenant, worker.id, 'wake', {}, 'super-agent', t0, 'task_1')).toBeNull();
+    expect(await reg.hasRoomDispatch(tenant, worker.id, 'task_1')).toBe(true);
+    expect(await reg.hasRoomDispatch(tenant, randomUUID(), 'task_1')).toBe(false);
 
     expect(await reg.get(randomUUID(), worker.id)).toBeNull();
     expect(await reg.revoke(randomUUID(), worker.id, t0)).toBe(false);

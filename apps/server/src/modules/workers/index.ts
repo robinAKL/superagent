@@ -1,4 +1,7 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { createHash } from 'node:crypto';
+import { flushRoom, roomState } from '../room/index.js';
+import type { RoomTask } from '../room/room.js';
 import { runtimeState } from '../runtime/index.js';
 import { claimTask, deadLetterTask, heartbeatTask, releaseTask, succeedTask, type Queryable } from '../runtime/pg-queue.js';
 import { PgWorkerRegistry } from './pg-registry.js';
@@ -98,6 +101,31 @@ const approvalDeps: ApprovalDeps = {
   stepMs: () => (workSignal.listening ? workersState.notifiedScanMs : workersState.pollStepMs),
 };
 
+/** A room message can use a single unambiguous, administrator-granted binding. */
+export async function resolveRoomDispatch(task: RoomTask, projectScopes: readonly string[] | null) {
+  if (task.approval !== 'none' || !['assigned', 'waiting'].includes(task.status) || task.hold) return;
+  const workerList = await workersState.registry.list(task.tenantId);
+  const targets = workerList.flatMap(worker => {
+    if (worker.revokedAt !== null) return [];
+    const projects = new Set(worker.capabilities.roomAssignments?.filter(assignment =>
+      assignment.employeeId === task.employeeId &&
+      (!task.projectId || assignment.projectId === task.projectId) &&
+      (!projectScopes || projectScopes.includes(assignment.projectId)) &&
+      workerMayRun(worker, assignment),
+    ).map(assignment => assignment.projectId));
+    return [...projects].map(projectId => ({ workerId: worker.id, projectId }));
+  });
+  if (targets.length === 1) return targets[0];
+}
+
+export async function queueRoomDispatch(task: RoomTask, target: { workerId: string; projectId: string }): Promise<void> {
+  await workersState.registry.appendEvent(task.tenantId, target.workerId, 'wake', {
+    roomTaskId: task.id,
+    projectId: target.projectId,
+    prompt: task.title,
+  }, 'super-agent', workersState.now(), task.id);
+}
+
 /** Admin side, mounted under the signed-in /api/v1/workers prefix (admin/owner only). */
 export const workersModule: FastifyPluginAsync = async (app) => {
   app.get('/pair/:userCode', async (req, reply) => {
@@ -169,6 +197,9 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) || JSON.stringify(payload).length > 16_384) {
       return reply.code(400).send({ error: 'bad_payload' });
     }
+    if (body.kind === 'wake' && Object.hasOwn(payload, 'roomTaskId')) {
+      return reply.code(400).send({ error: 'reserved_room_dispatch' });
+    }
     const event = await workersState.registry.appendEvent(user.tenantId, id, body.kind as WorkerEventKind, payload as Record<string, unknown>, user.userId, workersState.now());
     if (!event) return reply.code(404).send({ error: 'not_found' });
     return reply.code(201).send({ event });
@@ -179,8 +210,8 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
     const { id } = req.params as { id: string };
     if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
-    const body = (req.body ?? {}) as { allowEmployees?: unknown; allowProjects?: unknown };
-    const patch = cleanCapabilities({ allowEmployees: body.allowEmployees, allowProjects: body.allowProjects });
+    const body = (req.body ?? {}) as { allowEmployees?: unknown; allowProjects?: unknown; roomAssignments?: unknown };
+    const patch = cleanCapabilities({ allowEmployees: body.allowEmployees, allowProjects: body.allowProjects, roomAssignments: body.roomAssignments });
     const worker = await workersState.registry.patchCapabilities(user.tenantId, id, patch);
     if (!worker) return reply.code(404).send({ error: 'not_found' });
     return { worker: toView(worker, workersState.now()) };
@@ -300,14 +331,14 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
    */
   app.post('/poll', async (req, reply) => {
     const worker = req.worker!;
-    const body = (req.body ?? {}) as { waitMs?: unknown; since?: unknown };
+    const body = (req.body ?? {}) as { waitMs?: unknown; since?: unknown; eventsOnly?: unknown };
     const waitMs = typeof body.waitMs === 'number' && Number.isFinite(body.waitMs) ? Math.min(Math.max(0, body.waitMs), LONG_POLL_MAX_MS) : LONG_POLL_MAX_MS;
     if (body.since !== undefined && !(typeof body.since === 'number' && Number.isSafeInteger(body.since) && body.since >= 0)) {
       return reply.code(400).send({ error: 'bad_cursor' });
     }
     const since = (body.since as number | undefined) ?? 0;
     let closed = false;
-    req.raw.once('close', () => { closed = true; });
+    reply.raw.once('close', () => { closed = true; });
     const start = workersState.now();
     const keys = [tenantKey(worker.tenantId), workerKey(worker.id)];
     for (;;) {
@@ -317,7 +348,7 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
         const now = workersState.now();
         if (!(await workersState.registry.heartbeat(worker.id, now, {}))) return reply.code(401).send({ error: 'bad_worker_token' });
         const events = await workersState.registry.eventsAfter(worker.id, since, EVENTS_PAGE);
-        const task = await claimFor(worker, now);
+        const task = body.eventsOnly === true ? null : await claimFor(worker, now);
         const cursor = events.length ? events[events.length - 1]!.seq : since;
         if (task || events.length) return { task, events, cursor, ...(task ? { leaseMs: LEASE_MS } : {}) };
         if (closed || now - start >= waitMs) return { task: null, events, cursor, retryAfterMs: 0 };
@@ -338,6 +369,35 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
   async function stillValid(worker: WorkerRecord, now: number): Promise<boolean> {
     return workersState.registry.heartbeat(worker.id, now, {});
   }
+
+  app.post('/room-tasks/:id/:action', async (req, reply) => {
+    const { id, action } = req.params as { id: string; action: string };
+    if (action !== 'report' && action !== 'progress') return reply.code(404).send({ error: 'not_found' });
+    const worker = req.worker!;
+    const body = (req.body as { body?: unknown } | undefined)?.body;
+    if (typeof body !== 'string' || !body.trim() || body.length > 65_536) {
+      return reply.code(400).send({ error: 'bad_report' });
+    }
+    if (!(await stillValid(worker, workersState.now()))) return reply.code(401).send({ error: 'bad_worker_token' });
+    if (!(await workersState.registry.hasRoomDispatch(worker.tenantId, worker.id, id))) {
+      return reply.code(404).send({ error: 'task_not_found' });
+    }
+    const digest = createHash('sha256').update(body).digest('hex');
+    let message;
+    try {
+      message = roomState.current.updateFromWorker(
+        id, worker.tenantId, body, 'worker-' + action + ':' + id + ':' + digest, action === 'report',
+        task => workerMayRun(worker, task) && !!worker.capabilities.roomAssignments?.some(assignment =>
+          assignment.employeeId === task.employeeId && assignment.projectId === task.projectId,
+        ),
+      );
+    } catch (error) {
+      const reason = (error as Error).message;
+      return reply.code(reason === 'task_not_found' ? 404 : 409).send({ error: reason });
+    }
+    await flushRoom();
+    return message;
+  });
 
   app.post('/tasks/:id/heartbeat', async (req, reply) => {
     const { id } = req.params as { id: string };
