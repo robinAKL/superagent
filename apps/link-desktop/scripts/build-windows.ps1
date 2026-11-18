@@ -43,16 +43,17 @@ if (Test-Path $RepoLinkDir) {
 }
 
 # 4. Build NSIS installer
-$Makensis = Get-Command makensis -ErrorAction SilentlyContinue
-if (-not $Makensis) {
+$MakensisCmd = Get-Command makensis -ErrorAction SilentlyContinue
+$MakensisExe = if ($MakensisCmd) { $MakensisCmd.Source } else { $null }
+if (-not $MakensisExe) {
   $DefaultNsis = "C:\Program Files (x86)\NSIS\makensis.exe"
-  if (Test-Path $DefaultNsis) { $Makensis = Get-Item $DefaultNsis }
+  if (Test-Path $DefaultNsis) { $MakensisExe = $DefaultNsis }
 }
-if (-not $Makensis) { throw "makensis.exe not found. Install NSIS first." }
+if (-not $MakensisExe) { throw "makensis.exe not found. Install NSIS first." }
 
 $OutExe = Join-Path $DistDir "SuperAgentLink-Setup-x64.exe"
 $Nsi = Join-Path $Root "installer\SuperAgentLink.nsi"
-& $Makensis.Source "/DAPP_VERSION=$Version" "/DSTAGE_DIR=$StageDir" "/DOUT_FILE=$OutExe" $Nsi
+& $MakensisExe "/DAPP_VERSION=$Version" "/DSTAGE_DIR=$StageDir" "/DOUT_FILE=$OutExe" $Nsi
 if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
 
 $Hash = (Get-FileHash -Path $OutExe -Algorithm SHA256).Hash.ToLowerInvariant()
