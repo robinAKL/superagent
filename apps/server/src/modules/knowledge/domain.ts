@@ -172,10 +172,15 @@ export function mergeRecommendations(
 ) {
   const scoped = state.recommendations.filter(r => r.mcpScope === mcp?.mcpScope);
   const valid = mcp?.validEvidence ?? ((e: Evidence) => evidenceValid(state, ctx, e));
+  const evidenceOk = (e: Evidence) => evidenceValid(state, ctx, e) || valid(e);
   for (const p of proposals) {
     if (!p.key || !p.name || !p.evidence.length || !p.evidence.every(valid)) throw new KnowledgeError('unsupported_recommendation', '模型建议缺少当前可定位依据，不能生成草案。', 422);
   }
-  const objects = new Set(scoped.filter(r => r.kind === 'object' && !r.deleted && r.evidence.length && r.evidence.every(valid)).map(r => r.key));
+  const objects = new Set(
+    state.recommendations
+      .filter(r => r.kind === 'object' && !r.deleted && r.evidence.length && r.evidence.every(evidenceOk))
+      .map(r => r.key),
+  );
   for (const p of proposals) {
     if (p.kind !== 'object') continue;
     const existing = scoped.find(r => r.kind === 'object' && r.key === p.key);
