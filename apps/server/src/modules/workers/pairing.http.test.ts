@@ -114,6 +114,27 @@ it('restricts a paired worker to chosen employees and projects', async () => {
   expect(claimed.json().task.payload.itemId).toBe('mine');
 });
 
+it('heartbeat does not claim work; one poll plus succeed reports the task', async () => {
+  const a = await app();
+  const started = await start(a);
+  await a.inject({ method: 'POST', url: `/api/v1/workers/pair/${started.userCode}/allow` });
+  const token = (await a.inject({ method: 'POST', url: '/api/v1/worker-link/pair/poll', payload: { deviceCode: started.deviceCode } })).json().token as string;
+  runtimeState.queue.add({ tenantId: TENANT, kind: 'knowledge.parse', payload: { tenantId: TENANT, itemId: 'job-1' }, employeeId: 'emp-a', projectId: 'proj-1' });
+  expect((await a.inject({ method: 'POST', url: '/api/v1/worker-link/heartbeat', headers: { authorization: `Bearer ${token}` }, payload: {} })).statusCode).toBe(200);
+  const claimed = await a.inject({ method: 'POST', url: '/api/v1/worker-link/poll', headers: { authorization: `Bearer ${token}` }, payload: { waitMs: 0 } });
+  const task = claimed.json().task;
+  expect(task.payload.itemId).toBe('job-1');
+  const done = await a.inject({
+    method: 'POST',
+    url: `/api/v1/worker-link/tasks/${task.id}/succeed`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: { attempt: task.attempt },
+  });
+  expect(done.statusCode).toBe(200);
+  expect(done.json().status).toBe('reported');
+  expect((await a.inject({ method: 'POST', url: '/api/v1/worker-link/poll', headers: { authorization: `Bearer ${token}` }, payload: { waitMs: 0 } })).json().task).toBeNull();
+});
+
 it('concurrent allow of the same code only succeeds once', async () => {
   const a = await app();
   const started = await start(a);
