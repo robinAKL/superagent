@@ -5,6 +5,7 @@ const ENGLISH: Readonly<Record<string, string>> = {
   "业务流程": "Workflows",
   "指挥室": "Command room",
   "和超级智能体一起，把工作推进到交付。": "Work with Super Agent to move work through to delivery.",
+  "下载 Link（Windows x64）": "Download Link (Windows x64)",
   "团队": "Team",
   "工作摘要": "Work summary",
   "统一协调，按企业规则工作": "Coordinates the team and follows company rules",
