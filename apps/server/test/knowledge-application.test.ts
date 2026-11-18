@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { UserContext } from '@superagent/shared';
 import { KnowledgeService } from '../src/modules/knowledge/service.js';
 import { MemoryKnowledgeRepository, PgKnowledgeRepository } from '../src/modules/knowledge/repository.js';
-import { confirmSource, emptyState, invalidateAnalyses, type Evidence, type KnowledgeState } from '../src/modules/knowledge/domain.js';
+import { confirmSource, emptyState, invalidateAnalyses, mergeRecommendations, type Evidence, type KnowledgeState } from '../src/modules/knowledge/domain.js';
 import { runAnalysis } from '../src/modules/analysis/service.js';
 import { knowledgeModule } from '../src/modules/knowledge/index.js';
 import { migrate } from '../src/migrate.js';
@@ -225,6 +225,35 @@ describe('analysis stage worker', () => {
     proposals=[relation];
     await service.startAnalysis(owner);await runAnalysis(f.repo,model,owner,queued);
     expect((await f.repo.read(owner)).analyses.at(-1)).toMatchObject({status:'failed',error:'unsupported_relation'});
+  });
+  it('keeps a relation whose endpoints come from company files and Alice MCP drafts', async () => {
+    const f = await confirmed();
+    let queued = '';
+    const e = evidence(await f.repo.read(owner));
+    const model = { recommend: async () => [{ key: 'order', kind: 'object', name: 'Order', description: 'Company order', evidence: [e] }] };
+    const service = new KnowledgeService({ repo: f.repo, model, enqueue: async (_ctx, run) => { queued = run; } });
+    await service.startAnalysis(owner); await runAnalysis(f.repo, model, owner, queued);
+    expect((await service.recommendations(owner)).recommendations.map(r => r.key)).toEqual(['order']);
+
+    const quote = 'Supplier ships the order.';
+    const mcpE: Evidence = { sourceId: 'mcp:run-cross', version: '1', start: 0, end: quote.length, locator: 'handbook://supplier', quote, retrievedAt: '2026-11-18T00:00:00.000Z' };
+    await f.repo.transact(owner, s => {
+      s.analyses.push({
+        id: 'run-cross', actor: owner, status: 'completed', stage: 'complete', signature: 'mcp-cross', createdAt: '2026-11-18T00:00:00.000Z', error: null, mcpSources: [], mcpEvidence: [mcpE],
+      });
+      const { skippedRelations } = mergeRecommendations(s, owner, [
+        { key: 'supplier', kind: 'object', name: 'Supplier', description: 'MCP supplier', evidence: [mcpE] },
+        { key: 'rx', kind: 'relation', name: 'supplies', description: 'edge', evidence: [mcpE], relation: { from: 'order', to: 'supplier', label: 'supplies' } },
+      ], { mcpScope: 'alice-mcp', mcpRunId: 'run-cross', validEvidence: ev => ev.sourceId === mcpE.sourceId && ev.retrievedAt === mcpE.retrievedAt });
+      expect(skippedRelations).toBe(0);
+    });
+    const alice = await service.recommendations(owner);
+    expect(alice.recommendations.map(r => r.key)).toEqual(['order']);
+    expect(alice.mcpRecommendations.some(r => r.key === 'supplier')).toBe(true);
+    expect(alice.mcpRecommendations.find(r => r.kind === 'relation')).toMatchObject({ relation: { from: 'order', to: 'supplier', label: 'supplies' } });
+    const bob = await service.recommendations({ ...owner, userId: 'bob' });
+    expect(bob.mcpRecommendations).toEqual([]);
+    expect(bob.recommendations.some(r => r.kind === 'relation' || r.key === 'supplier')).toBe(false);
   });
   it('an expired lease during a model call becomes unknown without a second billable request', async () => {
     const f = await confirmed(); let queued = '', calls = 0;

@@ -102,9 +102,8 @@ export class KnowledgeService {
       if (!valid && !identityAllowed) return [];
       return [{ ...r, stale: !valid, evidence: valid ? r.evidence : [], workflow: valid ? r.workflow : undefined, proposedChange: r.proposedChange?.evidence.every(e => this.valid(s, ctx, e)) ? r.proposedChange : undefined }];
     });
-    const objectKey = (scope: string | undefined, key: string) => JSON.stringify([scope, key]);
-    const objectKeys = new Set(recs.filter(r => r.kind === 'object').map(r => objectKey(r.mcpScope, r.key)));
-    const visibleRecs = recs.filter(r => r.kind !== 'relation' || r.relation && objectKeys.has(objectKey(r.mcpScope, r.relation.from)) && objectKeys.has(objectKey(r.mcpScope, r.relation.to)));
+    const objectKeys = new Set(recs.filter(r => r.kind === 'object').map(r => r.key));
+    const visibleRecs = recs.filter(r => r.kind !== 'relation' || r.relation && objectKeys.has(r.relation.from) && objectKeys.has(r.relation.to));
     return {
       recommendations: visibleRecs.filter(r => !r.mcpScope),
       mcpRecommendations: visibleRecs.filter(r => r.mcpScope).map(({ mcpScope: _, mcpRunId: _run, ...draft }) => draft),
