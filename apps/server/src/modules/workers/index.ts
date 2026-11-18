@@ -14,11 +14,23 @@ import {
   registerWorker,
   toView,
   WORKER_KINDS,
+  workerMayRun,
   workerStatus,
   type WorkerKind,
   type WorkerRecord,
   type WorkerRegistry,
 } from './registry.js';
+import {
+  allowPair,
+  denyPair,
+  formatUserCode,
+  MemoryPairStore,
+  PgPairStore,
+  pollPair,
+  publicPairView,
+  startPair,
+  type PairStore,
+} from './pairing.js';
 
 export * from './registry.js';
 export { PgWorkerRegistry } from './pg-registry.js';
@@ -37,6 +49,7 @@ const NOTIFIED_SCAN_MS = 5_000;
 export const workersState: {
   registry: WorkerRegistry;
   approvals: ApprovalStore;
+  pairs: PairStore;
   db: Queryable | null;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
@@ -45,6 +58,7 @@ export const workersState: {
 } = {
   registry: memoryRegistry(),
   approvals: new MemoryApprovalStore(),
+  pairs: new MemoryPairStore(),
   db: null,
   now: () => Date.now(),
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -61,11 +75,13 @@ export function bindWorkersDb(db: Queryable | null): void {
   workersState.db = db;
   workersState.registry = db ? new PgWorkerRegistry(db) : memoryRegistry();
   workersState.approvals = db ? new PgApprovalStore(db) : new MemoryApprovalStore();
+  workersState.pairs = db ? new PgPairStore(db) : new MemoryPairStore();
 }
 
 export function resetWorkers(): void {
   workersState.registry = memoryRegistry();
   workersState.approvals = new MemoryApprovalStore();
+  workersState.pairs = new MemoryPairStore();
   workersState.db = null;
   workersState.now = () => Date.now();
   workersState.sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -84,6 +100,38 @@ const approvalDeps: ApprovalDeps = {
 
 /** Admin side, mounted under the signed-in /api/v1/workers prefix (admin/owner only). */
 export const workersModule: FastifyPluginAsync = async (app) => {
+  app.get('/pair/:userCode', async (req, reply) => {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) return reply.code(401).send({ error: 'unauthenticated' });
+    const { userCode } = req.params as { userCode: string };
+    const session = await workersState.pairs.byUserCode(userCode);
+    if (!session) return reply.code(404).send({ error: 'not_found' });
+    return publicPairView(session, workersState.now());
+  });
+
+  app.post('/pair/:userCode/allow', async (req, reply) => {
+    const user = req.user;
+    if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
+    const { userCode } = req.params as { userCode: string };
+    const result = await allowPair(workersState.pairs, workersState.registry, userCode, { tenantId: user.tenantId, userId: user.userId }, workersState.now());
+    if (result === 'missing') return reply.code(404).send({ error: 'not_found' });
+    if (result === 'expired') return reply.code(410).send({ error: 'expired' });
+    if (result === 'taken') return reply.code(409).send({ error: 'taken' });
+    const now = workersState.now();
+    const worker = result.workerId ? await workersState.registry.get(user.tenantId, result.workerId) : null;
+    return { pair: publicPairView(result, now), worker: worker ? toView(worker, now) : null };
+  });
+
+  app.post('/pair/:userCode/deny', async (req, reply) => {
+    if (!req.user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
+    const { userCode } = req.params as { userCode: string };
+    const result = await denyPair(workersState.pairs, userCode, workersState.now());
+    if (result === 'missing') return reply.code(404).send({ error: 'not_found' });
+    if (result === 'expired') return reply.code(410).send({ error: 'expired' });
+    if (result === 'taken') return reply.code(409).send({ error: 'taken' });
+    return publicPairView(result, workersState.now());
+  });
+
   app.post('/', async (req, reply) => {
     const user = req.user;
     if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
@@ -126,12 +174,25 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return reply.code(201).send({ event });
   });
 
+  app.patch('/:id', async (req, reply) => {
+    const user = req.user;
+    if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
+    const { id } = req.params as { id: string };
+    if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
+    const body = (req.body ?? {}) as { allowEmployees?: unknown; allowProjects?: unknown };
+    const patch = cleanCapabilities({ allowEmployees: body.allowEmployees, allowProjects: body.allowProjects });
+    const worker = await workersState.registry.patchCapabilities(user.tenantId, id, patch);
+    if (!worker) return reply.code(404).send({ error: 'not_found' });
+    return { worker: toView(worker, workersState.now()) };
+  });
+
   app.post('/:id/revoke', async (req, reply) => {
     const tenantId = req.user?.tenantId;
     if (!tenantId) return reply.code(401).send({ error: 'unauthenticated' });
     const { id } = req.params as { id: string };
     if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
     if (!(await workersState.registry.revoke(tenantId, id, workersState.now()))) return reply.code(404).send({ error: 'not_found' });
+    workSignal.notify(workerKey(id));
     return { id, status: 'revoked' };
   });
 
@@ -165,8 +226,9 @@ function memoryAttemptMatches(taskId: string, attempt: number): boolean {
 async function claimFor(worker: WorkerRecord, now: number) {
   const kinds = worker.capabilities.kinds ?? [];
   if (!kinds.length) return null; // no granted kinds: nothing to claim, but the poll still keeps it present
+  const matches = (task: { employeeId?: string | null; projectId?: string | null }) => workerMayRun(worker, task);
   if (runtimeState.db) return claimTask(runtimeState.db, worker.id, LEASE_MS, MAX_ATTEMPTS, worker.tenantId, kinds);
-  return runtimeState.queue.claim(worker.id, now, kinds, worker.tenantId);
+  return runtimeState.queue.claim(worker.id, now, kinds, worker.tenantId, (task) => matches(task));
 }
 
 /**
@@ -174,6 +236,27 @@ async function claimFor(worker: WorkerRecord, now: number) {
  * Mounted outside user sign-in; every route needs a worker bearer token. The lease owner is always the
  * worker's own id from the token, never a value in the body, so one worker cannot report for another.
  */
+/** Unauthenticated device-code pairing. Mounted next to worker-link, before the bearer hook. */
+export const workerPairModule: FastifyPluginAsync = async (app) => {
+  app.post('/pair/start', async (req, reply) => {
+    const session = await startPair(workersState.pairs, (req.body ?? {}) as { hostname?: unknown; agents?: unknown }, workersState.now());
+    return reply.code(201).send({
+      deviceCode: session.deviceCode,
+      userCode: formatUserCode(session.userCode),
+      expiresAt: session.expiresAt,
+      verifyPath: `/#connect?code=${encodeURIComponent(formatUserCode(session.userCode))}`,
+    });
+  });
+
+  app.post('/pair/poll', async (req, reply) => {
+    const deviceCode = typeof (req.body as { deviceCode?: unknown } | undefined)?.deviceCode === 'string'
+      ? (req.body as { deviceCode: string }).deviceCode
+      : '';
+    if (!deviceCode) return reply.code(400).send({ error: 'bad_device_code' });
+    return pollPair(workersState.pairs, deviceCode, workersState.now());
+  });
+};
+
 export const workerLinkModule: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', async (req, reply) => {
     const worker = await authenticateWorker(workersState.registry, bearer(req));
@@ -184,7 +267,7 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
   registerApprovalLinkRoutes(app, approvalDeps);
 
   app.post('/heartbeat', async (req, reply) => {
-    const body = (req.body ?? {}) as { busy?: unknown; waitingAuthReason?: unknown };
+    const body = (req.body ?? {}) as { busy?: unknown; waitingAuthReason?: unknown; capabilities?: unknown };
     const now = workersState.now();
     const input = {
       ...(typeof body.busy === 'boolean' ? { busy: body.busy } : {}),
@@ -192,9 +275,14 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
         ? { waitingAuthReason: (body.waitingAuthReason as string | null)?.slice(0, 500) ?? null }
         : {}),
     };
-    if (!(await workersState.registry.heartbeat(req.worker!.id, now, input))) return reply.code(401).send({ error: 'bad_worker_token' });
-    const fresh = await workersState.registry.get(req.worker!.tenantId, req.worker!.id);
-    return { status: fresh ? workerStatus(fresh, now) : 'revoked', at: now };
+    const worker = req.worker!;
+    if (body.capabilities && typeof body.capabilities === 'object') {
+      const agents = cleanCapabilities(body.capabilities).agents;
+      if (agents) await workersState.registry.patchCapabilities(worker.tenantId, worker.id, { agents });
+    }
+    if (!(await workersState.registry.heartbeat(worker.id, now, input))) return reply.code(401).send({ error: 'bad_worker_token' });
+    const fresh = await workersState.registry.get(worker.tenantId, worker.id);
+    return { status: fresh ? workerStatus(fresh, now) : 'revoked', at: now, capabilities: fresh?.capabilities ?? worker.capabilities };
   });
 
   /**
