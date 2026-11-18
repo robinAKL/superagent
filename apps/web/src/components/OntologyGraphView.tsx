@@ -6,7 +6,7 @@ import './OntologyGraphView.css';
 /**
  * Ontology = concrete entities analysis found (objects, rules, processes, employees, tools, source documents)
  * and the directed relations between them. Edges come from analysed object relations, employee tool/SOP
- * assignments, and evidence locators — never invented. Shared vs private MCP drafts stay separate.
+ * assignments, and evidence locators — never invented. Company files and MCP drafts share one tenant graph.
  */
 export interface OntologyEvidence { locator: string; quote: string; sourceId?: string; version?: string; retrievedAt?: string }
 export interface OntologyDraft {
@@ -23,7 +23,7 @@ export interface GraphLink extends d3.SimulationLinkDatum<GraphNode> { id: strin
 
 const TEXT = {
   en: {
-    shared: 'Company sources', personal: 'My MCP sources', summary: '{objects} entities · {relations} relationships',
+    all: 'All sources', shared: 'Company sources', personal: 'My MCP sources', summary: '{objects} entities · {relations} relationships',
     emptyTitle: 'No entities yet',
     emptyBody: 'Confirm materials in Company knowledge and run an analysis. Objects, roles, tools, processes and source documents it finds are drawn here with their sources.',
     openAnalysis: 'Open knowledge analysis',
@@ -40,7 +40,7 @@ const TEXT = {
     relTable: 'Related relationships', from: 'From', edge: 'Relationship', to: 'To',
   },
   zh: {
-    shared: '企业资料', personal: '我的 MCP 来源', summary: '{objects} 个实体 · {relations} 条关系',
+    all: '全部来源', shared: '企业资料', personal: '我的 MCP 来源', summary: '{objects} 个实体 · {relations} 条关系',
     emptyTitle: '还没有实体',
     emptyBody: '先在企业知识里确认资料并运行分析。分析找到的对象、岗位、工具、流程和来源文档会画在这里，并附上原文依据。',
     openAnalysis: '打开知识分析',
@@ -134,7 +134,16 @@ export function buildOntologyGraph(drafts: OntologyDraft[], companyName?: string
   const byKey = new Map<string, GraphNode>();
   const ordered = [...enriched.filter(d => d.kind === 'company'), ...enriched.filter(d => d.kind !== 'company')];
   for (const draft of ordered) {
-    if (!NODE_KINDS.has(draft.kind) || byKey.has(draft.key)) continue;
+    if (!NODE_KINDS.has(draft.kind)) continue;
+    const existing = byKey.get(draft.key);
+    if (existing) {
+      existing.draft = {
+        ...existing.draft,
+        description: existing.draft.description || draft.description,
+        evidence: [...existing.draft.evidence, ...draft.evidence],
+      };
+      continue;
+    }
     const { label, width } = fitLabel(draft.name);
     const type = nodeTypeOf(draft);
     const node: GraphNode = { id: draft.id, key: draft.key, name: draft.name, label, type, typeLabel: type, width, degree: 0, draft };
@@ -175,21 +184,16 @@ function linkGeometry(l: GraphLink) {
   return { d: `M${a.x},${a.y} Q${cx},${cy} ${b.x},${b.y}`, mx: (a.x + 2 * cx + b.x) / 4, my: (a.y + 2 * cy + b.y) / 4 };
 }
 
-type Scope = 'shared' | 'personal';
+type Scope = 'all' | 'shared' | 'personal';
 export function OntologyGraphView({ shared, personal = [], height = 560, time, companyName }: {
   shared: OntologyDraft[]; personal?: OntologyDraft[]; height?: number; time?: { at: string; known: string }; companyName?: string;
 }) {
   const t = useT(TEXT);
+  const unifiedGraph = useMemo(() => buildOntologyGraph([...shared, ...personal], companyName), [shared, personal, companyName]);
   const sharedGraph = useMemo(() => buildOntologyGraph(shared, companyName), [shared, companyName]);
   const personalGraph = useMemo(() => buildOntologyGraph(personal), [personal]);
-  const [scope, setScope] = useState<Scope>(() => (shared.length > 0 || personal.length === 0 ? 'shared' : 'personal'));
-  const userSelectedScope = useRef(false);
-  useEffect(() => {
-    if (userSelectedScope.current) return;
-    if (shared.length === 0 && personal.length > 0) setScope('personal');
-    else if (shared.length > 0 && personal.length === 0) setScope('shared');
-  }, [shared.length, personal.length]);
-  const graph = scope === 'shared' ? sharedGraph : personalGraph;
+  const [scope, setScope] = useState<Scope>('all');
+  const graph = scope === 'shared' ? sharedGraph : scope === 'personal' ? personalGraph : unifiedGraph;
   const [selected, setSelected] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const zoomRef = useRef<{ zoom: d3.ZoomBehavior<SVGSVGElement, unknown>; fit: () => void } | null>(null);
@@ -198,6 +202,7 @@ export function OntologyGraphView({ shared, personal = [], height = 560, time, c
   const edgeLabel = (label: string) => (label === DERIVED.sourced ? t('sourced') : label === DERIVED.uses ? t('uses') : label === DERIVED.assists ? t('assists') : label);
 
   useEffect(() => { setSelected(null); }, [scope]);
+  const showFilters = sharedGraph.nodes.length > 0 && personalGraph.nodes.length > 0;
 
   useEffect(() => {
     const svgEl = svgRef.current;
@@ -314,7 +319,7 @@ export function OntologyGraphView({ shared, personal = [], height = 560, time, c
   const nodeLinks = selNode ? graph.links.filter(l => nodeOf(l.source)?.id === selNode.id || nodeOf(l.target)?.id === selNode.id) : [];
   const zoomBy = (k: number) => { const z = zoomRef.current; if (svgRef.current && z) d3.select(svgRef.current).transition().duration(200).call(z.zoom.scaleBy, k); };
 
-  if (!sharedGraph.nodes.length && !personalGraph.nodes.length) {
+  if (!unifiedGraph.nodes.length) {
     return <section className="onto-empty" aria-label={t('canvas')}>
       <h3>{t('emptyTitle')}</h3>
       <p className="helper">{t('emptyBody')}</p>
@@ -329,11 +334,11 @@ export function OntologyGraphView({ shared, personal = [], height = 560, time, c
   const version = sources.map(e => e.version).find(Boolean);
   return <section className="onto" aria-label={t('canvas')}>
     <header className="onto-bar">
-      {sharedGraph.nodes.length && personalGraph.nodes.length ? <div className="onto-scope" role="tablist" aria-label={t('canvas')}>
-        {(['shared', 'personal'] as const).map(s => <button key={s} type="button" role="tab" aria-selected={scope === s} onClick={() => { userSelectedScope.current = true; setScope(s); }}>
-          {t(s)} <span>{(s === 'shared' ? sharedGraph : personalGraph).nodes.length}</span>
+      {showFilters ? <div className="onto-scope" role="tablist" aria-label={t('canvas')}>
+        {(['all', 'shared', 'personal'] as const).map(s => <button key={s} type="button" role="tab" aria-selected={scope === s} onClick={() => setScope(s)}>
+          {t(s)} <span>{(s === 'all' ? unifiedGraph : s === 'shared' ? sharedGraph : personalGraph).nodes.length}</span>
         </button>)}
-      </div> : <strong className="onto-scope-label">{t(scope)}</strong>}
+      </div> : <strong className="onto-scope-label">{t('all')}</strong>}
       <span className="onto-summary">{t('summary', { objects: graph.nodes.length, relations: graph.links.length })}</span>
       <div className="onto-tools">
         <button type="button" className="onto-icon" aria-label={t('zoomOut')} title={t('zoomOut')} onClick={() => zoomBy(1 / 1.3)}>−</button>

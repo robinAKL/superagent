@@ -75,16 +75,18 @@ describe('ontology graph view', () => {
     expect(html).not.toContain('<svg');
   });
 
-  it('keeps company and personal MCP drafts apart, with type labels and a keyboard relation table after select', () => {
+  it('draws one tenant graph from company and MCP drafts, with source filters', () => {
     const html = render('zh', drafts, [object('mcp', 'MCP 对象')]);
     expect(html).toContain('role="tablist"');
+    expect(html).toMatch(/全部来源 <span>8<\/span>/);
     expect(html).toMatch(/企业资料 <span>7<\/span>/);
     expect(html).toMatch(/我的 MCP 来源 <span>2<\/span>/);
-    expect(html).toContain('7 个实体 ·');
+    expect(html).toContain('8 个实体 ·');
+    expect(html).toContain('aria-selected="true"');
     expect(html).toContain('<svg');
     expect(html).toContain('数字员工');
     expect(html).toContain('来源文档');
-    expect(html.match(/<li><button type="button">/g)?.length).toBeGreaterThanOrEqual(7);
+    expect(html.match(/<li><button type="button">/g)?.length).toBeGreaterThanOrEqual(8);
   });
 
   it('shows identity, version and times in the entity list chrome', () => {
@@ -93,19 +95,29 @@ describe('ontology graph view', () => {
     expect(html).toContain('订单');
   });
 
-  it('shows the personal graph when only personal drafts exist, with the privacy note', () => {
+  it('shows the unified graph when only personal drafts exist', () => {
     const html = render('en', [], drafts);
     expect(html).not.toContain('role="tablist"');
-    expect(html).toContain('My MCP sources');
-    expect(html).toContain('Only you can see drafts from your MCP sources.');
+    expect(html).toContain('All sources');
+    expect(html).not.toContain('Only you can see drafts from your MCP sources.');
   });
 
-  it('defaults to personal graph when shared is empty even if companyName adds a synthetic company node', () => {
+  it('defaults to all sources so company and MCP entities share one canvas', () => {
     const html = render('en', [], drafts, 'VERA Shading');
     expect(html).toContain('role="tablist"');
-    expect(html).toMatch(/aria-selected="true"[^>]*>My MCP sources/);
-    expect(html).toContain('7 entities ·');
+    expect(html).toMatch(/aria-selected="true"[^>]*>All sources/);
+    expect(html).toContain('8 entities ·');
     expect(html).toContain('<svg');
+    expect(html).toContain('VERA Shading');
+  });
+
+  it('merges the same business entity from company and MCP sources and keeps cross-source relations', () => {
+    const company = [object('order', '采购订单'), relation('rx', 'order', 'mcp-item', '引用')];
+    const mcp = [object('order', '订单 MCP'), object('mcp-item', 'MCP 明细')];
+    const { nodes, links } = buildOntologyGraph([...company, ...mcp]);
+    expect(nodes.filter(n => n.key === 'order')).toHaveLength(1);
+    expect(nodes.find(n => n.key === 'order')!.draft.evidence.length).toBeGreaterThan(1);
+    expect(links.some(l => l.id === 'rx')).toBe(true);
   });
 
   it('has no Chinese interface text in English', () => {
