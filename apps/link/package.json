@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test detect-agents.test.mjs pair-store.test.mjs",
-    "typecheck": "node --check detect-agents.mjs pair-store.mjs pair-flow.mjs"
+    "start": "node start.mjs",
+    "test": "node --test detect-agents.test.mjs pair-store.test.mjs start.test.mjs",
+    "typecheck": "node --check detect-agents.mjs pair-store.mjs pair-flow.mjs start.mjs"
   }
 }

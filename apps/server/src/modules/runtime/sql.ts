@@ -32,6 +32,17 @@ export const CLAIM_TASK_KIND_SQL = CLAIM_TASK_SQL.replace(
   '    AND kind = ANY($5::text[])\n  ORDER BY created_at',
 );
 
+/**
+ * Kind-limited claim that also stays inside a worker's employee/project allow-lists.
+ * Null arrays mean unrestricted. projectId lives on payload (tasks has no project_id column).
+ */
+export const CLAIM_TASK_KIND_SCOPE_SQL = CLAIM_TASK_KIND_SQL.replace(
+  '  ORDER BY created_at',
+  `    AND ($6::text[] IS NULL OR employee_id::text = ANY($6::text[]))
+    AND ($7::text[] IS NULL OR coalesce(payload->>'projectId','') = ANY($7::text[]))
+  ORDER BY created_at`,
+);
+
 export const HEARTBEAT_TASK_SQL = `
 UPDATE tasks
 SET lease_until = now() + ($4::int * interval '1 millisecond')

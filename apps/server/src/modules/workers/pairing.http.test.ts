@@ -114,6 +114,19 @@ it('restricts a paired worker to chosen employees and projects', async () => {
   expect(claimed.json().task.payload.itemId).toBe('mine');
 });
 
+it('concurrent allow of the same code only succeeds once', async () => {
+  const a = await app();
+  const started = await start(a);
+  const [one, two] = await Promise.all([
+    a.inject({ method: 'POST', url: `/api/v1/workers/pair/${started.userCode}/allow` }),
+    a.inject({ method: 'POST', url: `/api/v1/workers/pair/${started.userCode}/allow`, headers: { 'x-test-user': `admin-2|admin|${OTHER}` } }),
+  ]);
+  const codes = [one.statusCode, two.statusCode].sort();
+  expect(codes).toEqual([200, 409]);
+  expect((await a.inject({ method: 'GET', url: '/api/v1/workers' })).json().workers).toHaveLength(1);
+  expect((await a.inject({ method: 'GET', url: '/api/v1/workers', headers: { 'x-test-user': `admin-2|admin|${OTHER}` } })).json().workers).toHaveLength(0);
+});
+
 it('the full app exposes pairing without a user session', async () => {
   const full = await buildApp();
   const startRes = await full.inject({ method: 'POST', url: '/api/v1/worker-link/pair/start', payload: { hostname: 'box' } });
