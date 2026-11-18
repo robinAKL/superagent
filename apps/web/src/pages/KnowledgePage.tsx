@@ -7,7 +7,7 @@ import { MaterialReview, type Material } from './MaterialReview';
 import { AnalysisDraftIndex } from './AnalysisDraftIndex';
 import type { McpConnection } from './McpKnowledge';
 import { OntologyGraphView } from '../components/OntologyGraphView';
-import { AnalysisResults, SopWorkspace, useDraftRead } from './SuperAgentPage';
+import { AnalysisResults, knowledgeWorkflowCandidates, SopWorkspace, useDraftRead } from './SuperAgentPage';
 import { AssertionFacts, DimensionChips, KnowledgeTimeline, RuleCard, TimeBar, dimensionsOf, objectNames, timeFromParams, visibleDraft, type Dimension, type KnowledgeTime } from './KnowledgeLenses';
 import { sopTabView, type LoadCount } from './knowledge-sop-tab';
 
@@ -653,7 +653,7 @@ function KnowledgeFlows({ t }: { t: Translate }) {
   }, [sopAttempt]);
   const candidates: LoadCount = knowledge.status !== 'ready'
     ? { status: knowledge.status }
-    : { status: 'ready', count: [...knowledge.drafts.recommendations, ...knowledge.drafts.mcpRecommendations].filter(draft => draft.kind === 'sop').length };
+    : { status: 'ready', count: knowledgeWorkflowCandidates(knowledge.drafts).length };
   const { sub, empty, waiting } = sopTabView(saved, candidates, route.sub);
   const candidateCount = candidates.status === 'ready' ? candidates.count : 0;
   return <div className="knowledge-flows">
