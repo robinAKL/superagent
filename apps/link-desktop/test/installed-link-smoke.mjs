@@ -103,11 +103,17 @@ try {
   const beforeTrayExit = heartbeatCount;
   process.kill(trayPid);
   await waitFor('the tray job to close its worker', () => processExited(workerPid));
-  await waitFor('a heartbeat after Task Scheduler restarts the tray', async () => {
+  await waitFor('a heartbeat after the supervisor restarts the tray', async () => {
     const pids = [...(await readLog()).matchAll(/Started tray process pid=(\d+)/g)].map((match) => Number(match[1]));
     return pids.some((pid) => pid !== trayPid) && heartbeatCount > beforeTrayExit;
-  }, 100_000);
-  console.log('Tray recovery verified: its worker exited and Task Scheduler restarted the tray.');
+  });
+  console.log('Tray recovery verified: its worker exited and the supervisor restarted the tray.');
+
+  const beforeUpgrade = heartbeatCount;
+  await run(path.resolve(installer), ['/S'], { timeout: 90_000 });
+  await waitFor('a heartbeat after silent upgrade', () => heartbeatCount > beforeUpgrade);
+  assert.ok(existsSync(tokenPath()));
+  console.log('Silent upgrade verified: the installed client restarted with its existing pairing.');
 
   revoke = true;
   await waitFor('token revocation', async () => !existsSync(tokenPath())

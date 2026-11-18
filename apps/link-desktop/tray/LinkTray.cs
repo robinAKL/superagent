@@ -615,6 +615,12 @@ namespace SuperAgentLinkTray
                 Console.WriteLine("{\"ok\":true,\"version\":\"" + TrayApp.AppVersion + "\"}");
                 return;
             }
+            if (args.Length == 0 || args[0] != "--tray")
+            {
+                SuperviseTray();
+                return;
+            }
+
             bool createdNew;
             using (var mutex = new Mutex(true, "Local\\SuperAgentLinkTray", out createdNew))
             {
@@ -622,6 +628,30 @@ namespace SuperAgentLinkTray
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new TrayApp());
+            }
+        }
+
+        private static void SuperviseTray()
+        {
+            bool createdNew;
+            using (var mutex = new Mutex(true, "Local\\SuperAgentLinkSupervisor", out createdNew))
+            {
+                if (!createdNew) return;
+
+                while (true)
+                {
+                    using (var tray = Process.Start(new ProcessStartInfo
+                    {
+                        FileName = Assembly.GetExecutingAssembly().Location,
+                        Arguments = "--tray",
+                        UseShellExecute = false
+                    }))
+                    {
+                        tray.WaitForExit();
+                        if (tray.ExitCode == 0) return;
+                    }
+                    Thread.Sleep(1000);
+                }
             }
         }
     }
