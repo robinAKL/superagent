@@ -354,3 +354,43 @@ test('compact filter toolbar filters and clears, and layout stays wider on list 
   await expect(page.getByLabel('搜索工作项')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
+
+for (const shotLang of ['zh', 'en'] as const) {
+  test.describe(`T-22 screenshots ${shotLang}`, () => {
+    test.use({ lang: shotLang });
+    test(`capture 1440 and 375 (${shotLang})`, async ({ page }) => {
+      test.skip(process.env.T22_SHOTS !== '1', 'Set T22_SHOTS=1 to capture deliverables/v12-compare-t22');
+      const staff = uid(`shot-${shotLang}`);
+      const first = await item(page, {
+        kind: 'data_check',
+        assigneeUserId: staff,
+        projectId: 'P-1',
+        payload: { title: shotLang === 'zh' ? '核对季度对账单' : 'Check quarterly statement', amount: 480, due: shotLang === 'zh' ? '今天 17:00' : 'Today 17:00' },
+      });
+      await item(page, {
+        kind: 'action_approval',
+        assigneeUserId: staff,
+        projectId: 'P-2',
+        payload: { title: shotLang === 'zh' ? '批准供应商付款' : 'Approve supplier payment', amount: 1200 },
+      });
+      await item(page, {
+        kind: 'manual_execution',
+        assigneeUserId: staff,
+        projectId: 'P-1',
+        waitingOn: shotLang === 'zh' ? '法务复核' : 'Legal review',
+        payload: { title: shotLang === 'zh' ? '等待法务回传' : 'Waiting on legal confirmation' },
+      });
+      await page.setExtraHTTPHeaders({ 'x-dev-user': `${staff}|employee|P-1,P-2` });
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/#work');
+      await page.reload();
+      await page.locator(`[data-item="${first}"]`).click();
+      await expect(page.getByRole('complementary')).toBeVisible();
+      const outDir = process.env.T22_SHOTS_DIR ?? '../../deliverables/v12-compare-t22';
+      const tag = process.env.T22_SHOTS_TAG ?? 'after';
+      await page.screenshot({ path: `${outDir}/t22-work-${tag}-1440-${shotLang}.png`, fullPage: true });
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.screenshot({ path: `${outDir}/t22-work-${tag}-375-${shotLang}.png`, fullPage: true });
+    });
+  });
+}
