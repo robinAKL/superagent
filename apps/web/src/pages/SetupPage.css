@@ -15,3 +15,9 @@
 .setup-success { color: var(--color-success); }
 .setup-error { color: var(--color-error); }
 @media (max-width: 42rem) { .setup-fields { grid-template-columns: minmax(0, 1fr); } }
+.setup-danger { border-color: rgba(239, 68, 68, 0.35); }
+.setup-danger-btn { border-color: rgba(239, 68, 68, 0.55); color: #fecaca; background: rgba(127, 29, 29, 0.35); }
+.setup-danger-btn:hover:not(:disabled) { background: rgba(153, 27, 27, 0.55); }
+.setup-modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.65); display: grid; place-items: center; padding: 1.5rem; z-index: 50; }
+.setup-modal { width: min(34rem, 100%); display: grid; gap: 0.9rem; }
+.setup-reset-counts { margin: 0; font-size: 0.92rem; line-height: 1.5; }
