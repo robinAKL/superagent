@@ -65,8 +65,8 @@ describe('ontology graph model', () => {
 });
 
 describe('ontology graph view', () => {
-  const render = (lang: 'en' | 'zh', shared: OntologyDraft[], personal: OntologyDraft[] = []) =>
-    renderToStaticMarkup(<LangProvider initial={lang}><OntologyGraphView shared={shared} personal={personal} time={{ at: '2026-11-08', known: '2026-11-08' }} /></LangProvider>);
+  const render = (lang: 'en' | 'zh', shared: OntologyDraft[], personal: OntologyDraft[] = [], companyName?: string) =>
+    renderToStaticMarkup(<LangProvider initial={lang}><OntologyGraphView shared={shared} personal={personal} companyName={companyName} time={{ at: '2026-11-08', known: '2026-11-08' }} /></LangProvider>);
 
   it('says honestly when analysis found no entities', () => {
     const html = render('zh', [], []);
@@ -98,6 +98,14 @@ describe('ontology graph view', () => {
     expect(html).not.toContain('role="tablist"');
     expect(html).toContain('My MCP sources');
     expect(html).toContain('Only you can see drafts from your MCP sources.');
+  });
+
+  it('defaults to personal graph when shared is empty even if companyName adds a synthetic company node', () => {
+    const html = render('en', [], drafts, 'VERA Shading');
+    expect(html).toContain('role="tablist"');
+    expect(html).toMatch(/aria-selected="true"[^>]*>My MCP sources/);
+    expect(html).toContain('7 entities ·');
+    expect(html).toContain('<svg');
   });
 
   it('has no Chinese interface text in English', () => {

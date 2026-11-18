@@ -544,3 +544,60 @@ test.describe('English Workflows / SOP empty and MCP-only panes', () => {
     await expect(page.getByLabel('选择流程')).toHaveCount(0);
   });
 });
+
+test.describe('T-24 ontology default scope with companyName and personal MCP drafts', () => {
+  const evidence = [{ sourceId: 'mcp-1', version: 'v1', start: 0, end: 8, locator: 'crm://leads', quote: '报价单由销售顾问跟进并关联客户档案。' }];
+  const mcpDrafts = [
+    { id: 'o1', key: 'customer', kind: 'object', name: '客户档案', description: '客户主数据', humanLocked: false, deleted: false, recordedAt: '2026-11-03T00:00:00.000Z', effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31', privateMcp: { sourceId: 'mcp-1', sourceName: 'CRM MCP' }, evidence },
+    { id: 'o2', key: 'quote', kind: 'object', name: '报价单', description: '销售报价单', humanLocked: false, deleted: false, recordedAt: '2026-11-03T00:00:00.000Z', effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31', privateMcp: { sourceId: 'mcp-1', sourceName: 'CRM MCP' }, evidence },
+    { id: 'r1', key: 'quote-customer', kind: 'relation', name: '报价关联客户', description: '报价单关联客户档案', humanLocked: false, deleted: false, recordedAt: '2026-11-03T00:00:00.000Z', effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31', privateMcp: { sourceId: 'mcp-1', sourceName: 'CRM MCP' }, relation: { from: 'quote', to: 'customer', label: '关联' }, evidence },
+  ];
+
+  async function seedAndOpen(page: import('@playwright/test').Page) {
+    const existing = await page.request.get('/api/v1/sop/company-context');
+    const version = ((await existing.json()) as { context?: { version?: number } }).context?.version ?? 0;
+    const saved = await page.request.put('/api/v1/sop/company-context', {
+      data: { name: 'VERA Shading', goal: '跟进客户报价', boundaries: '需保留报价记录', expectedVersion: version },
+    });
+    expect(saved.ok(), await saved.text()).toBeTruthy();
+    await page.route('**/api/v1/knowledge/overview**', async route => {
+      const response = await route.fetch();
+      const json = await response.json() as { recommendations?: unknown[]; mcpRecommendations?: unknown[]; analyses?: unknown[] };
+      json.recommendations = [];
+      json.mcpRecommendations = mcpDrafts;
+      json.analyses = [{ id: 'a1', status: 'completed', createdAt: '2026-11-03T00:00:00.000Z' }];
+      await route.fulfill({ json });
+    });
+    await page.goto('/#knowledge?view=graph&at=2026-09-15&known=2026-11-08');
+    await page.reload();
+  }
+
+  test('defaults to personal MCP tab in zh when shared has only synthetic company node', async ({ page }) => {
+    await seedAndOpen(page);
+    const ontology = page.locator('section.onto');
+    await expect(ontology).toBeVisible();
+    await expect(ontology.getByRole('tab', { name: /我的 MCP 来源/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(ontology.locator('.onto-node')).toHaveCount(3);
+    await expect(ontology.locator('.onto-link-line')).toHaveCount(3);
+    if (process.env.T24_SHOTS) {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.screenshot({ path: '../../deliverables/v12-compare-t24/t24-ontology-1440-zh.png', fullPage: true });
+    }
+  });
+
+  test.describe('en', () => {
+    test.use({ lang: 'en' });
+    test('defaults to personal MCP tab in en when shared has only synthetic company node', async ({ page }) => {
+      await seedAndOpen(page);
+      const ontology = page.locator('section.onto');
+      await expect(ontology).toBeVisible();
+      await expect(ontology.getByRole('tab', { name: /My MCP sources/ })).toHaveAttribute('aria-selected', 'true');
+      await expect(ontology.locator('.onto-node')).toHaveCount(3);
+      await expect(ontology.locator('.onto-link-line')).toHaveCount(3);
+      if (process.env.T24_SHOTS) {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.screenshot({ path: '../../deliverables/v12-compare-t24/t24-ontology-1440-en.png', fullPage: true });
+      }
+    });
+  });
+});
