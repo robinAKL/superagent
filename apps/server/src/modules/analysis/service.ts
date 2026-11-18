@@ -1,5 +1,5 @@
 import { SOP_NODE_KINDS, type SopNodeKind, type UserContext } from '@superagent/shared';
-import { evidenceValid, hash, id, KnowledgeError, mayRead, mergeRecommendations, positionedChunks, signature, type AnalysisRun, type Evidence, type KnowledgeState, type Recommendation, type RecommendedWorkflow } from '../knowledge/domain.js';
+import { evidenceValid, hash, id, KnowledgeError, mayRead, mergeRecommendations, positionedChunks, signature, type AnalysisRun, type Evidence, type KnowledgeState, type OntologyAttribute, type Recommendation, type RecommendedWorkflow } from '../knowledge/domain.js';
 import type { KnowledgeRepository } from '../knowledge/repository.js';
 import { matchesExcerpt, mcpEvidenceValid, mcpSelectionsCurrent } from '../knowledge/mcp-analysis.js';
 export interface AnalysisModel {
@@ -47,6 +47,25 @@ function recommendedWorkflow(input: unknown, evidenceCount: number): Recommended
   return workflow;
 }
 
+/** Keeps well-formed entity properties; a malformed property is dropped instead of failing the whole draft. */
+export function ontologyAttributes(value: unknown, evidenceCount: number): OntologyAttribute[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: OntologyAttribute[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || out.length >= 12) continue;
+    const a = entry as Record<string, unknown>;
+    const name = typeof a.name === 'string' ? a.name.trim() : '';
+    const raw = typeof a.value === 'number' || typeof a.value === 'boolean' ? String(a.value) : a.value;
+    const v = typeof raw === 'string' ? raw.trim() : '';
+    if (!name || !v || name.length > 80 || v.length > 300 || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    const citation = Number.isInteger(a.citation) && (a.citation as number) >= 1 && (a.citation as number) <= evidenceCount ? a.citation as number : undefined;
+    out.push({ name, value: v, ...(citation ? { citation } : {}) });
+  }
+  return out;
+}
+
 export function validateProposals(value: unknown): Omit<Recommendation, 'id' | 'humanLocked' | 'deleted'>[] {
   if (!Array.isArray(value) || value.length > 30) throw new KnowledgeError('invalid_model_output', '分析返回的草案结构无效。', 422);
   return value.map(v => {
@@ -63,7 +82,9 @@ export function validateProposals(value: unknown): Omit<Recommendation, 'id' | '
     const workflow = p.kind === 'sop' ? recommendedWorkflow(p.workflow, evidence.length) : undefined;
     const day = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
     const validity = { ...(day(p.effectiveFrom) ? { effectiveFrom: day(p.effectiveFrom) } : {}), ...(day(p.effectiveTo) ? { effectiveTo: day(p.effectiveTo) } : {}) };
-    return { workflow, key: p.key as string, name: p.name as string, description: p.description as string, kind: p.kind as Recommendation['kind'], evidence, ...assignment, ...validity, ...(p.ruleLike === true ? { ruleLike: true } : {}), ...(p.kind==='relation'?{relation:{from:relation!.from as string,to:relation!.to as string,label:relation!.label as string}}:{}) };
+    const attributes = p.kind === 'object' ? ontologyAttributes(p.attributes, evidence.length) : [];
+    const ruleLike = p.kind === 'object' && (p.ruleLike === true || p.rule === true);
+    return { workflow, key: p.key as string, name: p.name as string, description: p.description as string, kind: p.kind as Recommendation['kind'], evidence, ...assignment, ...validity, ...(attributes.length ? { attributes } : {}), ...(ruleLike ? { ruleLike: true } : {}), ...(p.kind==='relation'?{relation:{from:relation!.from as string,to:relation!.to as string,label:relation!.label as string}}:{}) };
   });
 }
 

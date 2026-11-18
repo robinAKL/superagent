@@ -790,8 +790,7 @@ export function OntologyView({ knowledge, retryKnowledge }: DraftViewProps) {
   if (knowledge.status !== 'ready') return <DraftLoadStatus knowledge={knowledge} retryKnowledge={retryKnowledge} />;
   const { recommendations, mcpRecommendations } = knowledge.drafts;
   return <OntologyGraphView
-    shared={recommendations.filter(item => item.evidence.length > 0)}
-    personal={mcpRecommendations.filter(item => item.evidence.length > 0)}
+    drafts={[...recommendations, ...mcpRecommendations.map(item => ({ ...item, privateMcp: true }))].filter(item => item.evidence.length > 0)}
   />;
 }
 
