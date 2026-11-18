@@ -41,13 +41,23 @@ await new Promise((resolve, reject) => {
   server.listen(0, '127.0.0.1', resolve);
 });
 
-async function waitFor(label, predicate) {
-  const stopAt = Date.now() + 40_000;
+async function waitFor(label, predicate, timeout = 40_000) {
+  const stopAt = Date.now() + timeout;
   while (Date.now() < stopAt) {
     if (await predicate()) return;
     await delay(250);
   }
   throw new Error('Timed out waiting for ' + label);
+}
+
+function processExited(pid) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    if (error.code === 'ESRCH') return true;
+    throw error;
+  }
 }
 
 async function readLog() {
@@ -86,6 +96,19 @@ try {
   await waitFor('a heartbeat after the Link worker exits', () => heartbeatCount >= 3);
   console.log('Heartbeat verified: 503 recovery and worker restart.');
 
+  const runningLog = await readLog();
+  const trayPid = Number(runningLog.match(/Started tray process pid=(\d+)/)?.[1]);
+  const workerPid = Number([...runningLog.matchAll(/Started link process pid=(\d+)/g)].at(-1)?.[1]);
+  assert.ok(trayPid > 0 && workerPid > 0 && workerPid !== firstChild);
+  const beforeTrayExit = heartbeatCount;
+  process.kill(trayPid);
+  await waitFor('the tray job to close its worker', () => processExited(workerPid));
+  await waitFor('a heartbeat after Task Scheduler restarts the tray', async () => {
+    const pids = [...(await readLog()).matchAll(/Started tray process pid=(\d+)/g)].map((match) => Number(match[1]));
+    return pids.some((pid) => pid !== trayPid) && heartbeatCount > beforeTrayExit;
+  }, 100_000);
+  console.log('Tray recovery verified: its worker exited and Task Scheduler restarted the tray.');
+
   revoke = true;
   await waitFor('token revocation', async () => !existsSync(tokenPath())
     && /Link process exited with code 2/.test(await readLog()));
@@ -93,6 +116,9 @@ try {
 
   await saveToken(mockToken);
   await writeFile(sentinel, 'keep existing user files');
+} catch (error) {
+  console.error(await readLog());
+  throw error;
 } finally {
   server.close();
   if (existsSync(uninstaller)) {

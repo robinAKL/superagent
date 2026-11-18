@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -12,6 +13,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using Microsoft.Win32.SafeHandles;
 
 [assembly: AssemblyTitle("SuperAgent Link")]
 
@@ -27,6 +29,58 @@ namespace SuperAgentLinkTray
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool DestroyIcon(IntPtr hIcon);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BasicJobLimits
+        {
+            public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass, SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct JobIoCounters
+        {
+            public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount;
+            public ulong ReadTransferCount, WriteTransferCount, OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ExtendedJobLimits
+        {
+            public BasicJobLimits BasicLimits;
+            public JobIoCounters IoCounters;
+            public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateJobObject(IntPtr attributes, string name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetInformationJobObject(SafeFileHandle job, int classId, ref ExtendedJobLimits limits, uint length);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool AssignProcessToJobObject(SafeFileHandle job, IntPtr process);
+
+        public static SafeFileHandle OwnProcessTree(Process process)
+        {
+            const int jobObjectExtendedLimitInformation = 9;
+            const uint jobObjectLimitKillOnJobClose = 0x00002000;
+            var job = CreateJobObject(IntPtr.Zero, null);
+            var limits = new ExtendedJobLimits { BasicLimits = new BasicJobLimits { LimitFlags = jobObjectLimitKillOnJobClose } };
+            if (job.IsInvalid
+                || !SetInformationJobObject(job, jobObjectExtendedLimitInformation, ref limits, (uint)Marshal.SizeOf(typeof(ExtendedJobLimits)))
+                || !AssignProcessToJobObject(job, process.Handle))
+            {
+                var error = new Win32Exception(Marshal.GetLastWin32Error());
+                job.Dispose();
+                throw error;
+            }
+            return job;
+        }
     }
 
     internal enum LinkStatus
@@ -59,6 +113,7 @@ namespace SuperAgentLinkTray
         private readonly System.Windows.Forms.Timer _restartTimer = new System.Windows.Forms.Timer();
 
         private Process _child;
+        private SafeFileHandle _childJob;
         private volatile bool _exiting;
         private bool _taskActive;
         private LinkStatus _status = LinkStatus.Unpaired;
@@ -75,6 +130,7 @@ namespace SuperAgentLinkTray
             var logDir = Path.Combine(_dataDir, "logs");
             Directory.CreateDirectory(logDir);
             _logPath = Path.Combine(logDir, "link.log");
+            using (var proc = Process.GetCurrentProcess()) Log("Started tray process pid=" + proc.Id);
 
             _nodeExe = Path.Combine(_installDir, "runtime", "node.exe");
             _linkEntry = Path.Combine(_installDir, "app", "link", "start.mjs");
@@ -322,6 +378,7 @@ namespace SuperAgentLinkTray
             try
             {
                 proc.Start();
+                _childJob = NativeMethods.OwnProcessTree(proc);
                 proc.BeginOutputReadLine();
                 proc.BeginErrorReadLine();
                 UpdateStatus(File.Exists(_tokenPath) ? LinkStatus.Reconnecting : LinkStatus.Unpaired);
@@ -395,6 +452,11 @@ namespace SuperAgentLinkTray
             if (_child == null) return;
             var child = _child;
             _child = null;
+            if (_childJob != null)
+            {
+                _childJob.Dispose();
+                _childJob = null;
+            }
             SetTaskSleepInhibition(false);
             try
             {
