@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -38,10 +38,13 @@ describe('link-desktop Windows installer & tray', () => {
 
   it('cleans up Scheduled Task, Run key, install dir, and link.token on uninstall in SuperAgentLink.nsi', () => {
     const nsi = readFileSync(path.join(linkDesktopDir, 'installer', 'SuperAgentLink.nsi'), 'utf8');
-    assert.match(nsi, /Register-ScheduledTask -TaskName ''SuperAgentLink''/);
+    const taskScript = readFileSync(path.join(linkDesktopDir, 'installer', 'Register-LogonTask.ps1'), 'utf8');
+    assert.match(nsi, /Register-LogonTask\.ps1/);
+    assert.match(taskScript, /Register-ScheduledTask -TaskName SuperAgentLink/);
     assert.match(nsi, /schtasks \/Delete \/TN "SuperAgentLink" \/F/);
-    assert.match(nsi, /DeleteRegValue HKCU "\$\{RUN_KEY\}" "SuperAgentLink"/);
-    assert.match(nsi, /RMDir \/r "\$INSTDIR"/);
+    assert.match(nsi.split('Section "Uninstall"')[1], /DeleteRegValue HKCU "\$\{RUN_KEY\}" "SuperAgentLink"/);
+    assert.match(nsi, /RMDir "\$INSTDIR"/);
+    assert.doesNotMatch(nsi, /RMDir \/r "\$INSTDIR"/);
     assert.match(nsi, /RMDir \/r "\$LOCALAPPDATA\\SuperAgentLink"/);
     assert.match(nsi, /Delete "\$APPDATA\\SuperAgent\\link\.token"/);
   });
@@ -55,6 +58,8 @@ describe('link-desktop Windows installer & tray', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'sa-link-tray-'));
     try {
       const exePath = path.join(dir, 'SuperAgentLink.exe');
+      const versionPath = path.join(dir, 'AssemblyVersion.cs');
+      writeFileSync(versionPath, '[assembly: System.Reflection.AssemblyVersion("9.3.7.0")]\n');
       execFileSync(csc, [
         '/nologo',
         '/target:winexe',
@@ -62,12 +67,13 @@ describe('link-desktop Windows installer & tray', () => {
         '/r:System.Windows.Forms.dll',
         '/r:System.Drawing.dll',
         path.join(linkDesktopDir, 'tray', 'LinkTray.cs'),
+        versionPath,
       ], { encoding: 'utf8' });
 
       const out = execFileSync(exePath, ['--self-check'], { encoding: 'utf8' });
       const parsed = JSON.parse(out.trim());
       assert.equal(parsed.ok, true);
-      assert.equal(parsed.version, '0.1.0');
+      assert.equal(parsed.version, '9.3.7');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
