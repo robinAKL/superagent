@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -12,10 +13,9 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using Microsoft.Win32.SafeHandles;
 
 [assembly: AssemblyTitle("SuperAgent Link")]
-[assembly: AssemblyVersion("0.1.0.0")]
-[assembly: AssemblyFileVersion("0.1.0.0")]
 
 namespace SuperAgentLinkTray
 {
@@ -29,6 +29,58 @@ namespace SuperAgentLinkTray
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool DestroyIcon(IntPtr hIcon);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BasicJobLimits
+        {
+            public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass, SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct JobIoCounters
+        {
+            public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount;
+            public ulong ReadTransferCount, WriteTransferCount, OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ExtendedJobLimits
+        {
+            public BasicJobLimits BasicLimits;
+            public JobIoCounters IoCounters;
+            public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateJobObject(IntPtr attributes, string name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetInformationJobObject(SafeFileHandle job, int classId, ref ExtendedJobLimits limits, uint length);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool AssignProcessToJobObject(SafeFileHandle job, IntPtr process);
+
+        public static SafeFileHandle OwnProcessTree(Process process)
+        {
+            const int jobObjectExtendedLimitInformation = 9;
+            const uint jobObjectLimitKillOnJobClose = 0x00002000;
+            var job = CreateJobObject(IntPtr.Zero, null);
+            var limits = new ExtendedJobLimits { BasicLimits = new BasicJobLimits { LimitFlags = jobObjectLimitKillOnJobClose } };
+            if (job.IsInvalid
+                || !SetInformationJobObject(job, jobObjectExtendedLimitInformation, ref limits, (uint)Marshal.SizeOf(typeof(ExtendedJobLimits)))
+                || !AssignProcessToJobObject(job, process.Handle))
+            {
+                var error = new Win32Exception(Marshal.GetLastWin32Error());
+                job.Dispose();
+                throw error;
+            }
+            return job;
+        }
     }
 
     internal enum LinkStatus
@@ -41,7 +93,7 @@ namespace SuperAgentLinkTray
 
     internal sealed class TrayApp : ApplicationContext
     {
-        private const string AppVersion = "0.1.0";
+        internal static readonly string AppVersion = Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
         private const string ReleasesApiUrl = "https://api.github.com/repos/robinAKL/superagent/releases/latest";
         private const string InstallerName = "SuperAgentLink-Setup-x64.exe";
 
@@ -55,13 +107,15 @@ namespace SuperAgentLinkTray
 
         private readonly NotifyIcon _tray;
         private readonly ToolStripMenuItem _statusItem;
-        private readonly object _procLock = new object();
+        private readonly object _logLock = new object();
+        private readonly WindowsFormsSynchronizationContext _uiContext = new WindowsFormsSynchronizationContext();
         private readonly System.Threading.Timer _updateTimer;
-        private readonly System.Threading.Timer _tokenPollTimer;
+        private readonly System.Windows.Forms.Timer _restartTimer = new System.Windows.Forms.Timer();
 
         private Process _child;
+        private SafeFileHandle _childJob;
         private volatile bool _exiting;
-        private volatile bool _taskActive;
+        private bool _taskActive;
         private LinkStatus _status = LinkStatus.Unpaired;
         private int _restartAttempt;
         private Icon _currentIcon;
@@ -76,6 +130,7 @@ namespace SuperAgentLinkTray
             var logDir = Path.Combine(_dataDir, "logs");
             Directory.CreateDirectory(logDir);
             _logPath = Path.Combine(logDir, "link.log");
+            using (var proc = Process.GetCurrentProcess()) Log("Started tray process pid=" + proc.Id);
 
             _nodeExe = Path.Combine(_installDir, "runtime", "node.exe");
             _linkEntry = Path.Combine(_installDir, "app", "link", "start.mjs");
@@ -109,11 +164,16 @@ namespace SuperAgentLinkTray
             _tray.DoubleClick += OnOpenRoom;
             UpdateStatus(LinkStatus.Unpaired);
 
+            _restartTimer.Tick += (s, e) =>
+            {
+                _restartTimer.Stop();
+                StartLinkProcess(pairMode: false);
+            };
+
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             AppDomain.CurrentDomain.ProcessExit += (s, e) => Cleanup();
 
             StartLinkProcess(pairMode: false);
-            _tokenPollTimer = new System.Threading.Timer(_ => PollTokenStateSafe(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2));
             _updateTimer = new System.Threading.Timer(_ => CheckForUpdatesSafe(), null, TimeSpan.FromSeconds(15), TimeSpan.FromHours(6));
         }
 
@@ -185,33 +245,11 @@ namespace SuperAgentLinkTray
             }
         }
 
-        private void PollTokenStateSafe()
-        {
-            if (_exiting || _status == LinkStatus.Revoked) return;
-            try
-            {
-                bool running;
-                lock (_procLock) { running = _child != null && !_child.HasExited; }
-                if (!running) return;
-                bool hasToken = File.Exists(_tokenPath);
-                if (hasToken && (_status == LinkStatus.Unpaired || _status == LinkStatus.Reconnecting))
-                {
-                    _restartAttempt = 0;
-                    UpdateStatus(LinkStatus.Connected);
-                }
-                else if (!hasToken && _status == LinkStatus.Connected)
-                {
-                    UpdateStatus(LinkStatus.Unpaired);
-                }
-            }
-            catch { }
-        }
-
         private void Log(string line)
         {
             try
             {
-                lock (_procLock)
+                lock (_logLock)
                 {
                     if (File.Exists(_logPath) && new FileInfo(_logPath).Length > 5 * 1024 * 1024)
                     {
@@ -250,22 +288,12 @@ namespace SuperAgentLinkTray
                     break;
             }
 
-            Action apply = () =>
-            {
-                _statusItem.Text = "状态: " + label;
-                _tray.Text = ("SuperAgent Link - " + label).Length > 63
-                    ? ("SuperAgent Link - " + label).Substring(0, 63)
-                    : "SuperAgent Link - " + label;
-                var prev = _currentIcon;
-                _currentIcon = BuildStatusIcon(color);
-                _tray.Icon = _currentIcon;
-                if (prev != null) prev.Dispose();
-            };
-
-            if (_tray.ContextMenuStrip != null && _tray.ContextMenuStrip.InvokeRequired)
-                _tray.ContextMenuStrip.BeginInvoke(apply);
-            else
-                apply();
+            _statusItem.Text = "状态: " + label;
+            _tray.Text = "SuperAgent Link - " + label;
+            var prev = _currentIcon;
+            _currentIcon = BuildStatusIcon(color);
+            _tray.Icon = _currentIcon;
+            if (prev != null) prev.Dispose();
         }
 
         private static Icon BuildStatusIcon(Color badgeColor)
@@ -306,6 +334,7 @@ namespace SuperAgentLinkTray
         private void StartLinkProcess(bool pairMode)
         {
             if (_exiting) return;
+            _restartTimer.Stop();
             if (!File.Exists(_nodeExe) || !File.Exists(_linkEntry))
             {
                 Log("Missing bundled runtime or link entrypoint: " + _nodeExe + " | " + _linkEntry);
@@ -320,43 +349,46 @@ namespace SuperAgentLinkTray
                 return;
             }
 
-            lock (_procLock)
+            StopChild();
+            var psi = new ProcessStartInfo
             {
-                StopChildLocked();
-                var args = "\"" + _linkEntry + "\"";
-                var psi = new ProcessStartInfo
-                {
-                    FileName = _nodeExe,
-                    Arguments = args,
-                    WorkingDirectory = _dataDir,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    RedirectStandardInput = true,
-                    StandardOutputEncoding = Encoding.UTF8,
-                    StandardErrorEncoding = Encoding.UTF8
-                };
-                psi.EnvironmentVariables["SUPERAGENT_ORIGIN"] = _serverUrl;
-                psi.EnvironmentVariables["SUPERAGENT_LINK_DATA_DIR"] = _dataDir;
+                FileName = _nodeExe,
+                Arguments = "\"" + _linkEntry + "\"",
+                WorkingDirectory = _dataDir,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
+            };
+            psi.EnvironmentVariables["SUPERAGENT_ORIGIN"] = _serverUrl;
+            psi.EnvironmentVariables["SUPERAGENT_LINK_DATA_DIR"] = _dataDir;
 
-                var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-                proc.OutputDataReceived += (s, e) => { if (e.Data != null) HandleLinkLine(e.Data); };
-                proc.ErrorDataReceived += (s, e) =>
-                {
-                    if (e.Data == null) return;
-                    Log("[stderr] " + e.Data);
-                    if (e.Data.IndexOf("revoked", StringComparison.OrdinalIgnoreCase) >= 0)
-                        UpdateStatus(LinkStatus.Revoked);
-                };
-                proc.Exited += (s, e) => OnChildExited(proc);
+            var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            proc.OutputDataReceived += (s, e) =>
+            {
+                if (e.Data != null)
+                    _uiContext.Post(_ => { if (_child == proc && !_exiting) HandleLinkLine(e.Data); }, null);
+            };
+            proc.ErrorDataReceived += (s, e) => { if (e.Data != null) Log("[stderr] " + e.Data); };
+            proc.Exited += (s, e) => _uiContext.Post(_ => OnChildExited(proc), null);
 
-                _child = proc;
+            _child = proc;
+            try
+            {
                 proc.Start();
+                _childJob = NativeMethods.OwnProcessTree(proc);
                 proc.BeginOutputReadLine();
                 proc.BeginErrorReadLine();
-                UpdateStatus(File.Exists(_tokenPath) ? LinkStatus.Connected : LinkStatus.Unpaired);
+                UpdateStatus(File.Exists(_tokenPath) ? LinkStatus.Reconnecting : LinkStatus.Unpaired);
                 Log("Started link process pid=" + proc.Id + " origin=" + _serverUrl + (pairMode ? " (re-pair)" : ""));
+            }
+            catch (Exception ex)
+            {
+                StopChild();
+                Log("Could not start Link: " + ex.Message);
+                ScheduleReconnect();
             }
         }
 
@@ -383,10 +415,9 @@ namespace SuperAgentLinkTray
 
         private void OnChildExited(Process exited)
         {
-            SetTaskSleepInhibition(false);
-            if (_exiting) return;
-            int code = -1;
-            try { code = exited.ExitCode; } catch { }
+            if (_exiting || _child != exited) return;
+            int code = exited.ExitCode;
+            StopChild();
             Log("Link process exited with code " + code);
             if (code == 2 || _status == LinkStatus.Revoked)
             {
@@ -394,48 +425,51 @@ namespace SuperAgentLinkTray
                 return;
             }
 
-            UpdateStatus(LinkStatus.Reconnecting);
+            ScheduleReconnect();
+        }
+
+        private void ScheduleReconnect()
+        {
+            UpdateStatus(File.Exists(_tokenPath) ? LinkStatus.Reconnecting : LinkStatus.Unpaired);
             _restartAttempt++;
-            int delayMs = Math.Min(30000, 1000 * (1 << Math.Min(5, _restartAttempt - 1)));
-            ThreadPool.QueueUserWorkItem(_ =>
-            {
-                Thread.Sleep(delayMs);
-                if (!_exiting && _status != LinkStatus.Revoked) StartLinkProcess(pairMode: false);
-            });
+            _restartTimer.Interval = Math.Min(30000, 1000 * (1 << Math.Min(5, _restartAttempt - 1)));
+            _restartTimer.Start();
         }
 
         private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
         {
-            if (e.Mode != PowerModes.Resume || _exiting) return;
-            Log("System resumed from sleep; triggering reconnect.");
-            UpdateStatus(LinkStatus.Reconnecting);
-            lock (_procLock)
+            if (e.Mode != PowerModes.Resume) return;
+            _uiContext.Post(_ =>
             {
-                if (_child != null && !_child.HasExited)
-                {
-                    try { _child.StandardInput.WriteLine("reconnect"); return; }
-                    catch { /* fallback to restart */ }
-                }
-            }
-            StartLinkProcess(pairMode: false);
+                if (_exiting || _status == LinkStatus.Revoked || _taskActive || !File.Exists(_tokenPath)) return;
+                Log("System resumed from sleep; triggering reconnect.");
+                StartLinkProcess(pairMode: false);
+            }, null);
         }
 
-        private void StopChildLocked()
+        private void StopChild()
         {
             if (_child == null) return;
+            var child = _child;
+            _child = null;
+            if (_childJob != null)
+            {
+                _childJob.Dispose();
+                _childJob = null;
+            }
+            SetTaskSleepInhibition(false);
             try
             {
-                if (!_child.HasExited)
+                if (!child.HasExited)
                 {
-                    _child.Kill();
-                    _child.WaitForExit(3000);
+                    child.Kill();
+                    child.WaitForExit(3000);
                 }
             }
             catch { }
             finally
             {
-                _child.Dispose();
-                _child = null;
+                child.Dispose();
             }
         }
 
@@ -468,14 +502,22 @@ namespace SuperAgentLinkTray
                         return;
                     }
 
-                    Log("Launching silent auto-update to " + remoteVer);
-                    Process.Start(new ProcessStartInfo
+                    _uiContext.Post(_ =>
                     {
-                        FileName = tempExe,
-                        Arguments = "/S /RESTART",
-                        UseShellExecute = true
-                    });
-                    OnExit(null, EventArgs.Empty);
+                        if (_exiting || _taskActive) return;
+                        try
+                        {
+                            Log("Launching silent auto-update to " + remoteVer);
+                            Process.Start(new ProcessStartInfo
+                            {
+                                FileName = tempExe,
+                                Arguments = "/S /D=" + _installDir.TrimEnd(Path.DirectorySeparatorChar),
+                                UseShellExecute = true
+                            });
+                            OnExit(null, EventArgs.Empty);
+                        }
+                        catch (Exception ex) { Log("Could not launch the update: " + ex.Message); }
+                    }, null);
                 }
             }
             catch (Exception ex)
@@ -549,11 +591,11 @@ namespace SuperAgentLinkTray
         {
             if (_exiting) return;
             _exiting = true;
+            _restartTimer.Dispose();
             SetTaskSleepInhibition(false);
-            try { if (_tokenPollTimer != null) _tokenPollTimer.Dispose(); } catch { }
             try { if (_updateTimer != null) _updateTimer.Dispose(); } catch { }
             try { SystemEvents.PowerModeChanged -= OnPowerModeChanged; } catch { }
-            lock (_procLock) { StopChildLocked(); }
+            StopChild();
             if (_tray != null)
             {
                 _tray.Visible = false;
@@ -570,9 +612,15 @@ namespace SuperAgentLinkTray
         {
             if (args != null && args.Length > 0 && args[0] == "--self-check")
             {
-                Console.WriteLine("{\"ok\":true,\"version\":\"0.1.0\"}");
+                Console.WriteLine("{\"ok\":true,\"version\":\"" + TrayApp.AppVersion + "\"}");
                 return;
             }
+            if (args.Length == 0 || args[0] != "--tray")
+            {
+                SuperviseTray();
+                return;
+            }
+
             bool createdNew;
             using (var mutex = new Mutex(true, "Local\\SuperAgentLinkTray", out createdNew))
             {
@@ -580,6 +628,30 @@ namespace SuperAgentLinkTray
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new TrayApp());
+            }
+        }
+
+        private static void SuperviseTray()
+        {
+            bool createdNew;
+            using (var mutex = new Mutex(true, "Local\\SuperAgentLinkSupervisor", out createdNew))
+            {
+                if (!createdNew) return;
+
+                while (true)
+                {
+                    using (var tray = Process.Start(new ProcessStartInfo
+                    {
+                        FileName = Assembly.GetExecutingAssembly().Location,
+                        Arguments = "--tray",
+                        UseShellExecute = false
+                    }))
+                    {
+                        tray.WaitForExit();
+                        if (tray.ExitCode == 0) return;
+                    }
+                    Thread.Sleep(1000);
+                }
             }
         }
     }

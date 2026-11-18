@@ -59,6 +59,26 @@ describe('Link start', () => {
     assert.equal(urls.some((u) => u.includes('/worker-link/poll')), false);
   });
 
+  it('reports a connection only after a healthy heartbeat and retries network failures', async () => {
+    const replies = [null, { ok: false, status: 503 }, { ok: true, status: 204 }, { ok: false, status: 401 }];
+    const states = [];
+    const delays = [];
+    await stayAlive(
+      'http://sa.test',
+      'saw_old',
+      async () => {
+        const reply = replies.shift();
+        if (!reply) throw new Error('Network unavailable');
+        return reply;
+      },
+      async (delay) => { delays.push(delay); },
+      async () => {},
+      (state) => states.push(state),
+    );
+    assert.deepEqual(states, ['reconnecting', 'connected', 'revoked']);
+    assert.deepEqual(delays, [2_000, 2_000, 15_000]);
+  });
+
   it('uses start on Windows to open the browser', () => {
     const calls = [];
     openBrowser('http://sa.test/#connect?code=AB', 'win32', (cmd, args) => {

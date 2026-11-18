@@ -1,4 +1,5 @@
 param(
+  [ValidatePattern('^\d+\.\d+\.\d+$')]
   [string]$Version = "0.1.0",
   [string]$NodeVersion = "v22.21.1"
 )
@@ -19,7 +20,13 @@ $Csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if (-not (Test-Path $Csc)) { throw "csc.exe not found at $Csc" }
 $TrayOut = Join-Path $StageDir "SuperAgentLink.exe"
 $TraySrc = Join-Path $Root "tray\LinkTray.cs"
-& $Csc /nologo /target:winexe /platform:x64 /optimize+ "/out:$TrayOut" /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll $TraySrc
+$VersionSrc = Join-Path $CacheDir "AssemblyVersion.cs"
+@"
+using System.Reflection;
+[assembly: AssemblyVersion("$Version.0")]
+[assembly: AssemblyFileVersion("$Version.0")]
+"@ | Set-Content -LiteralPath $VersionSrc -Encoding Ascii
+& $Csc /nologo /target:winexe /platform:x64 /optimize+ "/out:$TrayOut" /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll $TraySrc $VersionSrc
 if ($LASTEXITCODE -ne 0) { throw "csc.exe failed" }
 
 # 2. Bundle Node.js x64 runtime
@@ -35,12 +42,15 @@ if (-not (Test-Path (Join-Path $NodeExtract "node.exe"))) {
   Expand-Archive -Path $NodeZip -DestinationPath $CacheDir -Force
 }
 Copy-Item -Path (Join-Path $NodeExtract "node.exe") -Destination (Join-Path $RuntimeDir "node.exe") -Force
+Copy-Item -LiteralPath (Join-Path $NodeExtract "LICENSE") -Destination $RuntimeDir -Force
 
-# 3. Copy apps/link payload (populated once T-29 / T-30 land)
+# 3. Copy apps/link payload
 $RepoLinkDir = Join-Path $RepoRoot "apps\link"
-if (Test-Path $RepoLinkDir) {
-  Copy-Item -Path (Join-Path $RepoLinkDir "*") -Destination $AppLinkDir -Recurse -Force
+if (-not (Test-Path -LiteralPath (Join-Path $RepoLinkDir "start.mjs") -PathType Leaf)) {
+  throw "Missing apps/link/start.mjs; the installer would not have a Link client."
 }
+Copy-Item -Path (Join-Path $RepoLinkDir "*") -Destination $AppLinkDir -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $Root "installer\Register-LogonTask.ps1") -Destination $StageDir -Force
 
 # 4. Build NSIS installer
 $MakensisCmd = Get-Command makensis -ErrorAction SilentlyContinue

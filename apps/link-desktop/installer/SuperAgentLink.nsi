@@ -23,7 +23,8 @@ Unicode True
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_RUN "$INSTDIR\SuperAgentLink.exe"
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchLink
 !define MUI_FINISHPAGE_RUN_TEXT "Launch SuperAgent Link now"
 !insertmacro MUI_PAGE_FINISH
 
@@ -32,10 +33,18 @@ Unicode True
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
 
+Function LaunchLink
+  nsExec::ExecToLog 'schtasks /Run /TN "SuperAgentLink"'
+  Pop $0
+  StrCmp $0 "0" launch_done
+  Exec '"$INSTDIR\SuperAgentLink.exe"'
+launch_done:
+FunctionEnd
+
 Section "Main" SecMain
   SetOutPath "$INSTDIR"
-  ; Stop existing processes cleanly before overwriting binaries (important for /S auto-update)
-  nsExec::ExecToLog 'taskkill /F /IM SuperAgentLink.exe /T'
+  ; The tray's Windows job closes the worker tree. Leave any running updater alone.
+  nsExec::ExecToLog 'taskkill /F /IM SuperAgentLink.exe'
 
   File /r "${STAGE_DIR}\*.*"
 
@@ -49,25 +58,33 @@ Section "Main" SecMain
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
 
-  ; Interactive logon auto-start + crash restart via Scheduled Task (preferred over Windows Service so tray, sleep-inhibition, browser pairing, and user CLI tools work in the interactive desktop session)
-  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Unregister-ScheduledTask -TaskName ''SuperAgentLink'' -Confirm:`$false -ErrorAction SilentlyContinue; `$a = New-ScheduledTaskAction -Execute ''$INSTDIR\SuperAgentLink.exe''; `$t = New-ScheduledTaskTrigger -AtLogOn -User `$env:USERNAME; `$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew; Register-ScheduledTask -TaskName ''SuperAgentLink'' -Action `$a -Trigger `$t -Settings `$s -Force | Out-Null"'
-
-  ; Fallback HKCU Run key
+  ; Logon task starts the supervisor in the user's desktop session.
+  DeleteRegValue HKCU "${RUN_KEY}" "SuperAgentLink"
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\Register-LogonTask.ps1" -TrayPath "$INSTDIR\SuperAgentLink.exe"'
+  Pop $0
+  StrCmp $0 "0" task_registered
   WriteRegStr HKCU "${RUN_KEY}" "SuperAgentLink" '"$INSTDIR\SuperAgentLink.exe"'
+task_registered:
 
-  ; Start immediately after silent upgrade or /RESTART
+  ; Start immediately after a silent install or upgrade.
   IfSilent 0 +2
-    Exec '"$INSTDIR\SuperAgentLink.exe"'
+    Call LaunchLink
 SectionEnd
 
 Section "Uninstall"
-  nsExec::ExecToLog 'taskkill /F /IM SuperAgentLink.exe /T'
+  nsExec::ExecToLog 'taskkill /F /IM SuperAgentLink.exe'
   nsExec::ExecToLog 'schtasks /Delete /TN "SuperAgentLink" /F'
   DeleteRegValue HKCU "${RUN_KEY}" "SuperAgentLink"
   DeleteRegKey HKCU "${UNINST_KEY}"
 
   ; Clean install directory and user token/config/logs
-  RMDir /r "$INSTDIR"
+  Delete "$INSTDIR\SuperAgentLink.exe"
+  Delete "$INSTDIR\Register-LogonTask.ps1"
+  Delete "$INSTDIR\Uninstall.exe"
+  RMDir /r "$INSTDIR\app\link"
+  RMDir "$INSTDIR\app"
+  RMDir /r "$INSTDIR\runtime"
+  RMDir "$INSTDIR"
   RMDir /r "$LOCALAPPDATA\SuperAgentLink"
   Delete "$APPDATA\SuperAgent\link.token"
   RMDir "$APPDATA\SuperAgent"
