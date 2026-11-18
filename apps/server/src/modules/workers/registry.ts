@@ -26,6 +26,10 @@ export interface WorkerCapabilities {
   kinds?: string[];
   /** Agent CLIs the device can start, e.g. ["claude-code", "codex"]. Reported, not trusted for authorisation. */
   agents?: string[];
+  /** Empty or absent: every digital employee on the tenant may run here. */
+  allowEmployees?: string[];
+  /** Empty or absent: every project on the tenant may run here. */
+  allowProjects?: string[];
 }
 
 export interface WorkerRecord {
@@ -97,6 +101,7 @@ export interface WorkerRegistry {
   list(tenantId: string): Promise<WorkerRecord[]>;
   heartbeat(id: string, at: number, input: HeartbeatInput): Promise<boolean>;
   revoke(tenantId: string, id: string, at: number): Promise<boolean>;
+  patchCapabilities(tenantId: string, id: string, capabilities: WorkerCapabilities): Promise<WorkerRecord | null>;
   appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number): Promise<WorkerEvent | null>;
   /** Oldest first, at most `limit`, strictly after `since`. */
   eventsAfter(workerId: string, since: number, limit: number): Promise<WorkerEvent[]>;
@@ -142,9 +147,26 @@ export function cleanCapabilities(value: unknown): WorkerCapabilities {
   const out: WorkerCapabilities = {};
   const kinds = cleanList(raw.kinds);
   const agents = cleanList(raw.agents);
+  const allowEmployees = cleanList(raw.allowEmployees);
+  const allowProjects = cleanList(raw.allowProjects);
   if (kinds) out.kinds = kinds;
   if (agents) out.agents = agents;
+  if (allowEmployees) out.allowEmployees = allowEmployees;
+  if (allowProjects) out.allowProjects = allowProjects;
   return out;
+}
+
+export function mergeCapabilities(current: WorkerCapabilities, patch: WorkerCapabilities): WorkerCapabilities {
+  return cleanCapabilities({ ...current, ...patch });
+}
+
+/** Default: the worker may run any employee/project. A non-empty allow-list is exclusive. */
+export function workerMayRun(worker: WorkerRecord, task: { employeeId?: string | null; projectId?: string | null }): boolean {
+  const employees = worker.capabilities.allowEmployees;
+  if (employees?.length && (!task.employeeId || !employees.includes(task.employeeId))) return false;
+  const projects = worker.capabilities.allowProjects;
+  if (projects?.length && (!task.projectId || !projects.includes(task.projectId))) return false;
+  return true;
 }
 
 /** Creates the record and returns the plaintext token once. Only its hash is stored. */
@@ -229,5 +251,12 @@ export class MemoryWorkerRegistry implements WorkerRegistry {
     if (!row || row.tenantId !== tenantId || row.revokedAt !== null) return false;
     row.revokedAt = at;
     return true;
+  }
+
+  async patchCapabilities(tenantId: string, id: string, capabilities: WorkerCapabilities): Promise<WorkerRecord | null> {
+    const row = this.rows.get(id);
+    if (!row || row.tenantId !== tenantId || row.revokedAt !== null) return null;
+    row.capabilities = mergeCapabilities(row.capabilities, capabilities);
+    return { ...row };
   }
 }

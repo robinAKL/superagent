@@ -1,0 +1,10 @@
+{
+  "name": "@superagent/link",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test detect-agents.test.mjs pair-store.test.mjs",
+    "typecheck": "node --check detect-agents.mjs pair-store.mjs pair-flow.mjs"
+  }
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useT, type Dict, type Vars } from '../i18n';
+import { WorkerConnectPanel } from './WorkerConnectPanel';
 import './SetupPage.css';
 
 interface LlmStatus {
@@ -333,6 +334,7 @@ export function SetupPage() {
       <article><h3>{t('archControl')}</h3><p>{t('archControlBody')}</p></article>
       <article><h3>{t('archWorker')}</h3><p>{t('archWorkerBody')}</p></article>
     </section> : <>
+    {isAdmin ? <WorkerConnectPanel /> : null}
     <section className="panel setup-card" aria-labelledby="setup-connection">
       <header className="setup-card-head">
         <h2 id="setup-connection" className="h2">{t('connection')}</h2>
