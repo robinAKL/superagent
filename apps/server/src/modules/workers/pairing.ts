@@ -64,11 +64,10 @@ export class MemoryPairStore implements PairStore {
   }
 
   async consumeToken(deviceCode: string): Promise<string | null> {
-    const session = await this.byDeviceCode(deviceCode);
+    const session = this.byDevice.get(deviceCode);
     if (!session?.issuedToken) return null;
     const token = session.issuedToken;
     session.issuedToken = null;
-    await this.save(session);
     return token;
   }
 }

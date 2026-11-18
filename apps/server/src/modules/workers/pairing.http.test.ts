@@ -135,6 +135,19 @@ it('heartbeat does not claim work; one poll plus succeed reports the task', asyn
   expect((await a.inject({ method: 'POST', url: '/api/v1/worker-link/poll', headers: { authorization: `Bearer ${token}` }, payload: { waitMs: 0 } })).json().task).toBeNull();
 });
 
+it('concurrent polls of an allowed code receive the token only once', async () => {
+  const a = await app();
+  const started = await start(a);
+  await a.inject({ method: 'POST', url: `/api/v1/workers/pair/${started.userCode}/allow` });
+  const [one, two] = await Promise.all([
+    a.inject({ method: 'POST', url: '/api/v1/worker-link/pair/poll', payload: { deviceCode: started.deviceCode } }),
+    a.inject({ method: 'POST', url: '/api/v1/worker-link/pair/poll', payload: { deviceCode: started.deviceCode } }),
+  ]);
+  const tokens = [one.json().token, two.json().token].filter(Boolean);
+  expect(tokens).toHaveLength(1);
+  expect(tokens[0]).toMatch(/^saw_/);
+});
+
 it('concurrent allow of the same code only succeeds once', async () => {
   const a = await app();
   const started = await start(a);

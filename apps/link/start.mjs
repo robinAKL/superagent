@@ -1,8 +1,7 @@
 /**
  * SuperAgent Link entry: pair in the browser if needed, then stay reachable.
  * Presence uses /heartbeat so this process cannot claim work it will not run.
- * A one-shot poll+succeed is exported for the dispatch round-trip test; the
- * real agent runtime (T-29) should own /poll.
+ * Real /poll dispatch belongs to the Link runtime (T-29).
  */
 import { spawn } from 'node:child_process';
 import { loadToken, clearToken } from './pair-store.mjs';
@@ -42,24 +41,6 @@ export async function stayAlive(origin, token, fetchImpl = fetch, sleep = (ms) =
     }
     await sleep(res.ok ? 15_000 : 2_000);
   }
-}
-
-/** Claim at most one task and report it done. Does not loop. */
-export async function completeOneTask(origin, token, fetchImpl = fetch) {
-  const polled = await fetchImpl(originUrl(origin, '/api/v1/worker-link/poll'), {
-    method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ waitMs: 0, since: 0 }),
-  });
-  if (polled.status === 401) return { status: 'revoked' };
-  const body = await polled.json();
-  if (!body.task) return { status: 'idle' };
-  const done = await fetchImpl(originUrl(origin, `/api/v1/worker-link/tasks/${body.task.id}/succeed`), {
-    method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ attempt: body.task.attempt }),
-  });
-  return { status: done.ok ? 'reported' : 'failed', taskId: body.task.id, attempt: body.task.attempt };
 }
 
 const origin = process.env.SUPERAGENT_ORIGIN;
