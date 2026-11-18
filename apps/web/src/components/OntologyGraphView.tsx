@@ -1,325 +1,419 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { useT } from '../i18n';
+import { groupEvidence, readableQuote, sourceGroupKey, sourceLabel } from './evidence';
 import './OntologyGraphView.css';
 
 /**
- * Ontology = concrete entities analysis found (objects, rules, processes, employees, tools, source documents)
- * and the directed relations between them. Edges come from analysed object relations, employee tool/SOP
- * assignments, and evidence locators — never invented. Company files and MCP drafts share one tenant graph.
+ * One tenant ontology: every analysed draft — from company files or the user's own MCP sources — is knowledge
+ * in the same graph. Entities carry a type, source-backed attributes and directed relations. Where a fact came
+ * from is a citation on the entity, not a node of its own (unless the reader turns the source layer on).
  */
 export interface OntologyEvidence { locator: string; quote: string; sourceId?: string; version?: string; retrievedAt?: string }
+export interface OntologyAttribute { name: string; value: string; citation?: number }
 export interface OntologyDraft {
   id: string; key: string; kind: string; name: string; description: string;
   evidence: OntologyEvidence[]; relation?: { from: string; to: string; label: string };
   assignment?: { tools: string[]; sops: string[] };
+  attributes?: OntologyAttribute[]; ruleLike?: boolean; humanLocked?: boolean;
+  /** Drafts from the viewer's own MCP connections: shown in the same graph, marked as visible only to them. */
+  privateMcp?: boolean;
   recordedAt?: string; effectiveFrom?: string; effectiveTo?: string;
 }
-export type NodeType = 'company' | 'process' | 'rule' | 'source' | 'employee' | 'tool' | 'object';
+export type NodeType = 'tool' | 'employee' | 'process' | 'object' | 'rule' | 'source';
+export const LANES: NodeType[] = ['tool', 'employee', 'process', 'object', 'rule', 'source'];
 export interface GraphNode extends d3.SimulationNodeDatum {
-  id: string; key: string; name: string; label: string; type: NodeType; typeLabel: string; width: number; degree: number; draft: OntologyDraft;
+  id: string; key: string; name: string; type: NodeType; degree: number; draft: OntologyDraft; lines: string[];
 }
-export interface GraphLink extends d3.SimulationLinkDatum<GraphNode> { id: string; label: string; source: string | GraphNode; target: string | GraphNode; lane: number; lanes: number; draft: OntologyDraft }
+export interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
+  id: string; label: string; source: string | GraphNode; target: string | GraphNode; lane: number; lanes: number; draft: OntologyDraft; derived: boolean;
+}
 
 const TEXT = {
   en: {
-    all: 'All sources', shared: 'Company sources', personal: 'My MCP sources', summary: '{objects} entities · {relations} relationships',
+    title: 'Ontology', titleOf: '{company} ontology', summary: '{objects} entities · {relations} relationships',
     emptyTitle: 'No entities yet',
-    emptyBody: 'Confirm materials in Company knowledge and run an analysis. Objects, roles, tools, processes and source documents it finds are drawn here with their sources.',
+    emptyBody: 'Confirm materials in Company knowledge and run an analysis. Objects, rules, roles, tools and processes it finds are drawn here with their attributes and sources.',
     openAnalysis: 'Open knowledge analysis',
-    zoomIn: 'Zoom in', zoomOut: 'Zoom out', fit: 'Fit to view', canvas: 'Ontology graph',
-    hint: 'Drag to move · select an entity to see identity, time and sources',
-    objects: 'Entities', object: 'Business object', relation: 'Relationship', relations: 'Relationships ({n})',
-    noRelations: 'No relationship found for this entity yet.', sources: 'Sources ({n})', noSources: 'No locatable source.',
-    personalNote: 'Only you can see drafts from your MCP sources.', back: 'All entities', isolated: 'not linked',
-    type_company: 'Enterprise', type_process: 'Business process', type_rule: 'Rule', type_source: 'Source document',
-    type_employee: 'Digital employee', type_tool: 'Tool', type_object: 'Business object',
-    sourced: 'sourced from', uses: 'uses tool', assists: 'assists process',
-    stableId: 'Stable entity ID', version: 'Source version', businessTime: 'Business date', recordedTime: 'Recorded',
-    knownTime: 'Known to the platform by', notStated: 'not stated in the source',
-    relTable: 'Related relationships', from: 'From', edge: 'Relationship', to: 'To',
+    zoomIn: 'Zoom in', zoomOut: 'Zoom out', fit: 'Fit', canvas: 'Ontology graph', search: 'Find an entity',
+    showSources: 'Source layer', typeFilter: 'Entity types',
+    hint: 'Hover to trace · click for details · Ctrl + scroll to zoom',
+    entities: 'Entities', relation: 'Relationship',
+    attributes: 'Attributes', noAttributes: 'No attribute extracted yet. Re-run the analysis to extract properties such as amounts, limits and owners.',
+    relations: 'Relationships', noRelations: 'Not linked to another entity yet.',
+    sources: 'Sources', noSources: 'No locatable source.', citations: '{n} passages',
+    back: 'All entities', more: 'Show more', less: 'Show less',
+    type_process: 'Process', type_rule: 'Rule', type_source: 'Source', type_employee: 'Digital employee', type_tool: 'Tool', type_object: 'Business object',
+    sourced: 'sourced from', uses: 'uses', assists: 'takes part in',
+    pending: 'Pending review', confirmed: 'Confirmed', private: 'Only you', privateNote: 'From your own MCP connection — only you can see it until it is shared.',
+    time: 'Time', effective: 'In effect {range}', effectiveUnknown: 'Effective date not stated', recorded: 'recorded {date}', known: 'Known by {date}',
+    technical: 'Technical details', stableId: 'Stable ID', version: 'Source version', notStated: 'not stated',
+    cite: 'Source {n}',
   },
   zh: {
-    all: '全部来源', shared: '企业资料', personal: '我的 MCP 来源', summary: '{objects} 个实体 · {relations} 条关系',
+    title: '本体', titleOf: '{company} 的本体', summary: '{objects} 个实体 · {relations} 条关系',
     emptyTitle: '还没有实体',
-    emptyBody: '先在企业知识里确认资料并运行分析。分析找到的对象、岗位、工具、流程和来源文档会画在这里，并附上原文依据。',
+    emptyBody: '先在企业知识里确认资料并运行分析。分析找到的对象、规则、岗位、工具和流程会画在这里，并附上属性与原文依据。',
     openAnalysis: '打开知识分析',
-    zoomIn: '放大', zoomOut: '缩小', fit: '适配窗口', canvas: '本体关系图',
-    hint: '拖动节点调整位置 · 选中实体查看标识、时间与依据',
-    objects: '实体', object: '业务对象', relation: '关系', relations: '关系（{n}）',
-    noRelations: '这个实体还没有找到关系。', sources: '依据（{n}）', noSources: '没有可定位的依据。',
-    personalNote: '个人 MCP 来源的草案只有你能看到。', back: '全部实体', isolated: '未关联',
-    type_company: '企业', type_process: '业务流程', type_rule: '规则', type_source: '来源文档',
-    type_employee: '数字员工', type_tool: '工具', type_object: '业务对象',
-    sourced: '来源于', uses: '使用工具', assists: '协助执行',
-    stableId: '稳定实体 ID', version: '来源版本', businessTime: '业务时间', recordedTime: '记录时间',
-    knownTime: '知识截至', notStated: '资料未写明',
-    relTable: '与它有关的关系', from: '起点', edge: '关系', to: '终点',
+    zoomIn: '放大', zoomOut: '缩小', fit: '适配', canvas: '本体关系图', search: '查找实体',
+    showSources: '来源图层', typeFilter: '实体类型',
+    hint: '悬停追踪关系 · 点击查看详情 · Ctrl + 滚轮缩放',
+    entities: '实体', relation: '关系',
+    attributes: '属性', noAttributes: '还没有抽取到属性。重新运行分析即可抽取金额、比例、上限、负责人等属性。',
+    relations: '关系', noRelations: '还没有和其他实体建立关系。',
+    sources: '依据', noSources: '没有可定位的依据。', citations: '{n} 处',
+    back: '全部实体', more: '展开', less: '收起',
+    type_process: '流程', type_rule: '规则', type_source: '来源', type_employee: '数字员工', type_tool: '工具', type_object: '业务对象',
+    sourced: '来源于', uses: '使用', assists: '参与',
+    pending: '待审核', confirmed: '已确认', private: '仅自己', privateNote: '来自你个人的 MCP 连接，共享前只有你能看到。',
+    time: '时间', effective: '生效 {range}', effectiveUnknown: '资料未写明生效时间', recorded: '记录于 {date}', known: '知识截至 {date}',
+    technical: '技术信息', stableId: '稳定 ID', version: '来源版本', notStated: '未写明',
+    cite: '依据 {n}',
   },
 };
+type TextKey = keyof typeof TEXT.en;
 
-const NODE_KINDS = new Set(['object', 'employee', 'tool', 'sop', 'source', 'company']);
+const ENTITY_KINDS = new Set(['object', 'employee', 'tool', 'sop']);
 const DERIVED = { sourced: '__sourced', uses: '__uses', assists: '__assists' } as const;
-const RULE = /必须|须|需要|需经|应当|不得|禁止|不超过|超过|以上|以下|上限|下限|阈值|审批|批准|must|shall|required?|requires|not allowed|threshold|approv|limit|exceed/i;
+/** Fallback for drafts analysed before the model returned a rule flag: only the name decides. */
+const RULE_NAME = /规则|政策|制度|要求|阈值|上限|下限|审批|必须|不得|禁止|policy|rule|requirement|threshold|limit|approval|must/i;
 
-const charWidth = (ch: string) => (/[⺀-￿]/.test(ch) ? 16 : 8.8);
-function fitLabel(name: string, max = 196): { label: string; width: number } {
-  let width = 0, label = '';
-  for (const ch of name) {
-    if (width + charWidth(ch) > max) return { label: `${label}…`, width: width + 12 + 50 };
-    width += charWidth(ch); label += ch;
-  }
-  return { label, width: Math.max(width + 50, 96) };
-}
-
-export function nodeTypeOf(draft: OntologyDraft): NodeType {
+export function nodeTypeOf(draft: Pick<OntologyDraft, 'kind' | 'name' | 'ruleLike'>): NodeType {
   if (draft.kind === 'employee') return 'employee';
   if (draft.kind === 'tool') return 'tool';
   if (draft.kind === 'sop') return 'process';
   if (draft.kind === 'source') return 'source';
-  if (draft.kind === 'company') return 'company';
-  if (RULE.test(`${draft.name} ${draft.description}`)) return 'rule';
+  if (draft.ruleLike || RULE_NAME.test(draft.name)) return 'rule';
   return 'object';
 }
 
-function sourceKey(e: OntologyEvidence) {
-  return `src:${e.sourceId || e.locator}:${e.version || ''}`;
+const charWidth = (ch: string) => (/[⺀-￿]/.test(ch) ? 13 : 7);
+/** Breaks a name into at most two lines under the node; the full name stays in the tooltip and panel. */
+export function wrapLabel(name: string, max = 148): string[] {
+  const lines: string[] = [];
+  let line = '', width = 0;
+  for (const ch of name) {
+    const w = charWidth(ch);
+    if (width + w > max) {
+      if (lines.length === 1) return [lines[0]!, `${line.trimEnd()}…`];
+      // Break at the last space, slash, dash, underscore or bracket so identifiers like mark_orders_in_transit stay readable.
+      if (/[/—_-]/.test(ch) && lines.length === 0) { lines.push(`${line}${ch}`); line = ''; width = 0; continue; }
+      const cut = /[\s(]/.test(ch) ? -1 : line.search(/[\s/—_(-][^\s/—_(-]*$/);
+      if (cut > 4) {
+        const sep = line[cut]!;
+        const end = /\s/.test(sep) || sep === '(' ? cut : cut + 1;
+        lines.push(line.slice(0, end).trimEnd()); line = line.slice(/\s/.test(sep) ? cut + 1 : end);
+        width = [...line].reduce((s, c) => s + charWidth(c), 0);
+      }
+      else { lines.push(line.trimEnd()); line = ''; width = 0; }
+      if (/\s/.test(ch) && !line) continue;
+    }
+    line += ch; width += w;
+  }
+  if (line.trim()) lines.push(line.trim());
+  return lines.slice(0, 2);
 }
 
-/** Adds source-document nodes and employee→tool / employee→process edges from real assignment + evidence. */
-export function enrichOntologyDrafts(drafts: OntologyDraft[], companyName?: string): OntologyDraft[] {
-  const extra: OntologyDraft[] = [];
-  const name = companyName?.trim();
-  if (name) {
-    extra.push({ id: 'sys:company', key: 'sys:company', kind: 'company', name, description: '', evidence: [] });
-  }
-  const sources = new Map<string, OntologyDraft>();
-  const keys = new Set(drafts.filter(d => NODE_KINDS.has(d.kind) || d.kind === 'object').map(d => d.key));
-  for (const draft of drafts) {
-    if (!NODE_KINDS.has(draft.kind) && draft.kind !== 'relation') continue;
-    for (const e of draft.evidence) {
-      const key = sourceKey(e);
-      if (!sources.has(key)) {
-        sources.set(key, { id: key, key, kind: 'source', name: e.locator, description: '', evidence: [e] });
-      }
-      extra.push({
-        id: `from:${draft.id}:${key}`, key: `from:${draft.key}:${key}`, kind: 'relation', name: DERIVED.sourced,
-        description: '', evidence: [e], relation: { from: draft.key, to: key, label: DERIVED.sourced },
-      });
-    }
-    if (draft.kind === 'employee' && draft.assignment) {
-      for (const tool of draft.assignment.tools) {
-        if (!keys.has(tool)) continue;
-        extra.push({
-          id: `use:${draft.key}:${tool}`, key: `use:${draft.key}:${tool}`, kind: 'relation', name: DERIVED.uses,
-          description: '', evidence: draft.evidence, relation: { from: draft.key, to: tool, label: DERIVED.uses },
-        });
-      }
-      for (const sop of draft.assignment.sops) {
-        if (!keys.has(sop)) continue;
-        extra.push({
-          id: `sop:${draft.key}:${sop}`, key: `sop:${draft.key}:${sop}`, kind: 'relation', name: DERIVED.assists,
-          description: '', evidence: draft.evidence, relation: { from: draft.key, to: sop, label: DERIVED.assists },
-        });
-      }
-    }
-  }
-  return [...drafts, ...sources.values(), ...extra];
-}
-
-/** Pure: typed entities become nodes; relations whose two ends exist become links; parallel links get lanes. */
-export function buildOntologyGraph(drafts: OntologyDraft[], companyName?: string): { nodes: GraphNode[]; links: GraphLink[] } {
-  const enriched = enrichOntologyDrafts(drafts, companyName);
+/** Pure: entity drafts become typed nodes (merged by key); relations, role assignments and — optionally — sources become links. */
+export function buildOntologyGraph(drafts: OntologyDraft[], options: { withSources?: boolean } = {}): { nodes: GraphNode[]; links: GraphLink[] } {
   const nodes: GraphNode[] = [];
   const byKey = new Map<string, GraphNode>();
-  const ordered = [...enriched.filter(d => d.kind === 'company'), ...enriched.filter(d => d.kind !== 'company')];
-  for (const draft of ordered) {
-    if (!NODE_KINDS.has(draft.kind)) continue;
+  for (const draft of drafts) {
+    if (!ENTITY_KINDS.has(draft.kind)) continue;
     const existing = byKey.get(draft.key);
     if (existing) {
+      const prev = existing.draft;
+      const offset = prev.evidence.length;
+      const names = new Set((prev.attributes ?? []).map(a => a.name.toLowerCase()));
       existing.draft = {
-        ...existing.draft,
-        description: existing.draft.description || draft.description,
-        evidence: [...existing.draft.evidence, ...draft.evidence],
+        ...prev,
+        description: prev.description || draft.description,
+        evidence: [...prev.evidence, ...draft.evidence],
+        attributes: [...(prev.attributes ?? []), ...(draft.attributes ?? []).filter(a => !names.has(a.name.toLowerCase()))
+          .map(a => ({ ...a, citation: a.citation ? a.citation + offset : undefined }))],
+        privateMcp: !!prev.privateMcp && !!draft.privateMcp,
+        ruleLike: prev.ruleLike || draft.ruleLike,
+        humanLocked: prev.humanLocked || draft.humanLocked,
       };
+      existing.type = nodeTypeOf(existing.draft);
       continue;
     }
-    const { label, width } = fitLabel(draft.name);
-    const type = nodeTypeOf(draft);
-    const node: GraphNode = { id: draft.id, key: draft.key, name: draft.name, label, type, typeLabel: type, width, degree: 0, draft };
+    const node: GraphNode = { id: draft.id, key: draft.key, name: draft.name, type: nodeTypeOf(draft), degree: 0, draft, lines: wrapLabel(draft.name) };
     byKey.set(draft.key, node); nodes.push(node);
   }
+
   const links: GraphLink[] = [];
-  const pairs = new Map<string, GraphLink[]>();
-  for (const draft of enriched) {
-    const rel = draft.relation;
-    if (draft.kind !== 'relation' || !rel) continue;
-    const from = byKey.get(rel.from), to = byKey.get(rel.to);
-    if (!from || !to || from === to) continue;
-    const link: GraphLink = { id: draft.id, label: rel.label, source: from.id, target: to.id, lane: 0, lanes: 1, draft };
+  const seen = new Set<string>();
+  const link = (id: string, from: GraphNode | undefined, to: GraphNode | undefined, label: string, draft: OntologyDraft, derived: boolean) => {
+    if (!from || !to || from === to) return;
+    const dedupe = `${from.id}|${label}|${to.id}`;
+    if (seen.has(dedupe)) return;
+    seen.add(dedupe);
     from.degree++; to.degree++;
-    const pair = [from.id, to.id].sort().join('|');
-    pairs.set(pair, [...(pairs.get(pair) ?? []), link]);
-    links.push(link);
+    links.push({ id, label, source: from.id, target: to.id, lane: 0, lanes: 1, draft, derived });
+  };
+  for (const draft of drafts) {
+    if (draft.kind === 'relation' && draft.relation) link(draft.id, byKey.get(draft.relation.from), byKey.get(draft.relation.to), draft.relation.label, draft, false);
+    if (draft.kind === 'employee' && draft.assignment) {
+      const from = byKey.get(draft.key);
+      for (const tool of draft.assignment.tools) link(`use:${draft.key}:${tool}`, from, byKey.get(tool), DERIVED.uses, draft, true);
+      for (const sop of draft.assignment.sops) link(`sop:${draft.key}:${sop}`, from, byKey.get(sop), DERIVED.assists, draft, true);
+    }
   }
-  for (const group of pairs.values()) group.forEach((link, i) => { link.lane = i; link.lanes = group.length; });
+
+  if (options.withSources) {
+    const sources = new Map<string, GraphNode>();
+    for (const node of [...nodes]) {
+      for (const e of node.draft.evidence) {
+        const key = `src:${sourceGroupKey(e)}`;
+        let source = sources.get(key);
+        if (!source) {
+          const name = sourceLabel(e.locator);
+          const draft: OntologyDraft = { id: key, key, kind: 'source', name, description: '', evidence: [] };
+          source = { id: key, key, name, type: 'source', degree: 0, draft, lines: wrapLabel(name) };
+          sources.set(key, source); nodes.push(source);
+        }
+        source.draft.evidence.push(e);
+        link(`from:${node.id}:${key}`, node, source, DERIVED.sourced, { ...node.draft, evidence: [e] }, true);
+      }
+    }
+  }
+
+  const pairs = new Map<string, GraphLink[]>();
+  for (const l of links) {
+    const pair = [l.source, l.target].sort().join('|');
+    pairs.set(pair, [...(pairs.get(pair) ?? []), l]);
+  }
+  for (const group of pairs.values()) group.forEach((l, i) => { l.lane = i; l.lanes = group.length; });
   return { nodes, links };
 }
 
-const endpoint = (end: string | GraphNode) => (typeof end === 'string' ? undefined : end);
-function boxExit(n: GraphNode, tx: number, ty: number) {
-  const x = n.x ?? 0, y = n.y ?? 0, dx = tx - x, dy = ty - y, hw = n.width / 2 + 3, hh = 32;
-  if (!dx && !dy) return { x, y };
-  const s = Math.min(dx ? hw / Math.abs(dx) : Infinity, dy ? hh / Math.abs(dy) : Infinity);
-  return { x: x + dx * s, y: y + dy * s };
-}
-function linkGeometry(l: GraphLink) {
-  const s = endpoint(l.source), t = endpoint(l.target);
-  if (!s || !t) return { d: '', mx: 0, my: 0 };
+const radius = (n: GraphNode) => Math.min(9 + Math.sqrt(n.degree) * 3.2, 22);
+const idOf = (end: string | GraphNode) => (typeof end === 'string' ? end : end.id);
+
+/** Lanes run left→right; links between lanes are horizontal S-curves, links inside one lane bow outward. */
+function linkPath(l: GraphLink) {
+  const s = l.source as GraphNode, t = l.target as GraphNode;
   const sx = s.x ?? 0, sy = s.y ?? 0, tx = t.x ?? 0, ty = t.y ?? 0;
-  const len = Math.hypot(tx - sx, ty - sy) || 1;
-  const bend = (l.lane - (l.lanes - 1) / 2) * 46 * (s.id < t.id ? 1 : -1);
-  const cx = (sx + tx) / 2 + (-(ty - sy) / len) * bend, cy = (sy + ty) / 2 + ((tx - sx) / len) * bend;
-  const a = boxExit(s, cx, cy), b = boxExit(t, cx, cy);
-  return { d: `M${a.x},${a.y} Q${cx},${cy} ${b.x},${b.y}`, mx: (a.x + 2 * cx + b.x) / 4, my: (a.y + 2 * cy + b.y) / 4 };
+  const spread = (l.lane - (l.lanes - 1) / 2) * 18;
+  let c1: [number, number], c2: [number, number];
+  if (Math.abs(tx - sx) > 60) {
+    const mx = (sx + tx) / 2;
+    c1 = [mx, sy + spread]; c2 = [mx, ty + spread];
+  } else {
+    const bow = 46 + Math.abs(ty - sy) * 0.28 + spread;
+    c1 = [sx + bow, sy]; c2 = [tx + bow, ty];
+  }
+  const trim = (px: number, py: number, cx: number, cy: number, r: number): [number, number] => {
+    const dx = cx - px, dy = cy - py, len = Math.hypot(dx, dy) || 1;
+    return [px + (dx / len) * r, py + (dy / len) * r];
+  };
+  const a = trim(sx, sy, c1[0], c1[1], radius(s) + 2), b = trim(tx, ty, c2[0], c2[1], radius(t) + 5);
+  return {
+    d: `M${a[0]},${a[1]} C${c1[0]},${c1[1]} ${c2[0]},${c2[1]} ${b[0]},${b[1]}`,
+    mx: (a[0] + 3 * c1[0] + 3 * c2[0] + b[0]) / 8, my: (a[1] + 3 * c1[1] + 3 * c2[1] + b[1]) / 8,
+  };
 }
 
-type Scope = 'all' | 'shared' | 'personal';
-export function OntologyGraphView({ shared, personal = [], height = 560, time, companyName }: {
-  shared: OntologyDraft[]; personal?: OntologyDraft[]; height?: number; time?: { at: string; known: string }; companyName?: string;
+function rangeText(d: OntologyDraft) {
+  if (d.effectiveFrom && d.effectiveTo) return `${d.effectiveFrom} – ${d.effectiveTo}`;
+  return d.effectiveFrom || d.effectiveTo;
+}
+
+export function OntologyGraphView({ drafts, time, companyName }: {
+  drafts: OntologyDraft[]; time?: { at: string; known: string }; companyName?: string;
 }) {
   const t = useT(TEXT);
-  const unifiedGraph = useMemo(() => buildOntologyGraph([...shared, ...personal], companyName), [shared, personal, companyName]);
-  const sharedGraph = useMemo(() => buildOntologyGraph(shared, companyName), [shared, companyName]);
-  const personalGraph = useMemo(() => buildOntologyGraph(personal), [personal]);
-  const [scope, setScope] = useState<Scope>('all');
-  const graph = scope === 'shared' ? sharedGraph : scope === 'personal' ? personalGraph : unifiedGraph;
+  const [withSources, setWithSources] = useState(false);
+  const [hidden, setHidden] = useState<Set<NodeType>>(() => new Set());
+  const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
+  const [focusCite, setFocusCite] = useState<number | null>(null);
+  const [descOpen, setDescOpen] = useState(false);
+  const full = useMemo(() => buildOntologyGraph(drafts, { withSources }), [drafts, withSources]);
+  const graph = useMemo(() => {
+    if (!hidden.size) return full;
+    const nodes = full.nodes.filter(n => !hidden.has(n.type));
+    const ids = new Set(nodes.map(n => n.id));
+    return { nodes, links: full.links.filter(l => ids.has(idOf(l.source)) && ids.has(idOf(l.target))) };
+  }, [full, hidden]);
+  const counts = useMemo(() => {
+    const map = new Map<NodeType, number>();
+    for (const n of full.nodes) map.set(n.type, (map.get(n.type) ?? 0) + 1);
+    return map;
+  }, [full]);
+
   const svgRef = useRef<SVGSVGElement | null>(null);
   const zoomRef = useRef<{ zoom: d3.ZoomBehavior<SVGSVGElement, unknown>; fit: () => void } | null>(null);
   const selectRef = useRef(setSelected);
   selectRef.current = setSelected;
   const edgeLabel = (label: string) => (label === DERIVED.sourced ? t('sourced') : label === DERIVED.uses ? t('uses') : label === DERIVED.assists ? t('assists') : label);
+  const typeName = (type: NodeType) => t(`type_${type}` as TextKey);
 
-  useEffect(() => { setSelected(null); }, [scope]);
-  const showFilters = sharedGraph.nodes.length > 0 && personalGraph.nodes.length > 0;
+  useEffect(() => { setFocusCite(null); setDescOpen(false); }, [selected]);
+  useEffect(() => { if (selected && !graph.nodes.some(n => n.id === selected) && !graph.links.some(l => l.id === selected)) setSelected(null); }, [graph, selected]);
 
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl || !graph.nodes.length) return;
     const nodes = graph.nodes.map(n => ({ ...n }));
     const byId = new Map(nodes.map(n => [n.id, n]));
-    const links = graph.links.map(l => ({ ...l, source: byId.get(l.source as string) ?? (l.source as GraphNode), target: byId.get((typeof l.target === 'string' ? l.target : l.target.id)) ?? (l.target as GraphNode) }));
-    const rect = svgEl.getBoundingClientRect();
-    const w = rect.width || 800, h = rect.height || height;
+    const links = graph.links.map(l => ({ ...l, source: byId.get(idOf(l.source))!, target: byId.get(idOf(l.target))! }));
+    const neighbors = new Map<string, Set<string>>(nodes.map(n => [n.id, new Set([n.id])]));
+    for (const l of links) { neighbors.get(l.source.id)!.add(l.target.id); neighbors.get(l.target.id)!.add(l.source.id); }
+
+    const lanes = LANES.filter(type => nodes.some(n => n.type === type));
+    const laneW = 250;
+    const laneX = new Map(lanes.map((type, i) => [type, (i + 0.5) * laneW]));
+    const perLane = new Map<NodeType, GraphNode[]>();
+    for (const n of [...nodes].sort((a, b) => b.degree - a.degree || a.name.localeCompare(b.name))) perLane.set(n.type, [...(perLane.get(n.type) ?? []), n]);
+    // Busy lanes split into two staggered columns so the lane stays readable instead of becoming one tall stack.
+    const targetX = new Map<string, number>();
+    for (const [type, list] of perLane) {
+      const split = list.length > 7;
+      list.forEach((n, i) => {
+        const x = laneX.get(type)! + (split ? (i % 2 ? 62 : -62) : 0);
+        targetX.set(n.id, x);
+        n.x = x; n.fx = x; n.y = (split ? Math.floor(i / 2) * 92 + (i % 2) * 46 : i * 92) - (split ? list.length / 4 : list.length / 2) * 92;
+      });
+    }
+
     const svg = d3.select(svgEl);
     svg.selectAll('*').remove();
     const defs = svg.append('defs');
     for (const [id, cls] of [['onto-arrow', ''], ['onto-arrow-active', 'is-active']] as const) {
-      defs.append('marker').attr('id', id).attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5)
-        .attr('markerWidth', 8).attr('markerHeight', 8).attr('orient', 'auto-start-reverse')
-        .append('path').attr('d', 'M0,0 L10,5 L0,10 z').attr('class', `onto-arrowhead ${cls}`);
+      defs.append('marker').attr('id', id).attr('viewBox', '0 0 10 10').attr('refX', 8).attr('refY', 5)
+        .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto-start-reverse')
+        .append('path').attr('d', 'M0,1 L9,5 L0,9 z').attr('class', `onto-arrowhead ${cls}`);
     }
     const root = svg.append('g').attr('class', 'onto-root');
-    const linkSel = root.append('g').selectAll<SVGGElement, GraphLink>('g').data(links).join('g').attr('class', 'onto-link')
+    const laneLayer = root.append('g').attr('class', 'onto-lanes');
+    const linkSel = root.append('g').selectAll<SVGGElement, typeof links[number]>('g').data(links).join('g')
+      .attr('class', l => `onto-link${l.derived ? ' is-derived' : ''}`)
       .on('click', (event: MouseEvent, l) => { event.stopPropagation(); selectRef.current(l.id); });
     linkSel.append('path').attr('class', 'onto-link-hit');
     linkSel.append('path').attr('class', 'onto-link-line').attr('marker-end', 'url(#onto-arrow)');
     const labelSel = linkSel.append('g').attr('class', 'onto-link-label');
-    labelSel.append('rect').attr('rx', 6).attr('height', 24);
-    labelSel.append('text').attr('dy', '0.35em').attr('text-anchor', 'middle').text(l => fitLabel(edgeLabel(l.label), 120).label);
-    labelSel.each(function () {
-      const text = (this as SVGGElement).querySelector('text') as SVGTextElement;
-      const bw = (text.getComputedTextLength?.() || 60) + 12;
-      d3.select(this).select('rect').attr('x', -bw / 2).attr('y', -12).attr('width', bw);
+    labelSel.append('rect').attr('rx', 9).attr('height', 18);
+    labelSel.append('text').attr('dy', '0.35em').attr('text-anchor', 'middle').text(l => {
+      const label = edgeLabel(l.label);
+      return label.length > 24 ? `${label.slice(0, 23)}…` : label;
     });
 
-    const nodeSel = root.append('g').selectAll<SVGGElement, GraphNode>('g').data(nodes).join('g').attr('class', n => `onto-node onto-type-${n.type}`)
-      .attr('tabindex', 0).attr('role', 'button').attr('aria-label', n => `${n.name}, ${t(`type_${n.type}` as 'type_object')}`)
+    const hover = (id: string | null) => {
+      const near = id ? neighbors.get(id)! : null;
+      svg.classed('has-hover', !!id);
+      nodeSel.classed('is-hover-near', n => !!near?.has(n.id));
+      linkSel.classed('is-hover', l => !!id && (l.source.id === id || l.target.id === id));
+    };
+    const nodeSel = root.append('g').selectAll<SVGGElement, GraphNode>('g').data(nodes).join('g')
+      .attr('class', n => `onto-node onto-type-${n.type}${n.draft.humanLocked ? ' is-confirmed' : ''}${n.draft.privateMcp ? ' is-private' : ''}${n.degree < 2 ? ' is-minor' : ''}`)
+      .attr('tabindex', 0).attr('role', 'button').attr('aria-label', n => `${n.name}, ${typeName(n.type)}`)
       .on('click', (event: MouseEvent, n) => { event.stopPropagation(); selectRef.current(n.id); })
+      .on('mouseenter', (_e, n) => hover(n.id)).on('mouseleave', () => hover(null))
+      .on('focus', (_e, n) => hover(n.id)).on('blur', () => hover(null))
       .on('keydown', (event: KeyboardEvent, n) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectRef.current(n.id); } });
-    nodeSel.append('rect').attr('x', n => -n.width / 2).attr('y', -32).attr('width', n => n.width).attr('height', 64).attr('rx', 8);
-    nodeSel.append('text').attr('class', 'onto-node-title').attr('y', -6).attr('text-anchor', 'middle').text(n => n.label);
-    nodeSel.append('text').attr('class', 'onto-node-type').attr('y', 16).attr('text-anchor', 'middle').text(n => t(`type_${n.type}` as 'type_object'));
-    nodeSel.append('title').text(n => `${n.name} · ${t(`type_${n.type}` as 'type_object')}`);
+    nodeSel.append('circle').attr('class', 'onto-node-halo').attr('r', n => radius(n) + 6);
+    nodeSel.append('circle').attr('class', 'onto-node-dot').attr('r', radius);
+    nodeSel.filter(n => !!n.draft.privateMcp).append('circle').attr('class', 'onto-node-private').attr('r', n => radius(n) + 3.5);
+    const text = nodeSel.append('text').attr('class', 'onto-node-label').attr('text-anchor', 'middle').attr('y', n => radius(n) + 15);
+    text.selectAll('tspan').data(n => n.lines).join('tspan').attr('x', 0).attr('dy', (_l, i) => (i ? 15 : 0)).text(l => l);
+    nodeSel.append('title').text(n => `${n.name} · ${typeName(n.type)}`);
 
     const sim = d3.forceSimulation<GraphNode>(nodes)
-      .force('link', d3.forceLink<GraphNode, GraphLink>(links).id(n => n.id).distance(l => 160 + ((endpoint(l.source)?.width ?? 0) + (endpoint(l.target)?.width ?? 0)) / 2.4).strength(0.7))
-      .force('charge', d3.forceManyBody().strength(-1100).distanceMax(900))
-      .force('collide', d3.forceCollide<GraphNode>().radius(n => n.width / 2 + 36).strength(0.9))
-      .force('x', d3.forceX(w / 2).strength(0.015)).force('y', d3.forceY(h / 2).strength(0.14));
+      .force('link', d3.forceLink<GraphNode, typeof links[number]>(links).id(n => n.id).distance(150).strength(0.08))
+      .force('charge', d3.forceManyBody().strength(-180).distanceMax(320))
+      .force('collide', d3.forceCollide<GraphNode>().radius(n => radius(n) + 34).strength(1))
+      .force('x', d3.forceX<GraphNode>(n => targetX.get(n.id) ?? 0).strength(0.9))
+      .force('y', d3.forceY(0).strength(0.035))
+      .stop();
+    for (let i = 0; i < 360; i++) sim.tick();
 
+    const drawLanes = () => {
+      laneLayer.selectAll('*').remove();
+      const ys = nodes.map(n => n.y ?? 0);
+      const top = Math.min(...ys) - 70, bottom = Math.max(...ys) + 70;
+      for (const type of lanes) {
+        const x = laneX.get(type)! - laneW / 2 + 8;
+        const g = laneLayer.append('g').attr('class', `onto-lane onto-type-${type}`);
+        g.append('rect').attr('x', x).attr('y', top).attr('width', laneW - 16).attr('height', bottom - top).attr('rx', 14);
+        g.append('text').attr('x', x + 14).attr('y', top + 24).text(`${typeName(type)} · ${perLane.get(type)!.length}`);
+      }
+    };
     const tick = () => {
       linkSel.each(function (l) {
-        const g = linkGeometry(l), sel = d3.select(this);
+        const g = linkPath(l), sel = d3.select(this);
         sel.selectAll('path').attr('d', g.d);
         sel.select('.onto-link-label').attr('transform', `translate(${g.mx},${g.my})`);
       });
       nodeSel.attr('transform', n => `translate(${n.x ?? 0},${n.y ?? 0})`);
     };
-    sim.on('tick', tick);
+    drawLanes(); tick();
+    labelSel.each(function () {
+      const label = (this as SVGGElement).querySelector('text') as SVGTextElement;
+      const bw = (label.getComputedTextLength?.() || 50) + 16;
+      d3.select(this).select('rect').attr('x', -bw / 2).attr('y', -9).attr('width', bw);
+    });
 
-    const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.18, 3])
-      .filter(event => !event.button && (event.type !== 'wheel' || event.ctrlKey || event.metaKey) &&
-        (event.type !== 'touchstart' || event.touches.length > 1))
-      .on('zoom', event => root.attr('transform', event.transform.toString()));
+    const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.2, 2.5])
+      .filter(event => !event.button && (event.type !== 'wheel' || event.ctrlKey || event.metaKey) && (event.type !== 'touchstart' || event.touches.length > 1))
+      .on('zoom', event => { root.attr('transform', event.transform.toString()); svg.classed('is-far', event.transform.k < 0.45); });
     svg.call(zoom).on('dblclick.zoom', null).on('click', () => selectRef.current(null));
     const fit = () => {
-      const xs = nodes.flatMap(n => [(n.x ?? 0) - n.width / 2, (n.x ?? 0) + n.width / 2]), ys = nodes.flatMap(n => [(n.y ?? 0) - 32, (n.y ?? 0) + 32]);
-      const box = svgEl.getBoundingClientRect(), cw = box.width || w, ch = (box.height || h) - 24;
-      const padding = cw < 480 ? 18 : 30;
-      const [x0, x1] = [Math.min(...xs) - padding, Math.max(...xs) + padding];
-      const [y0, y1] = [Math.min(...ys) - padding, Math.max(...ys) + padding];
-      const k = Math.min(1.6, cw / Math.max(x1 - x0, 1), ch / Math.max(y1 - y0, 1));
-      const transform = d3.zoomIdentity.translate(cw / 2 - k * (x0 + x1) / 2, ch / 2 - k * (y0 + y1) / 2).scale(k);
-      svg.interrupt().call(zoom.transform, transform);
+      const box = svgEl.getBoundingClientRect();
+      const bb = (root.node() as SVGGElement).getBBox?.();
+      if (!bb || !box.width) return;
+      const pad = 24;
+      const k = Math.min(1.25, (box.width - pad * 2) / Math.max(bb.width, 1), (box.height - pad * 2) / Math.max(bb.height, 1));
+      svg.interrupt().call(zoom.transform, d3.zoomIdentity.translate(box.width / 2 - k * (bb.x + bb.width / 2), box.height / 2 - k * (bb.y + bb.height / 2)).scale(k));
     };
     zoomRef.current = { zoom, fit };
     const resize = new ResizeObserver(fit);
     resize.observe(svgEl);
 
     nodeSel.call(d3.drag<SVGGElement, GraphNode>()
-      .on('start', (e, n) => { if (!e.active) sim.alphaTarget(0.25).restart(); n.fx = n.x; n.fy = n.y; })
-      .on('drag', (e, n) => { n.fx = e.x; n.fy = e.y; })
-      .on('end', (e, n) => { if (!e.active) sim.alphaTarget(0); n.fx = null; n.fy = null; }));
+      .on('start', (e, n) => { n.fx = n.x; n.fy = n.y; })
+      .on('drag', (e, n) => { n.x = n.fx = e.x; n.y = n.fy = e.y; tick(); })
+      .on('end', (_e, n) => { n.fx = null; n.fy = null; }));
 
-    for (let i = 0; i < 300; i++) sim.tick();
-    tick(); fit();
+    fit();
     return () => { resize.disconnect(); sim.stop(); svg.interrupt().on('.zoom', null); zoomRef.current = null; };
-  }, [graph, height, t]);
+  }, [graph, t]);
 
+  // Selection and search only restyle the drawn graph; they never re-run the layout.
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
     const svg = d3.select(svgEl);
     const link = graph.links.find(l => l.id === selected);
     const near = new Set<string>();
-    if (link) { near.add(typeof link.source === 'string' ? link.source : link.source.id); near.add(typeof link.target === 'string' ? link.target : link.target.id); }
+    if (link) { near.add(idOf(link.source)); near.add(idOf(link.target)); }
     else if (selected) {
       near.add(selected);
-      for (const l of graph.links) {
-        const s = typeof l.source === 'string' ? l.source : l.source.id, tg = typeof l.target === 'string' ? l.target : l.target.id;
-        if (s === selected || tg === selected) { near.add(s); near.add(tg); }
-      }
+      for (const l of graph.links) if (idOf(l.source) === selected || idOf(l.target) === selected) { near.add(idOf(l.source)); near.add(idOf(l.target)); }
     }
-    const touches = (l: GraphLink) => {
-      const s = endpoint(l.source)?.id, tg = endpoint(l.target)?.id;
-      return link ? l.id === link.id : !!selected && (s === selected || tg === selected);
-    };
-    svg.classed('has-selection', !!selected);
-    svg.selectAll<SVGGElement, GraphNode>('.onto-node').classed('is-selected', n => n.id === selected).classed('is-near', n => near.has(n.id));
+    const touches = (l: GraphLink) => (link ? l.id === link.id : !!selected && (idOf(l.source) === selected || idOf(l.target) === selected));
+    const q = query.trim().toLowerCase();
+    svg.classed('has-selection', !!selected).classed('has-query', !!q);
+    svg.selectAll<SVGGElement, GraphNode>('.onto-node').classed('is-selected', n => n.id === selected).classed('is-near', n => near.has(n.id))
+      .classed('is-match', n => !!q && (n.name.toLowerCase().includes(q) || (n.draft.attributes ?? []).some(a => `${a.name} ${a.value}`.toLowerCase().includes(q))));
     svg.selectAll<SVGGElement, GraphLink>('.onto-link').classed('is-active', touches)
       .select('.onto-link-line').attr('marker-end', l => (touches(l) ? 'url(#onto-arrow-active)' : 'url(#onto-arrow)'));
-  }, [selected, graph]);
+  }, [selected, graph, query]);
 
   const nodeById = new Map(graph.nodes.map(n => [n.id, n]));
-  const nodeOf = (end: string | GraphNode) => nodeById.get(typeof end === 'string' ? end : end.id);
+  const nodeOf = (end: string | GraphNode) => nodeById.get(idOf(end));
   const selNode = selected ? nodeById.get(selected) : undefined;
   const selLink = selected ? graph.links.find(l => l.id === selected) : undefined;
-  const nodeLinks = selNode ? graph.links.filter(l => nodeOf(l.source)?.id === selNode.id || nodeOf(l.target)?.id === selNode.id) : [];
   const zoomBy = (k: number) => { const z = zoomRef.current; if (svgRef.current && z) d3.select(svgRef.current).transition().duration(200).call(z.zoom.scaleBy, k); };
+  const toggleType = (type: NodeType) => setHidden(current => { const next = new Set(current); if (next.has(type)) next.delete(type); else next.add(type); return next; });
+  const pickFirstMatch = () => {
+    const q = query.trim().toLowerCase();
+    const hit = q && graph.nodes.find(n => n.name.toLowerCase().includes(q));
+    if (hit) setSelected(hit.id);
+  };
 
-  if (!unifiedGraph.nodes.length) {
+  if (!full.nodes.length) {
     return <section className="onto-empty" aria-label={t('canvas')}>
       <h3>{t('emptyTitle')}</h3>
       <p className="helper">{t('emptyBody')}</p>
@@ -328,71 +422,135 @@ export function OntologyGraphView({ shared, personal = [], height = 560, time, c
   }
 
   const draft = selNode?.draft ?? selLink?.draft;
-  const sources = draft?.evidence ?? [];
+  const evidence = draft?.evidence ?? [];
+  const groups = groupEvidence(evidence);
   const recorded = draft?.recordedAt?.slice(0, 10);
-  const business = draft?.effectiveFrom && draft.effectiveTo ? `${draft.effectiveFrom} – ${draft.effectiveTo}` : (draft?.effectiveFrom || draft?.effectiveTo);
-  const version = sources.map(e => e.version).find(Boolean);
+  const version = evidence.map(e => e.version).find(Boolean);
+  const nodeLinks = selNode ? graph.links.filter(l => idOf(l.source) === selNode.id || idOf(l.target) === selNode.id) : [];
+  const relationGroups = new Map<string, { label: string; dir: 'out' | 'in'; items: { node: GraphNode; link: GraphLink }[] }>();
+  for (const l of nodeLinks) {
+    const out = idOf(l.source) === selNode!.id;
+    const other = nodeOf(out ? l.target : l.source);
+    if (!other) continue;
+    const key = `${out ? 'out' : 'in'}:${l.label}`;
+    const group = relationGroups.get(key) ?? { label: edgeLabel(l.label), dir: out ? 'out' as const : 'in' as const, items: [] };
+    group.items.push({ node: other, link: l });
+    relationGroups.set(key, group);
+  }
+  const attributes = selNode?.draft.attributes ?? [];
+  const summary = t('summary', { objects: graph.nodes.length, relations: graph.links.length });
+
   return <section className="onto" aria-label={t('canvas')}>
     <header className="onto-bar">
-      {showFilters ? <div className="onto-scope" role="tablist" aria-label={t('canvas')}>
-        {(['all', 'shared', 'personal'] as const).map(s => <button key={s} type="button" role="tab" aria-selected={scope === s} onClick={() => setScope(s)}>
-          {t(s)} <span>{(s === 'all' ? unifiedGraph : s === 'shared' ? sharedGraph : personalGraph).nodes.length}</span>
-        </button>)}
-      </div> : <strong className="onto-scope-label">{t('all')}</strong>}
-      <span className="onto-summary">{t('summary', { objects: graph.nodes.length, relations: graph.links.length })}</span>
+      <div className="onto-heading">
+        <strong>{companyName ? t('titleOf', { company: companyName }) : t('title')}</strong>
+        <span className="onto-summary">{summary}</span>
+      </div>
+      <input className="onto-search" type="search" value={query} placeholder={t('search')} aria-label={t('search')}
+        onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') pickFirstMatch(); }} />
       <div className="onto-tools">
         <button type="button" className="onto-icon" aria-label={t('zoomOut')} title={t('zoomOut')} onClick={() => zoomBy(1 / 1.3)}>−</button>
         <button type="button" className="onto-icon" aria-label={t('zoomIn')} title={t('zoomIn')} onClick={() => zoomBy(1.3)}>+</button>
         <button type="button" className="onto-icon onto-fit" onClick={() => zoomRef.current?.fit()}>{t('fit')}</button>
       </div>
     </header>
-    {scope === 'personal' ? <p className="onto-note">{t('personalNote')}</p> : null}
+    <div className="onto-legend" role="group" aria-label={t('typeFilter')}>
+      {LANES.filter(type => type !== 'source' && counts.has(type)).map(type => <button key={type} type="button" className={`onto-chip onto-type-${type}`}
+        aria-pressed={!hidden.has(type)} onClick={() => toggleType(type)}>
+        <i aria-hidden="true" />{typeName(type)}<span>{counts.get(type)}</span>
+      </button>)}
+      <label className="onto-switch"><input type="checkbox" checked={withSources} onChange={event => setWithSources(event.target.checked)} /><span>{t('showSources')}</span></label>
+    </div>
     <div className="onto-body">
       <div className="onto-canvas">
-        <svg ref={svgRef} role="img" aria-label={`${t('canvas')}: ${t('summary', { objects: graph.nodes.length, relations: graph.links.length })}`} />
+        <svg ref={svgRef} role="img" aria-label={`${t('canvas')}: ${summary}`} />
         <p className="onto-hint">{t('hint')}</p>
       </div>
       <aside className="onto-panel" aria-live="polite">
         {selNode || selLink ? <>
           <button type="button" className="onto-back" onClick={() => setSelected(null)}>← {t('back')}</button>
-          <span className="onto-kind">{selNode ? t(`type_${selNode.type}` as 'type_object') : t('relation')}</span>
+          <div className="onto-badges">
+            {selNode ? <span className={`onto-chip is-static onto-type-${selNode.type}`}><i aria-hidden="true" />{typeName(selNode.type)}</span> : <span className="onto-chip is-static">{t('relation')}</span>}
+            {selNode && selNode.type !== 'source' ? <span className={`onto-status ${draft?.humanLocked ? 'is-confirmed' : ''}`}>{t(draft?.humanLocked ? 'confirmed' : 'pending')}</span> : null}
+            {draft?.privateMcp ? <span className="onto-status is-private" title={t('privateNote')}>{t('private')}</span> : null}
+          </div>
           {selLink ? <h3 className="onto-rel-title">
             <button type="button" onClick={() => setSelected(nodeOf(selLink.source)?.id ?? null)}>{nodeOf(selLink.source)?.name}</button>
-            <span>→ {edgeLabel(selLink.label)} →</span>
+            <span>{edgeLabel(selLink.label)} →</span>
             <button type="button" onClick={() => setSelected(nodeOf(selLink.target)?.id ?? null)}>{nodeOf(selLink.target)?.name}</button>
           </h3> : <h3>{selNode!.name}</h3>}
-          {draft?.description ? <p className="onto-desc">{draft.description}</p> : null}
-          <dl className="onto-meta">
-            <dt>{t('stableId')}</dt><dd><code>{draft?.id ?? selected}</code></dd>
-            <dt>{t('version')}</dt><dd>{version || t('notStated')}</dd>
-            <dt>{t('businessTime')}</dt><dd>{business || t('notStated')}</dd>
-            <dt>{t('recordedTime')}</dt><dd>{recorded || t('notStated')}</dd>
-            {time ? <><dt>{t('knownTime')}</dt><dd>{time.known}</dd></> : null}
-          </dl>
-          {selNode ? <div className="onto-section">
-            <h4 id="onto-rel-heading">{t('relTable')}</h4>
-            {nodeLinks.length ? <table className="onto-rel-table" aria-labelledby="onto-rel-heading">
-              <thead><tr><th>{t('from')}</th><th>{t('edge')}</th><th>{t('to')}</th></tr></thead>
-              <tbody>{nodeLinks.map(l => {
-                const from = nodeOf(l.source), to = nodeOf(l.target);
-                return <tr key={l.id}>
-                  <td><button type="button" onClick={() => setSelected(from?.id ?? null)}>{from?.name}</button></td>
-                  <td><button type="button" onClick={() => setSelected(l.id)}>{edgeLabel(l.label)}</button></td>
-                  <td><button type="button" onClick={() => setSelected(to?.id ?? null)}>{to?.name}</button></td>
-                </tr>;
-              })}</tbody>
-            </table> : <p className="helper">{t('noRelations')}</p>}
+          {draft?.description && !selLink?.derived ? <div className="onto-desc">
+            <p className={descOpen ? '' : 'is-clamped'}>{draft.description}</p>
+            {draft.description.length > 140 ? <button type="button" className="onto-link-btn" onClick={() => setDescOpen(v => !v)}>{t(descOpen ? 'less' : 'more')}</button> : null}
           </div> : null}
+
+          {selNode && selNode.type !== 'source' ? <div className="onto-section">
+            <h4>{t('attributes')}{attributes.length ? <span>{attributes.length}</span> : null}</h4>
+            {attributes.length ? <dl className="onto-attrs">{attributes.map(a => <div key={a.name}>
+              <dt>{a.name}</dt>
+              <dd>{a.value}{a.citation && a.citation <= evidence.length ? <button type="button" className="onto-cite" aria-label={t('cite', { n: a.citation })}
+                onClick={() => setFocusCite(a.citation! - 1)}>{a.citation}</button> : null}</dd>
+            </div>)}</dl> : <p className="onto-muted">{t('noAttributes')}</p>}
+          </div> : null}
+
+          {selNode ? <div className="onto-section">
+            <h4>{t('relations')}{nodeLinks.length ? <span>{nodeLinks.length}</span> : null}</h4>
+            {relationGroups.size ? <ul className="onto-rels">{[...relationGroups.values()].map(group => <li key={`${group.dir}:${group.label}`}>
+              <span className="onto-rel-label">{group.dir === 'out' ? `${group.label} →` : `← ${group.label}`}</span>
+              <div>{group.items.map(({ node, link }) => <button key={link.id} type="button" className={`onto-chip onto-type-${node.type}`} onClick={() => setSelected(node.id)}>
+                <i aria-hidden="true" />{node.name}
+              </button>)}</div>
+            </li>)}</ul> : <p className="onto-muted">{t('noRelations')}</p>}
+          </div> : null}
+
           <div className="onto-section">
-            <h4>{t('sources', { n: sources.length })}</h4>
-            {sources.length ? <ul className="onto-sources">{sources.map((e, i) => <li key={i}><code>{e.locator}</code><q>{e.quote}</q></li>)}</ul>
-              : <p className="helper">{t('noSources')}</p>}
+            <h4>{t('time')}</h4>
+            <p className="onto-time">
+              {draft && rangeText(draft) ? t('effective', { range: rangeText(draft)! }) : t('effectiveUnknown')}
+              {recorded ? <> · {t('recorded', { date: recorded })}</> : null}
+              {time ? <> · {t('known', { date: time.known })}</> : null}
+            </p>
           </div>
+
+          <div className="onto-section">
+            <h4>{t('sources')}{evidence.length ? <span>{evidence.length}</span> : null}</h4>
+            {groups.length ? <ul className="onto-sources">{groups.map(group => {
+              const focused = focusCite !== null && group.items.some(item => item.index === focusCite);
+              return <li key={`${group.key}:${focused ? 'f' : ''}`}>
+                <details open={focused || groups.length === 1 || undefined}>
+                  <summary><strong>{group.label}</strong><span>{t('citations', { n: group.items.length })}</span></summary>
+                  <ol>{group.items.map(({ entry, index }) => <li key={index} className={index === focusCite ? 'is-focused' : ''}
+                    ref={el => { if (el && index === focusCite) el.scrollIntoView({ block: 'nearest' }); }}>
+                    <span className="onto-cite is-static">{index + 1}</span>
+                    <p>{readableQuote(entry.quote)}</p>
+                  </li>)}</ol>
+                </details>
+              </li>;
+            })}</ul> : <p className="onto-muted">{t('noSources')}</p>}
+          </div>
+
+          <details className="onto-tech">
+            <summary>{t('technical')}</summary>
+            <dl className="onto-meta">
+              <dt>{t('stableId')}</dt><dd><code>{draft?.id ?? selected}</code></dd>
+              <dt>{t('version')}</dt><dd>{version || t('notStated')}</dd>
+            </dl>
+          </details>
         </> : <>
-          <h4>{t('objects')}</h4>
-          <ul className="onto-list">{[...graph.nodes].sort((a, b) => b.degree - a.degree || a.name.localeCompare(b.name)).map(n => <li key={n.id}>
-            <button type="button" onClick={() => setSelected(n.id)}><span>{n.name}</span><small>{t(`type_${n.type}` as 'type_object')}</small></button>
-          </li>)}</ul>
+          <h4 className="onto-panel-title">{t('entities')}</h4>
+          {LANES.filter(type => graph.nodes.some(n => n.type === type)).map(type => {
+            const list = graph.nodes.filter(n => n.type === type).sort((a, b) => b.degree - a.degree || a.name.localeCompare(b.name));
+            return <div key={type} className="onto-group">
+              <h5 className={`onto-type-${type}`}><i aria-hidden="true" />{typeName(type)}<span>{list.length}</span></h5>
+              <ul className="onto-list">{list.map(n => <li key={n.id}>
+                <button type="button" onClick={() => setSelected(n.id)}>
+                  <span>{n.name}</span>
+                  {n.draft.attributes?.length ? <small>{n.draft.attributes.length} {t('attributes')}</small> : null}
+                  {n.draft.privateMcp ? <small className="is-private">{t('private')}</small> : null}
+                </button>
+              </li>)}</ul>
+            </div>;
+          })}
         </>}
       </aside>
     </div>

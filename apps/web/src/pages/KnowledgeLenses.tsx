@@ -1,5 +1,6 @@
 import { useId } from 'react';
 import { useT } from '../i18n';
+import { sourceLabel } from '../components/evidence';
 import './KnowledgeLenses.css';
 
 /**
@@ -254,15 +255,15 @@ export function KnowledgeTimeline({ items, runs, drafts, organizationConfirmedAt
 }
 
 /** The v12 assertion facts: dimensions, entity/relation, source, time and status, read off the draft itself. */
-export function AssertionFacts({ draft, runs, names, stale }: { draft: LensDraft; runs: LensRun[]; names: Map<string, string>; stale?: boolean }) {
+export function AssertionFacts({ draft, runs, names, stale, hideEntity }: { draft: LensDraft; runs: LensRun[]; names: Map<string, string>; stale?: boolean; hideEntity?: boolean }) {
   const t = useT(TEXT);
   const recorded = day(recordedOf(draft, runs));
   const source = draft.evidence[0]?.locator;
   const dims = dimensionsOf(draft);
   return <dl className="lens-facts">
     <div><dt>{t('factDims')}</dt><dd className="lens-fact-dims">{dims.map(dim => <span key={dim}>{t(`dim_${dim}` as keyof typeof TEXT.en)}</span>)}</dd></div>
-    <div><dt>{t('factEntity')}</dt><dd>{draft.relation ? relationText(draft, names) : draft.name}</dd></div>
-    <div><dt>{t('factSource')}</dt><dd>{source ? draft.evidence.length > 1 ? t('factSourceMore', { source, n: draft.evidence.length }) : source : t('factNoSource')}</dd></div>
+    {hideEntity && !draft.relation ? null : <div><dt>{t('factEntity')}</dt><dd>{draft.relation ? relationText(draft, names) : draft.name}</dd></div>}
+    <div><dt>{t('factSource')}</dt><dd>{source ? draft.evidence.length > 1 ? t('factSourceMore', { source: sourceLabel(source), n: draft.evidence.length }) : sourceLabel(source) : t('factNoSource')}</dd></div>
     {recorded ? <div><dt>{t('factTime')}</dt><dd>{statedEffect(draft)
       ? t('factTimeStated', { from: statedEffect(draft)!, to: '', date: recorded })
       : t('factTimeValue', { date: recorded })}</dd></div> : null}

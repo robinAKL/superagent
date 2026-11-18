@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LangProvider } from '../src/i18n';
-import { buildOntologyGraph, OntologyGraphView, nodeTypeOf, type OntologyDraft } from '../src/components/OntologyGraphView';
+import { buildOntologyGraph, OntologyGraphView, nodeTypeOf, wrapLabel, type OntologyDraft } from '../src/components/OntologyGraphView';
+import { groupEvidence, readableQuote, sourceLabel } from '../src/components/evidence';
 
 const ev = [{ locator: 'order-form.xlsx page 5', quote: 'PVC frame types', sourceId: 'src1', version: 'v1', retrievedAt: '2026-11-08T00:00:00Z' }];
-const object = (key: string, name: string): OntologyDraft => ({ id: `o-${key}`, key, kind: 'object', name, description: `${name} description`, evidence: ev });
+const object = (key: string, name: string, extra: Partial<OntologyDraft> = {}): OntologyDraft => ({ id: `o-${key}`, key, kind: 'object', name, description: `${name} description`, evidence: ev, ...extra });
 const relation = (id: string, from: string, to: string, label: string): OntologyDraft => ({ id, key: id, kind: 'relation', name: label, description: '', evidence: ev, relation: { from, to, label } });
 
 const drafts: OntologyDraft[] = [
@@ -16,15 +17,25 @@ const drafts: OntologyDraft[] = [
 ];
 
 describe('ontology graph model', () => {
-  it('turns objects, employees, tools and source documents into typed nodes', () => {
+  it('turns entity drafts into typed nodes and keeps sources out of the graph by default', () => {
     const { nodes, links } = buildOntologyGraph(drafts);
-    expect(nodes.map(n => n.key).sort()).toEqual(['clerk', 'color', 'frame', 'kb', 'lonely', 'order', 'src:src1:v1']);
+    expect(nodes.map(n => n.key).sort()).toEqual(['clerk', 'color', 'frame', 'kb', 'lonely', 'order']);
     expect(nodes.find(n => n.key === 'clerk')!.type).toBe('employee');
     expect(nodes.find(n => n.key === 'kb')!.type).toBe('tool');
-    expect(nodes.find(n => n.key === 'src:src1:v1')!.type).toBe('source');
     expect(links.filter(l => ['r1', 'r2', 'r3'].includes(l.id)).map(l => l.id)).toEqual(['r1', 'r2', 'r3']);
-    expect(links.some(l => l.id === 'use:clerk:kb')).toBe(true);
-    expect(nodes.find(n => n.key === 'order')!.degree).toBeGreaterThanOrEqual(3);
+    expect(links.some(l => l.id === 'use:clerk:kb' && l.derived)).toBe(true);
+    expect(links.some(l => l.label === '__sourced')).toBe(false);
+    expect(nodes.find(n => n.key === 'order')!.degree).toBe(3);
+  });
+
+  it('adds one source node per document, not per line anchor, when the source layer is on', () => {
+    const a = object('a', 'A', { evidence: [{ locator: 'GUIDE.md#L3', quote: 'x', sourceId: 'guide' }] });
+    const b = object('b', 'B', { evidence: [{ locator: 'GUIDE.md#L40', quote: 'y', sourceId: 'guide' }, { locator: 'GUIDE.md#L41', quote: 'z', sourceId: 'guide' }] });
+    const { nodes, links } = buildOntologyGraph([a, b], { withSources: true });
+    const sources = nodes.filter(n => n.type === 'source');
+    expect(sources).toHaveLength(1);
+    expect(sources[0]!.name).toBe('GUIDE.md');
+    expect(links.filter(l => l.label === '__sourced')).toHaveLength(2);
   });
 
   it('gives parallel relations between the same pair separate lanes, in either direction', () => {
@@ -34,90 +45,86 @@ describe('ontology graph model', () => {
     expect(links.find(l => l.id === 'r2')).toMatchObject({ lane: 0, lanes: 1 });
   });
 
-  it('shortens long names for the node box but keeps the full name', () => {
-    const long = object('long', 'ISWELL 采购订单表单（常规）与附件清单以及颜色选项数据');
-    const [node] = buildOntologyGraph([long]).nodes.filter(n => n.key === 'long');
+  it('wraps long names into at most two lines but keeps the full name', () => {
+    const long = object('long', 'ISWELL 采购订单表单（常规）与附件清单以及颜色选项数据和更多更多的说明文字');
+    const [node] = buildOntologyGraph([long]).nodes;
     expect(node!.name).toBe(long.name);
-    expect(node!.label.endsWith('…')).toBe(true);
-    expect(node!.width).toBeLessThanOrEqual(260);
+    expect(node!.lines).toHaveLength(2);
+    expect(node!.lines[1]!.endsWith('…')).toBe(true);
+    expect(wrapLabel('Short')).toEqual(['Short']);
   });
 
-  it('labels a rule-like object as a rule node', () => {
-    expect(nodeTypeOf({ id: 'p', key: 'p', kind: 'object', name: '审批阈值', description: '超过 5 万必须审批', evidence: [] })).toBe('rule');
+  it('types rules from the analysis flag, falling back to the name only', () => {
+    expect(nodeTypeOf({ kind: 'object', name: 'Deposit', ruleLike: true })).toBe('rule');
+    expect(nodeTypeOf({ kind: 'object', name: '审批阈值' })).toBe('rule');
+    expect(nodeTypeOf({ kind: 'object', name: 'Wholesale order' })).toBe('object');
+    expect(nodeTypeOf({ kind: 'sop', name: 'Order flow' })).toBe('process');
   });
 
-  it('places a real company node from company configuration, even when an object already uses key=company', () => {
-    const { nodes } = buildOntologyGraph([...drafts, object('company', '模型对象')], 'ISWELL');
-    const company = nodes.find(n => n.type === 'company');
-    expect(company?.key).toBe('sys:company');
-    expect(company?.name).toBe('ISWELL');
-    expect(nodes.find(n => n.key === 'company')?.type).not.toBe('company');
-    expect(nodeTypeOf({ id: 'c', key: 'sys:company', kind: 'company', name: 'ISWELL', description: '', evidence: [] })).toBe('company');
+  it('merges the same entity from company and MCP sources, with attributes and shifted citations', () => {
+    const company = [object('order', '采购订单', { attributes: [{ name: '币种', value: 'NZD', citation: 1 }] }), relation('rx', 'order', 'mcp-item', '引用')];
+    const mcp = [object('order', '订单 MCP', { privateMcp: true, attributes: [{ name: '定金', value: '60%', citation: 1 }, { name: '币种', value: 'AUD' }] }), object('mcp-item', 'MCP 明细', { privateMcp: true })];
+    const { nodes, links } = buildOntologyGraph([...company, ...mcp]);
+    const order = nodes.filter(n => n.key === 'order');
+    expect(order).toHaveLength(1);
+    expect(order[0]!.draft.evidence).toHaveLength(2);
+    expect(order[0]!.draft.attributes).toEqual([{ name: '币种', value: 'NZD', citation: 1 }, { name: '定金', value: '60%', citation: 2 }]);
+    expect(order[0]!.draft.privateMcp).toBe(false);
+    expect(nodes.find(n => n.key === 'mcp-item')!.draft.privateMcp).toBe(true);
+    expect(links.some(l => l.id === 'rx')).toBe(true);
   });
 
-  it('keeps assertion recordedAt and effective dates on the node instead of evidence retrievedAt', () => {
-    const d = { ...object('order', '订单'), recordedAt: '2026-11-01T12:00:00Z', effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31' };
-    const node = buildOntologyGraph([d]).nodes.find(n => n.key === 'order')!;
+  it('keeps assertion recordedAt and effective dates on the node', () => {
+    const d = object('order', '订单', { recordedAt: '2026-11-01T12:00:00Z', effectiveFrom: '2026-08-01', effectiveTo: '2026-10-31' });
+    const node = buildOntologyGraph([d]).nodes[0]!;
     expect(node.draft.recordedAt).toBe('2026-11-01T12:00:00Z');
     expect(node.draft.effectiveFrom).toBe('2026-08-01');
-    expect(node.draft.effectiveTo).toBe('2026-10-31');
+  });
+});
+
+describe('evidence helpers', () => {
+  it('groups passages by document and keeps citation indexes', () => {
+    const groups = groupEvidence([{ locator: 'a.md#L1', quote: '1' }, { locator: 'b.md', quote: '2' }, { locator: 'a.md#L9', quote: '3' }]);
+    expect(groups.map(g => [g.label, g.items.map(i => i.index)])).toEqual([['a.md', [0, 2]], ['b.md', [1]]]);
+    expect(sourceLabel('VERA CRM / get_crm_guide')).toBe('VERA CRM / get_crm_guide');
+  });
+
+  it('turns a JSON tool fragment into readable text', () => {
+    const text = readableQuote('{"title":"CRM operating guide","summary":"Workflow order: customer order → review","mcp_tools":["get_order","approve_order"]');
+    expect(text).not.toMatch(/[{}"[\]]/);
+    expect(text).toContain('title: CRM operating guide');
+    expect(text).toContain('mcp tools: get_order · approve_order');
+    expect(readableQuote('Plain   prose.')).toBe('Plain prose.');
   });
 });
 
 describe('ontology graph view', () => {
-  const render = (lang: 'en' | 'zh', shared: OntologyDraft[], personal: OntologyDraft[] = [], companyName?: string) =>
-    renderToStaticMarkup(<LangProvider initial={lang}><OntologyGraphView shared={shared} personal={personal} companyName={companyName} time={{ at: '2026-11-08', known: '2026-11-08' }} /></LangProvider>);
+  const render = (lang: 'en' | 'zh', list: OntologyDraft[], companyName?: string) =>
+    renderToStaticMarkup(<LangProvider initial={lang}><OntologyGraphView drafts={list} companyName={companyName} time={{ at: '2026-11-08', known: '2026-11-08' }} /></LangProvider>);
 
   it('says honestly when analysis found no entities', () => {
-    const html = render('zh', [], []);
+    const html = render('zh', []);
     expect(html).toContain('还没有实体');
     expect(html).toContain('href="#knowledge?view=analysis"');
     expect(html).not.toContain('<svg');
   });
 
-  it('draws one tenant graph from company and MCP drafts, with source filters', () => {
-    const html = render('zh', drafts, [object('mcp', 'MCP 对象')]);
-    expect(html).toContain('role="tablist"');
-    expect(html).toMatch(/全部来源 <span>8<\/span>/);
-    expect(html).toMatch(/企业资料 <span>7<\/span>/);
-    expect(html).toMatch(/我的 MCP 来源 <span>2<\/span>/);
-    expect(html).toContain('8 个实体 ·');
-    expect(html).toContain('aria-selected="true"');
+  it('draws one graph for company and MCP drafts — no source split', () => {
+    const html = render('zh', [...drafts, object('mcp', 'MCP 对象', { privateMcp: true })], 'ISWELL');
+    expect(html).not.toContain('role="tablist"');
+    expect(html).not.toContain('我的 MCP 来源');
+    expect(html).toContain('ISWELL 的本体');
+    expect(html).toContain('7 个实体 ·');
     expect(html).toContain('<svg');
     expect(html).toContain('数字员工');
-    expect(html).toContain('来源文档');
-    expect(html.match(/<li><button type="button">/g)?.length).toBeGreaterThanOrEqual(8);
+    expect(html).toContain('仅自己');
+    expect(html).toContain('来源图层');
   });
 
-  it('shows identity, version and times in the entity list chrome', () => {
-    const html = render('zh', [object('order', '订单')]);
-    expect(html).toContain('业务对象');
-    expect(html).toContain('订单');
-  });
-
-  it('shows the unified graph when only personal drafts exist', () => {
-    const html = render('en', [], drafts);
-    expect(html).not.toContain('role="tablist"');
-    expect(html).toContain('All sources');
-    expect(html).not.toContain('Only you can see drafts from your MCP sources.');
-  });
-
-  it('defaults to all sources so company and MCP entities share one canvas', () => {
-    const html = render('en', [], drafts, 'VERA Shading');
-    expect(html).toContain('role="tablist"');
-    expect(html).toMatch(/aria-selected="true"[^>]*>All sources/);
-    expect(html).toContain('8 entities ·');
-    expect(html).toContain('<svg');
-    expect(html).toContain('VERA Shading');
-  });
-
-  it('merges the same business entity from company and MCP sources and keeps cross-source relations', () => {
-    const company = [object('order', '采购订单'), relation('rx', 'order', 'mcp-item', '引用')];
-    const mcp = [object('order', '订单 MCP'), object('mcp-item', 'MCP 明细')];
-    const { nodes, links } = buildOntologyGraph([...company, ...mcp]);
-    expect(nodes.filter(n => n.key === 'order')).toHaveLength(1);
-    expect(nodes.find(n => n.key === 'order')!.draft.evidence.length).toBeGreaterThan(1);
-    expect(links.some(l => l.id === 'rx')).toBe(true);
+  it('offers type filters as a legend with counts', () => {
+    const html = render('en', drafts);
+    expect(html).toMatch(/aria-pressed="true"[^>]*><i aria-hidden="true"><\/i>Business object<span>4<\/span>/);
+    expect(html).toContain('Tool');
   });
 
   it('has no Chinese interface text in English', () => {

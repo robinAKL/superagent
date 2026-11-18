@@ -16,10 +16,14 @@ export interface RecommendedWorkflow {
     employeeKey?: string; toolKey?: string; citations: number[];
   }[];
 }
+/** One property of an ontology entity, e.g. "Deposit share = 60%". citation is the 1-based index into the draft's evidence. */
+export interface OntologyAttribute { name: string; value: string; citation?: number }
 export interface Recommendation {
   id: string; key: string; kind: 'employee' | 'tool' | 'sop' | 'object' | 'relation'; name: string; description: string;
   origin?: 'manual' | 'inferred';
   relation?: { from: string; to: string; label: string };
+  /** Object drafts: source-backed properties shown as the entity's attributes in the ontology. */
+  attributes?: OntologyAttribute[];
   workflow?: RecommendedWorkflow;
   evidence: Evidence[]; humanLocked: boolean; deleted: boolean;
   proposedChange?: { name: string; description: string; evidence: Evidence[]; relation?: { from:string;to:string;label:string }; workflow?: RecommendedWorkflow };
@@ -203,6 +207,7 @@ export function mergeRecommendations(
     if (existing) {
       delete existing.effectiveFrom;
       delete existing.effectiveTo;
+      delete existing.attributes;
       Object.assign(existing, draft, { recordedAt: existing.recordedAt ?? recordedAt });
     }
     else {

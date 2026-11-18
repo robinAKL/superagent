@@ -7,6 +7,7 @@ import { MaterialReview, type Material } from './MaterialReview';
 import { AnalysisDraftIndex } from './AnalysisDraftIndex';
 import type { McpConnection } from './McpKnowledge';
 import { OntologyGraphView } from '../components/OntologyGraphView';
+import { groupEvidence, readableQuote } from '../components/evidence';
 import { AnalysisResults, knowledgeWorkflowCandidates, SopWorkspace, useDraftRead } from './SuperAgentPage';
 import { AssertionFacts, DimensionChips, KnowledgeTimeline, RuleCard, TimeBar, dimensionsOf, objectNames, timeFromParams, visibleDraft, type Dimension, type KnowledgeTime } from './KnowledgeLenses';
 import { sopTabView, type LoadCount } from './knowledge-sop-tab';
@@ -24,6 +25,7 @@ interface Recommendation {
   relation?: { from: string; to: string; label: string };
   recordedAt?: string; effectiveFrom?: string; effectiveTo?: string; ruleLike?: boolean;
   assignment?: { tools: string[]; sops: string[] };
+  attributes?: { name: string; value: string; citation?: number }[];
   origin?: 'manual' | 'inferred';
 }
 interface Overview {
@@ -165,6 +167,8 @@ const TEXT = {
     recName: 'Name',
     recDesc: 'Description',
     recSaveLockBtn: 'Save and lock',
+    recConfirmBtn: 'Confirm and lock', recEditBtn: 'Edit', recCancelBtn: 'Cancel',
+    recAttributes: 'Attributes', recShowMore: 'Show more', recShowLess: 'Show less', recPassages: '{n} passages', recCite: 'Source {n}',
     recDeleteSuccess: 'Draft deleted; future analyses will not restore it automatically.',
     recDeleteBtn: 'Delete draft',
     recProposalTitle: 'Analysis proposed a change without overwriting manual content',
@@ -418,6 +422,8 @@ const TEXT = {
     recName: '名称',
     recDesc: '说明',
     recSaveLockBtn: '保存并人工锁定',
+    recConfirmBtn: '确认并锁定', recEditBtn: '编辑', recCancelBtn: '取消',
+    recAttributes: '属性', recShowMore: '展开', recShowLess: '收起', recPassages: '{n} 处', recCite: '依据 {n}',
     recDeleteSuccess: '草案已删除，后续分析不会自动恢复。',
     recDeleteBtn: '删除草案',
     recProposalTitle: '分析提出了修改，尚未覆盖人工内容',
@@ -677,33 +683,38 @@ function KnowledgeFlows({ t }: { t: Translate }) {
   </div>;
 }
 
-function EvidenceList({ evidence, t, collapsible = false }: { evidence: Evidence[]; t: Translate; collapsible?: boolean }) {
-  const group = useId();
+function EvidenceList({ evidence, t, collapsible = false, focus }: { evidence: Evidence[]; t: Translate; collapsible?: boolean; focus?: number | null }) {
   if (!evidence.length) return <p className="knowledge-empty">{t('noEvidence')}</p>;
+  if (collapsible) {
+    // One row per source document; the passages it supports sit inside as readable text, not raw tool output.
+    const groups = groupEvidence(evidence);
+    return <ul className="knowledge-evidence-groups">{groups.map(group => {
+      const focused = focus != null && group.items.some(item => item.index === focus);
+      return <li key={`${group.key}:${focused ? 'f' : ''}`}><details open={focused || groups.length === 1 || undefined}>
+        <summary>
+          <span className="knowledge-evidence-location">{group.label}</span>
+          <span className="knowledge-evidence-count">{t('recPassages', { n: group.items.length })}</span>
+        </summary>
+        <ol>{group.items.map(({ entry, index }) => {
+          const retrieved = entry.retrievedAt ? t('analysisMcpRetrieved', { date: new Date(entry.retrievedAt).toLocaleString() }) : undefined;
+          return <li key={`${entry.start}:${index}`} className={index === focus ? 'is-focused' : ''} ref={el => { if (el && index === focus) el.scrollIntoView({ block: 'nearest' }); }}>
+            <span className="knowledge-cite is-static">{index + 1}</span>
+            <div><p>{readableQuote(entry.quote)}</p><small>{retrieved ?? t('evidenceLocator', { version: entry.version, start: entry.start, end: entry.end })}</small></div>
+          </li>;
+        })}</ol>
+      </details></li>;
+    })}</ul>;
+  }
 
-  return <ol className={collapsible ? 'knowledge-evidence knowledge-evidence-collapsible' : 'knowledge-evidence'}>
+  return <ol className="knowledge-evidence">
     {evidence.map((entry, index) => {
       const position = t('evidenceLocator', { version: entry.version, start: entry.start, end: entry.end });
       const source = t('evidenceSource', { sourceId: entry.sourceId });
       const retrieved = entry.retrievedAt ? t('analysisMcpRetrieved', { date: new Date(entry.retrievedAt).toLocaleString() }) : undefined;
       return <li key={`${entry.sourceId}:${entry.version}:${entry.start}:${index}`}>
-        {collapsible ? <details name={group}>
-          <summary>
-            <span className="knowledge-evidence-location">{entry.locator || source}</span>
-            <span className="knowledge-evidence-preview" aria-hidden="true">{entry.quote}</span>
-          </summary>
-          <div className="knowledge-evidence-body">
-            <div className="knowledge-evidence-scroll" role="region" aria-label={t('evidenceExcerpt')} tabIndex={0}>
-              <blockquote>{entry.quote}</blockquote>
-            </div>
-            <small>{retrieved ?? position}</small>
-            {retrieved ? null : <small>{source}</small>}
-          </div>
-        </details> : <>
-          <blockquote>{entry.quote}</blockquote>
-          <p>{entry.locator} {!retrieved ? <span>· {position}</span> : null}</p>
-          <small>{retrieved ?? source}</small>
-        </>}
+        <blockquote>{entry.quote}</blockquote>
+        <p>{entry.locator} {!retrieved ? <span>· {position}</span> : null}</p>
+        <small>{retrieved ?? source}</small>
       </li>;
     })}
   </ol>;
@@ -802,15 +813,23 @@ function RecommendationCard({ recommendation: r, privateMcp, disabled, onAction,
 }) {
   const [name, setName] = useState(r.name);
   const [description, setDescription] = useState(r.description);
-  useEffect(() => { setName(r.name); setDescription(r.description); }, [r.name, r.description]);
+  const [editing, setEditing] = useState(false);
+  const [descOpen, setDescOpen] = useState(false);
+  const [focus, setFocus] = useState<number | null>(null);
+  useEffect(() => { setName(r.name); setDescription(r.description); setEditing(false); setDescOpen(false); setFocus(null); }, [r.id, r.name, r.description]);
   async function save(event: FormEvent) {
     event.preventDefault();
-    await onAction(`lock:${r.id}`, `/recommendations/${encodeURIComponent(r.id)}/lock`, { name: name.trim(), description: description.trim() }, t('recLockSuccess'));
+    if (await onAction(`lock:${r.id}`, `/recommendations/${encodeURIComponent(r.id)}/lock`, { name: name.trim(), description: description.trim() }, t('recLockSuccess'))) setEditing(false);
   }
+  const attributes = r.attributes ?? [];
+  const canSave = !disabled && !!name.trim() && !!description.trim() && (r.origin === 'manual' || r.evidence.length > 0);
+  // Read view first: the draft reads like a knowledge card (what it is, its properties, where it came from).
+  // Inputs only appear when the reviewer chooses to edit.
   return <article className="knowledge-recommendation">
     <header className="knowledge-recommendation-head">
-      <div>
-        <h3>{t('recDraftKind', { kind: label(r.kind) })}</h3>
+      <div className="knowledge-rec-title">
+        <span className="knowledge-rec-kind">{t('recDraftKind', { kind: label(r.kind) })}</span>
+        <h3>{r.name}</h3>
         {privateMcp ? <p className="helper">{t('analysisMcpDraft')}</p> : r.origin === 'manual' ? <p className="helper">{t('recOriginManual')}</p> : null}
       </div>
       <span className={`knowledge-badge ${r.humanLocked ? 'is-green' : ''}`}>{r.humanLocked ? t('recHumanLocked') : t('recPendingReview')}</span>
@@ -819,13 +838,24 @@ function RecommendationCard({ recommendation: r, privateMcp, disabled, onAction,
     <form onSubmit={save}>
       {r.stale ? <p className="knowledge-alert">{t('recStaleAlert')}</p> : null}
       <div className="knowledge-recommendation-body">
-        <div className="knowledge-form knowledge-recommendation-editor">
-          <label className="field"><span>{t('recName')}</span><input required maxLength={160} value={name} onChange={event => setName(event.target.value)} /></label>
-          <label className="field"><span>{t('recDesc')}</span><textarea required maxLength={4000} rows={4} value={description} onChange={event => setDescription(event.target.value)} /></label>
+        <div className="knowledge-recommendation-main">
+          {editing ? <div className="knowledge-form knowledge-recommendation-editor">
+            <label className="field"><span>{t('recName')}</span><input required maxLength={160} value={name} onChange={event => setName(event.target.value)} /></label>
+            <label className="field"><span>{t('recDesc')}</span><textarea required maxLength={4000} rows={7} value={description} onChange={event => setDescription(event.target.value)} /></label>
+          </div> : <section className="knowledge-rec-desc" aria-label={t('recDesc')}>
+            <h4>{t('recDesc')}</h4>
+            <p className={descOpen ? '' : 'is-clamped'}>{r.description}</p>
+            {r.description.length > 220 ? <button type="button" className="knowledge-link-btn" onClick={() => setDescOpen(open => !open)}>{t(descOpen ? 'recShowLess' : 'recShowMore')}</button> : null}
+          </section>}
+          {attributes.length ? <section className="knowledge-rec-attrs" aria-label={t('recAttributes')}>
+            <h4>{t('recAttributes')} <span>{attributes.length}</span></h4>
+            <dl>{attributes.map(a => <div key={a.name}><dt>{a.name}</dt><dd>{a.value}{a.citation && a.citation <= r.evidence.length
+              ? <button type="button" className="knowledge-cite" aria-label={t('recCite', { n: a.citation })} onClick={() => setFocus(a.citation! - 1)}>{a.citation}</button> : null}</dd></div>)}</dl>
+          </section> : null}
         </div>
         {r.origin !== 'manual' ? <section className="knowledge-recommendation-evidence" aria-label={t('recEvidenceTitle')}>
           <h4>{t('recEvidenceTitle')} <span>{r.evidence.length}</span></h4>
-          <EvidenceList evidence={r.evidence} t={t} collapsible />
+          <EvidenceList evidence={r.evidence} t={t} collapsible focus={focus} />
         </section> : null}
       </div>
       {r.proposedChange ? <section className="knowledge-proposal">
@@ -837,7 +867,10 @@ function RecommendationCard({ recommendation: r, privateMcp, disabled, onAction,
       </section> : null}
       <div className="knowledge-recommendation-actions">
         <button className="btn knowledge-danger" type="button" disabled={disabled} onClick={() => void onAction(`delete:${r.id}`, `/recommendations/${encodeURIComponent(r.id)}/delete`, {}, t('recDeleteSuccess'))}>{t('recDeleteBtn')}</button>
-        <button className="btn primary" type="submit" disabled={disabled || !name.trim() || !description.trim() || (r.origin !== 'manual' && !r.evidence.length)}>{t('recSaveLockBtn')}</button>
+        {editing
+          ? <button className="btn" type="button" disabled={disabled} onClick={() => { setName(r.name); setDescription(r.description); setEditing(false); }}>{t('recCancelBtn')}</button>
+          : <button className="btn" type="button" disabled={disabled} onClick={() => setEditing(true)}>{t('recEditBtn')}</button>}
+        {editing || !r.humanLocked ? <button className="btn primary" type="submit" disabled={!canSave}>{t(editing ? 'recSaveLockBtn' : 'recConfirmBtn')}</button> : null}
       </div>
     </form>
   </article>;
@@ -1389,7 +1422,7 @@ export function KnowledgePage() {
         {shownDrafts.length ? <>
           <AnalysisDraftIndex key={dimension} drafts={shownDrafts} renderDraft={draft => <div className="knowledge-recommendations">
             <RecommendationCard key={draft.id} recommendation={draft} privateMcp={'privateMcp' in draft} disabled={!!busy} onAction={action} label={label} t={t}
-              facts={<AssertionFacts draft={draft} runs={lensRuns} names={names} stale={draft.stale} />} />
+              facts={<AssertionFacts draft={draft} runs={lensRuns} names={names} stale={draft.stale} hideEntity />} />
           </div>} />
         </> : <p className="knowledge-empty">{t('noRecommendations')}</p>}
       </section>
@@ -1404,8 +1437,7 @@ export function KnowledgePage() {
       {view === 'graph' ? <section className="panel knowledge-section knowledge-graph-tab" aria-labelledby="knowledge-graph-heading">
         <div className="knowledge-section-head"><div><h2 id="knowledge-graph-heading">{t('workspaceGraph')}</h2><p className="helper">{t('graphIntro')}</p></div></div>
         <OntologyGraphView time={time} companyName={companyName || undefined}
-          shared={timedDrafts.filter(draft => !('privateMcp' in draft) && !draft.stale && draft.evidence.length > 0)}
-          personal={timedDrafts.filter(draft => 'privateMcp' in draft && !draft.stale && draft.evidence.length > 0)} />
+          drafts={timedDrafts.filter(draft => !draft.stale && draft.evidence.length > 0)} />
       </section> : null}
 
       {view === 'timeline' ? <section className="panel knowledge-section">
