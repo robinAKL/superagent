@@ -1,7 +1,9 @@
 import Fastify from 'fastify';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { expect, it } from 'vitest';
 import { bindRoomStore, createCommandRoom, reloadRoom, roomModule, roomState } from '../room/index.js';
 import { registerWorker, resetWorkers, workerLinkModule, workersState } from './index.js';
@@ -24,7 +26,7 @@ it('assigns once to the bound device while offline and accepts only its report',
   await workersState.registry.patchCapabilities(tenantId, wrongProject.worker.id, { allowProjects: ['project-c'] });
   const wrongTenant = await worker(otherTenant, projectId);
   const app = Fastify();
-  const directory = await mkdtemp(join(tmpdir(), 'superagent-room-link-'));
+  const directory = await mkdtemp(join(tmpdir(), 'superagent room link '));
   app.addHook('preHandler', async (request) => {
     request.user = { tenantId, userId: 'owner', roles: ['owner'], projectScopes: [] };
   });
@@ -71,8 +73,12 @@ it('assigns once to the bound device while offline and accepts only its report',
       for await (const chunk of process.stdin) prompt += chunk;
       console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: prompt + ' complete.' } }));
     `);
-    const moduleUrl = new URL('../../../../link/link.mjs', import.meta.url).href;
-    const { WorkerLink } = await import(moduleUrl);
+    const runtimeSource = new URL('../../../../link/', import.meta.url);
+    await Promise.all(['link.mjs', 'agent.mjs', 'codex-app-server.mjs'].map(file =>
+      copyFile(new URL(file, runtimeSource), join(directory, file)),
+    ));
+    const nativeRequire = createRequire(import.meta.url);
+    const { WorkerLink } = nativeRequire(fileURLToPath(pathToFileURL(join(directory, 'link.mjs'))));
     const dispatchFetcher = async (url: URL, init: RequestInit) => {
       const response = await app.inject({
         method: 'POST', url: url.pathname.replace('/api/v1/worker-link', '/link'),

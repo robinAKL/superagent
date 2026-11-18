@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -60,7 +60,10 @@ async function fixture(t, agent = 'codex', options = {}) {
     return Response.json({});
   };
   return {
-    make: () => new WorkerLink(config, 'test-token', { fetcher, launchWithApprovals: options.launchWithApprovals, sleep: options.sleep }),
+    make: () => new WorkerLink(config, 'test-token', {
+      fetcher, launch: options.launch, launchWithApprovals: options.launchWithApprovals,
+      sleep: options.sleep, renameState: options.renameState,
+    }),
     args: async () => (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse),
     state: async () => JSON.parse(await readFile(stateFile, 'utf8')),
     save: async (state) => writeFile(stateFile, JSON.stringify(state)),
@@ -129,6 +132,57 @@ test('restarts an unfinished task through its explicit saved session', async (t)
     await link.runNext();
     assert.deepEqual((await f.args())[0].argv, args);
   }
+});
+
+test('retries a transient state-file lock while recording the running agent session', async (t) => {
+  let retried = false;
+  const f = await fixture(t, 'codex', {
+    async renameState(from, to) {
+      const saved = JSON.parse(await readFile(from, 'utf8'));
+      if (saved.jobs[0]?.session && !retried) {
+        retried = true;
+        throw Object.assign(new Error('synthetic sharing violation'), { code: 'EPERM' });
+      }
+      return rename(from, to);
+    },
+  });
+  f.wake(1, 'Record a session');
+  const link = f.make();
+  await link.poll(undefined, 0);
+  await link.runNext();
+  assert.equal(retried, true);
+  assert.equal((await f.state()).jobs[0].session, 'session-1');
+  assert.ok(f.requests.some(({ path }) => path.endsWith('/report')));
+});
+
+test('cancels running work and preserves the last durable cursor if the state-file lock persists', async (t) => {
+  let cancelled = false;
+  const f = await fixture(t, 'codex', {
+    async renameState(from, to) {
+      const saved = JSON.parse(await readFile(from, 'utf8'));
+      if (saved.jobs[0]?.session) throw Object.assign(new Error('synthetic persistent lock'), { code: 'EPERM' });
+      return rename(from, to);
+    },
+    launch(_project, _prompt, _session, notify) {
+      let finish;
+      const completed = new Promise(resolve => { finish = resolve; });
+      queueMicrotask(() => notify({ session: 'session-locked' }));
+      return {
+        completed,
+        cancel() {
+          cancelled = true;
+          finish({ cancelled: true });
+        },
+      };
+    },
+  });
+  f.wake(1, 'Record a session');
+  const link = f.make();
+  await link.poll(undefined, 0);
+  await assert.rejects(link.runNext(), { code: 'EPERM' });
+  assert.equal(cancelled, true);
+  assert.equal((await f.state()).cursor, 1);
+  assert.ok(!f.requests.some(({ path }) => path.endsWith('/report')));
 });
 
 test('relays an App Server approval over the worker API and applies one decision', async (t) => {
