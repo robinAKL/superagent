@@ -26,6 +26,9 @@ export interface PairStore {
   byDeviceCode(deviceCode: string): Promise<PairSession | null>;
   byUserCode(userCode: string): Promise<PairSession | null>;
   save(session: PairSession): Promise<void>;
+  /** Atomically take a pending unexpired session. Concurrent allow/deny lose. */
+  takePending(userCode: string, next: PairStatus, now: number): Promise<PairSession | null>;
+  consumeToken(deviceCode: string): Promise<string | null>;
 }
 
 export class MemoryPairStore implements PairStore {
@@ -50,6 +53,22 @@ export class MemoryPairStore implements PairStore {
   async save(session: PairSession): Promise<void> {
     this.byDevice.set(session.deviceCode, clone(session));
     this.byUser.set(session.userCode, session.deviceCode);
+  }
+
+  async takePending(userCode: string, next: PairStatus, now: number): Promise<PairSession | null> {
+    const device = this.byUser.get(normalizeUserCode(userCode));
+    const session = device ? this.byDevice.get(device) : undefined;
+    if (!session || session.status !== 'pending' || now >= session.expiresAt) return null;
+    session.status = next;
+    return clone(session);
+  }
+
+  async consumeToken(deviceCode: string): Promise<string | null> {
+    const session = this.byDevice.get(deviceCode);
+    if (!session?.issuedToken) return null;
+    const token = session.issuedToken;
+    session.issuedToken = null;
+    return token;
   }
 }
 
@@ -121,11 +140,7 @@ export async function pollPair(store: PairStore, deviceCode: string, now: number
   if (!session) return { status: 'expired' };
   if (session.status === 'pending' && now >= session.expiresAt) return { status: 'expired' };
   if (session.status !== 'allowed') return { status: session.status === 'pending' ? 'pending' : 'denied' };
-  const token = session.issuedToken;
-  if (token) {
-    session.issuedToken = null;
-    await store.save(session);
-  }
+  const token = await store.consumeToken(deviceCode);
   return { status: 'allowed', ...(token ? { token, workerId: session.workerId ?? undefined } : { workerId: session.workerId ?? undefined }) };
 }
 
@@ -136,10 +151,12 @@ export async function allowPair(
   actor: { tenantId: string; userId: string },
   now: number,
 ): Promise<PairSession | 'missing' | 'expired' | 'taken'> {
-  const session = await store.byUserCode(userCode);
-  if (!session) return 'missing';
-  if (session.status !== 'pending') return 'taken';
-  if (now >= session.expiresAt) return 'expired';
+  const existing = await store.byUserCode(userCode);
+  if (!existing) return 'missing';
+  if (existing.status !== 'pending') return 'taken';
+  if (now >= existing.expiresAt) return 'expired';
+  const session = await store.takePending(userCode, 'allowed', now);
+  if (!session) return 'taken';
   const capabilities: WorkerCapabilities = {
     kinds: [...WORK_KINDS],
     ...(session.agents.length ? { agents: session.agents } : {}),
@@ -149,7 +166,6 @@ export async function allowPair(
     { tenantId: actor.tenantId, name: session.hostname, kind: 'link', capabilities, createdBy: actor.userId },
     now,
   );
-  session.status = 'allowed';
   session.tenantId = actor.tenantId;
   session.workerId = worker.id;
   session.issuedToken = token;
@@ -158,13 +174,12 @@ export async function allowPair(
 }
 
 export async function denyPair(store: PairStore, userCode: string, now: number): Promise<PairSession | 'missing' | 'taken' | 'expired'> {
-  const session = await store.byUserCode(userCode);
-  if (!session) return 'missing';
-  if (session.status !== 'pending') return 'taken';
-  if (now >= session.expiresAt) return 'expired';
-  session.status = 'denied';
-  await store.save(session);
-  return session;
+  const existing = await store.byUserCode(userCode);
+  if (!existing) return 'missing';
+  if (existing.status !== 'pending') return 'taken';
+  if (now >= existing.expiresAt) return 'expired';
+  const session = await store.takePending(userCode, 'denied', now);
+  return session ?? 'taken';
 }
 
 const COLUMNS = 'device_code, user_code, hostname, agents, status, tenant_id, worker_id, issued_token, extract(epoch from expires_at)*1000 as expires_at, extract(epoch from created_at)*1000 as created_at';
@@ -224,5 +239,28 @@ export class PgPairStore implements PairStore {
        WHERE device_code=$1`,
       [session.deviceCode, session.status, session.tenantId, session.workerId, session.issuedToken, JSON.stringify(session.agents)],
     );
+  }
+
+  async takePending(userCode: string, next: PairStatus, now: number): Promise<PairSession | null> {
+    const { rows } = await this.db.query<PairRow>(
+      `UPDATE worker_pair_sessions SET status = $2
+       WHERE user_code = $1 AND status = 'pending' AND expires_at > to_timestamp($3::double precision / 1000)
+       RETURNING ${COLUMNS}`,
+      [normalizeUserCode(userCode), next, now],
+    );
+    return rows[0] ? fromRow(rows[0]) : null;
+  }
+
+  async consumeToken(deviceCode: string): Promise<string | null> {
+    const current = await this.byDeviceCode(deviceCode);
+    const token = current?.issuedToken;
+    if (!token) return null;
+    const { rows } = await this.db.query<{ device_code: string }>(
+      `UPDATE worker_pair_sessions SET issued_token = NULL
+       WHERE device_code = $1 AND issued_token = $2
+       RETURNING device_code`,
+      [deviceCode, token],
+    );
+    return rows[0] ? token : null;
   }
 }

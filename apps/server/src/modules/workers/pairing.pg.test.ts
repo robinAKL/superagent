@@ -38,6 +38,14 @@ live('PgPairStore: allow issues a token once and isolates tenants', async () => 
     const stolen = await allowPair(store, registry, other.userCode, { tenantId: randomUUID(), userId: 'b' }, now);
     if (typeof stolen === 'string') throw new Error(stolen);
     expect(stolen.tenantId).not.toBe(tenantA);
+
+    const raced = await startPair(store, { hostname: 'race' }, now);
+    const [firstAllow, secondAllow] = await Promise.all([
+      allowPair(store, registry, raced.userCode, { tenantId: tenantA, userId: 'a' }, now),
+      allowPair(store, registry, raced.userCode, { tenantId: randomUUID(), userId: 'b' }, now),
+    ]);
+    const outcomes = [firstAllow, secondAllow].map((r) => (typeof r === 'string' ? r : 'ok'));
+    expect(outcomes.sort()).toEqual(['ok', 'taken']);
   } finally {
     await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     client.release();

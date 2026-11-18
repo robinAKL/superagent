@@ -1,5 +1,5 @@
 import { normalizeWork, requireTenantUuid, type WorkRef } from './queue.js';
-import { CLAIM_TASK_KIND_SQL, CLAIM_TASK_SQL, DEAD_LETTER_SQL, FIND_OPEN_WORK_SQL, HEARTBEAT_TASK_SQL, INSERT_WORK_SQL, RELEASE_TASK_SQL, SUCCEED_TASK_SQL, UPDATE_NOT_BEFORE_SQL } from './sql.js';
+import { CLAIM_TASK_KIND_SCOPE_SQL, CLAIM_TASK_KIND_SQL, CLAIM_TASK_SQL, DEAD_LETTER_SQL, FIND_OPEN_WORK_SQL, HEARTBEAT_TASK_SQL, INSERT_WORK_SQL, RELEASE_TASK_SQL, SUCCEED_TASK_SQL, UPDATE_NOT_BEFORE_SQL } from './sql.js';
 
 export interface Queryable {
   query<T>(sql: string, params: readonly unknown[]): Promise<{ rows: T[] }>;
@@ -11,6 +11,8 @@ export interface ClaimedTaskRow {
   lease_owner: string;
   kind?: string | null;
   tenant_id?: string;
+  employee_id?: string | null;
+  project_id?: string | null;
   payload?: WorkRef | null;
   max_attempts?: number;
   identity_snapshot?: Record<string, unknown> | null;
@@ -24,11 +26,19 @@ export async function claimTask(
   maxAttempts: number,
   tenantId: string,
   kinds?: readonly string[],
+  scope?: { employees?: readonly string[]; projects?: readonly string[] },
 ): Promise<ClaimedTaskRow | null> {
   const filtered = kinds !== undefined;
+  const employees = scope?.employees?.length ? [...scope.employees] : null;
+  const projects = scope?.projects?.length ? [...scope.projects] : null;
+  const scoped = filtered && scope !== undefined;
   const result = await db.query<ClaimedTaskRow>(
-    filtered ? CLAIM_TASK_KIND_SQL : CLAIM_TASK_SQL,
-    filtered ? [workerId, leaseMs, maxAttempts, tenantId, [...kinds]] : [workerId, leaseMs, maxAttempts, tenantId],
+    scoped ? CLAIM_TASK_KIND_SCOPE_SQL : filtered ? CLAIM_TASK_KIND_SQL : CLAIM_TASK_SQL,
+    scoped
+      ? [workerId, leaseMs, maxAttempts, tenantId, [...kinds], employees, projects]
+      : filtered
+        ? [workerId, leaseMs, maxAttempts, tenantId, [...kinds]]
+        : [workerId, leaseMs, maxAttempts, tenantId],
   );
   return result.rows[0] ?? null;
 }

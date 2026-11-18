@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { claimTask, deadLetterTask, enqueueWork, heartbeatTask, releaseTask, succeedTask } from './pg-queue.js';
-import { CLAIM_TASK_KIND_SQL, CLAIM_TASK_SQL, DEAD_LETTER_SQL, FIND_OPEN_WORK_SQL, HEARTBEAT_TASK_SQL, INSERT_WORK_SQL, OPEN_WORK_INDEX_SQL, RELEASE_TASK_SQL, SUCCEED_TASK_SQL, UPDATE_NOT_BEFORE_SQL } from './sql.js';
+import { CLAIM_TASK_KIND_SCOPE_SQL, CLAIM_TASK_KIND_SQL, CLAIM_TASK_SQL, DEAD_LETTER_SQL, FIND_OPEN_WORK_SQL, HEARTBEAT_TASK_SQL, INSERT_WORK_SQL, OPEN_WORK_INDEX_SQL, RELEASE_TASK_SQL, SUCCEED_TASK_SQL, UPDATE_NOT_BEFORE_SQL } from './sql.js';
 
 it('sends the SKIP LOCKED claim and returns no row when the queue is empty', async () => {
   const calls: { sql: string; params: readonly unknown[] }[] = [];
@@ -42,6 +42,30 @@ it('limits a Postgres claim to the named kinds and does not take a room row', as
   expect(calls[0]?.sql).toMatch(/tenant_id = \$4::uuid/);
   expect(calls[0]?.sql).toMatch(/FOR UPDATE SKIP LOCKED/);
   expect(calls[0]?.params).toEqual(['worker-a', 30_000, 3, '11111111-1111-4111-8111-111111111111', ['knowledge.parse']]);
+});
+
+it('puts employee and project allow-lists into the SKIP LOCKED claim', async () => {
+  const calls: { sql: string; params: readonly unknown[] }[] = [];
+  await claimTask(
+    {
+      async query(sql, params) {
+        calls.push({ sql, params });
+        return { rows: [] };
+      },
+    },
+    'worker-a',
+    30_000,
+    3,
+    '11111111-1111-4111-8111-111111111111',
+    ['knowledge.parse'],
+    { employees: ['emp-a'], projects: ['proj-1'] },
+  );
+  expect(calls[0]?.sql).toBe(CLAIM_TASK_KIND_SCOPE_SQL);
+  expect(calls[0]?.sql).toMatch(/employee_id::text = ANY\(\$6::text\[\]\)/);
+  expect(calls[0]?.sql).toMatch(/payload->>'projectId'/);
+  expect(calls[0]?.params).toEqual([
+    'worker-a', 30_000, 3, '11111111-1111-4111-8111-111111111111', ['knowledge.parse'], ['emp-a'], ['proj-1'],
+  ]);
 });
 
 it('treats a heartbeat with no updated row as a lost lease', async () => {

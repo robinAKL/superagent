@@ -21,6 +21,7 @@ CREATE TABLE "${SCHEMA}".tasks (
   identity_snapshot jsonb,
   dead_letter boolean NOT NULL DEFAULT false,
   kind text,
+  employee_id text,
   payload jsonb,
   not_before timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
@@ -161,6 +162,39 @@ live('a failed claim retries once, then dead-letter opens a single exception ite
         [taskId],
       );
       expect(task.rows[0]).toEqual({ dead_letter: true, status: 'waiting' });
+    } finally {
+      client.release();
+    }
+  });
+}, 20_000);
+
+live('a scoped claim skips other employees and projects in one SKIP LOCKED statement', async () => {
+  await withDatabase(async (pool) => {
+    const client = await pool.connect();
+    try {
+      await client.query(`SET search_path TO "${SCHEMA}"`);
+      await client.query(
+        `INSERT INTO tasks (id, tenant_id, status, attempt, dead_letter, kind, employee_id, payload, created_at)
+         VALUES (gen_random_uuid(), $1::uuid, 'assigned', 0, false, 'knowledge.parse', 'emp-b', '{"projectId":"proj-2","operationId":"other"}'::jsonb, now())`,
+        [LIVE_TENANT],
+      );
+      const mine = await client.query<{ id: string }>(
+        `INSERT INTO tasks (id, tenant_id, status, attempt, dead_letter, kind, employee_id, payload, created_at)
+         VALUES (gen_random_uuid(), $1::uuid, 'assigned', 0, false, 'knowledge.parse', 'emp-a', '{"projectId":"proj-1","itemId":"mine","operationId":"mine"}'::jsonb, now() + interval '1 millisecond')
+         RETURNING id`,
+        [LIVE_TENANT],
+      );
+      const db = bound(pool);
+      const row = await claimTask(db, 'worker-link', 30_000, 3, LIVE_TENANT, ['knowledge.parse'], {
+        employees: ['emp-a'],
+        projects: ['proj-1'],
+      });
+      expect(row?.id).toBe(mine.rows[0]!.id);
+      expect(row?.employee_id).toBe('emp-a');
+      const leftover = await client.query<{ employee_id: string; status: string }>(
+        `SELECT employee_id, status FROM tasks WHERE employee_id = 'emp-b'`,
+      );
+      expect(leftover.rows[0]).toEqual({ employee_id: 'emp-b', status: 'assigned' });
     } finally {
       client.release();
     }
