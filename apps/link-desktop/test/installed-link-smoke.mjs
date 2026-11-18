@@ -24,16 +24,43 @@ assert.ok(
 );
 
 const mockToken = 'saw_installer_smoke_test';
+const assignmentId = 'windows-ci-assignment';
+const assignment = {
+  seq: 1,
+  kind: 'wake',
+  payload: { roomTaskId: assignmentId, projectId: 'windows-ci', prompt: 'Check the installed client' },
+};
 let heartbeatCount = 0;
 let revoke = false;
-const server = createServer((req, res) => {
-  if (req.method !== 'POST' || req.url !== '/api/v1/worker-link/heartbeat') {
-    res.writeHead(404).end();
-  } else if (revoke || req.headers.authorization !== 'Bearer ' + mockToken) {
-    res.writeHead(401).end();
-  } else {
-    heartbeatCount++;
-    res.writeHead(heartbeatCount === 1 ? 503 : 204).end();
+const progress = [];
+const reports = [];
+const server = createServer(async (req, res) => {
+  if (req.method !== 'POST') return res.writeHead(404).end();
+  if (revoke || req.headers.authorization !== 'Bearer ' + mockToken) return res.writeHead(401).end();
+  try {
+    const route = req.url?.replace(/^\/api\/v1\/worker-link/, '');
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw);
+    res.setHeader('content-type', 'application/json');
+    switch (route) {
+      case '/heartbeat':
+        heartbeatCount++;
+        return res.writeHead(heartbeatCount === 1 ? 503 : 200).end('{}');
+      case '/poll':
+        if (body.since > 0) await delay(200);
+        return res.end(JSON.stringify({ events: body.since === 0 ? [assignment] : [] }));
+      case '/room-tasks/' + assignmentId + '/progress':
+        progress.push(body.body);
+        return res.end('{}');
+      case '/room-tasks/' + assignmentId + '/report':
+        reports.push(body.body);
+        return res.end('{}');
+      default:
+        return res.writeHead(404).end('{}');
+    }
+  } catch {
+    res.writeHead(400).end('{}');
   }
 });
 await new Promise((resolve, reject) => {
@@ -41,8 +68,8 @@ await new Promise((resolve, reject) => {
   server.listen(0, '127.0.0.1', resolve);
 });
 
-async function waitFor(label, predicate, timeout = 40_000) {
-  const stopAt = Date.now() + timeout;
+async function waitFor(label, predicate) {
+  const stopAt = Date.now() + 40_000;
   while (Date.now() < stopAt) {
     if (await predicate()) return;
     await delay(250);
@@ -67,6 +94,12 @@ async function readLog() {
     if (error.code === 'ENOENT') return '';
     throw error;
   }
+}
+
+async function trayRequestsSystemAwake() {
+  const { stdout } = await run('powercfg.exe', ['/requests']);
+  const systemRequests = stdout.match(/^SYSTEM:\s*\r?\n([\s\S]*?)(?=^[A-Z_]+:|\s*$)/m)?.[1];
+  return /SuperAgentLink\.exe/i.test(systemRequests ?? '');
 }
 
 try {
@@ -114,6 +147,36 @@ try {
   await waitFor('a heartbeat after silent upgrade', () => heartbeatCount > beforeUpgrade);
   assert.ok(existsSync(tokenPath()));
   console.log('Silent upgrade verified: the installed client restarted with its existing pairing.');
+
+  const projectDir = path.join(dataDir, 'CI project');
+  const fixture = path.join(projectDir, 'agent.mjs');
+  const finishTask = path.join(projectDir, 'finish-task');
+  await mkdir(projectDir);
+  await writeFile(fixture, [
+    "import { existsSync } from 'node:fs';",
+    "import { setTimeout as delay } from 'node:timers/promises';",
+    "let prompt = '';",
+    'for await (const chunk of process.stdin) prompt += chunk;',
+    "console.log(JSON.stringify({ type: 'thread.started', thread_id: 'windows-ci-session' }));",
+    "while (!existsSync('finish-task')) await delay(100);",
+    "console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Executed: ' + prompt } }));",
+  ].join('\n'));
+  await writeFile(path.join(dataDir, 'link-runtime.json'), JSON.stringify({
+    projects: { 'windows-ci': { directory: projectDir, executable: fixture, agent: 'codex' } },
+  }));
+  const latestWorker = Number([...((await readLog()).matchAll(/Started link process pid=(\d+)/g))].at(-1)?.[1]);
+  assert.ok(latestWorker > 0);
+  process.kill(latestWorker);
+
+  await waitFor('the installed worker to start its assigned CLI', async () =>
+    progress.includes('Agent started.') && (await readLog()).includes('LINK_TASK:start'));
+  await waitFor('Windows to show the tray sleep request during the task', trayRequestsSystemAwake);
+  await writeFile(finishTask, '');
+  await waitFor('the installed worker to return the CLI result', () => reports.length > 0);
+  assert.deepEqual(reports, ['Executed: Check the installed client']);
+  await waitFor('the tray to release its sleep request after task completion', async () =>
+    (await readLog()).includes('LINK_TASK:end') && !(await trayRequestsSystemAwake()));
+  console.log('Installed dispatch verified: long poll, local CLI fixture, result report and Windows sleep request lifecycle.');
 
   revoke = true;
   await waitFor('token revocation', async () => !existsSync(tokenPath())
