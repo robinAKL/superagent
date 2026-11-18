@@ -52,6 +52,11 @@ jobs:
         run: |
           node --test apps/link-desktop/test/link-desktop.test.mjs apps/link/*.test.mjs
 
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y
+
       - name: Build SuperAgentLink-Setup-x64.exe
         shell: pwsh
         run: |
