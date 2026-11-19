@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { dirname, isAbsolute } from 'node:path';
+import { basename, dirname, isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { launchAgent, launchCodexWithApprovals, projectDirectory } from './agent.mjs';
 
@@ -66,6 +66,20 @@ export class WorkerLink {
       if (!response.ok) throw Object.assign(new Error('Worker API returned HTTP ' + response.status), { status: response.status });
       return response.json();
     };
+  }
+
+  #capabilities() {
+    const projects = [];
+    for (const [id, project] of this.#projects) {
+      try {
+        const directory = projectDirectory(this.#projects, id).directory;
+        if (!statSync(project.executable).isFile()) continue;
+        projects.push({ id, name: (basename(directory) || id).slice(0, 128), agent: project.agent });
+      } catch {
+        // A moved folder or executable cannot receive new work until it is available again.
+      }
+    }
+    return { projects, agents: [...new Set(projects.map(project => project.agent))] };
   }
 
   #save() {
@@ -240,6 +254,7 @@ export class WorkerLink {
     const signal = AbortSignal.any([externalSignal, shutdown.signal]);
     let retryMs = FIRST_POLL_RETRY_MS;
     let lastStatus;
+    let publishAfter = 0;
     const markStatus = (status) => {
       if (status === lastStatus) return;
       lastStatus = status;
@@ -261,6 +276,10 @@ export class WorkerLink {
       while (!signal.aborted) {
         schedule();
         try {
+          if (Date.now() >= publishAfter) {
+            await this.#api('/heartbeat', { capabilities: this.#capabilities() }, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
+            publishAfter = Date.now() + 30_000;
+          }
           await this.poll(AbortSignal.any([signal, AbortSignal.timeout(28_000)]));
           markStatus('connected');
           retryMs = FIRST_POLL_RETRY_MS;
@@ -273,6 +292,7 @@ export class WorkerLink {
             throw error;
           }
           markStatus('reconnecting');
+          publishAfter = 0;
           console.error(error.message);
           await this.#sleep(retryMs, undefined, { signal }).catch(() => {});
           retryMs = Math.min(retryMs * 2, MAX_POLL_RETRY_MS);

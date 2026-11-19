@@ -1,4 +1,14 @@
-# Super Agent Link prototype
+# Super Agent Link
+
+On Windows, pair Link to the workspace and open **Set up local agent** in the tray menu. Choose a project folder.
+Link detects signed-in Codex and Claude Code CLIs and asks which to use if both are available. The folder path and
+executable stay on the computer. Link reports the project label and agent type to the workspace.
+
+In **Admin settings → Linked computers**, bind the project to a digital employee. If there is one available
+employee and one project, both are selected automatically. In the Command room, mention that employee to assign
+work. The employee card shows whether the binding is ready, the device is offline, or sign-in is required.
+
+### Manual setup
 
 Run from a machine with Node.js 22+ and an authenticated Codex or Claude Code CLI. Link opens the sign-in and pairing page on first run, then stores its worker credential locally. For an existing manually registered worker, set `SUPERAGENT_WORKER_TOKEN` in the Link process environment instead.
 

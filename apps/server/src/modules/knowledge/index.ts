@@ -93,6 +93,7 @@ export const knowledgeModule: FastifyPluginAsync<{ deps?: KnowledgeDeps }> = asy
   app.post<{ Params: { id: string } }>('/recommendations/:id/merge', req => service!.mergeRecommendation(req.user!, req.params.id, body(req)));
   app.get('/organization', req => service!.organization(req.user!));
   app.post('/organization/confirm', req => service!.confirmOrganization(req.user!));
+  app.post('/organization/resize', { bodyLimit: 4 * 1024 }, req => service!.resizeTeam(req.user!, body(req)));
   app.post('/organization/plan', { bodyLimit: 4 * 1024 }, req => service!.planTeam(req.user!, body(req)));
   app.post('/organization/plan/adopt', req => service!.adoptTeamPlan(req.user!, body(req)));
   app.post('/organization/plan/discard', req => service!.discardTeamPlan(req.user!));

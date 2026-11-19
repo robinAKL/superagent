@@ -20,13 +20,14 @@ $Csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if (-not (Test-Path $Csc)) { throw "csc.exe not found at $Csc" }
 $TrayOut = Join-Path $StageDir "SuperAgentLink.exe"
 $TraySrc = Join-Path $Root "tray\LinkTray.cs"
+$LinkIcon = Join-Path $Root "assets\SuperAgentLink.ico"
 $VersionSrc = Join-Path $CacheDir "AssemblyVersion.cs"
 @"
 using System.Reflection;
 [assembly: AssemblyVersion("$Version.0")]
 [assembly: AssemblyFileVersion("$Version.0")]
 "@ | Set-Content -LiteralPath $VersionSrc -Encoding Ascii
-& $Csc /nologo /target:winexe /platform:x64 /optimize+ "/out:$TrayOut" /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll $TraySrc $VersionSrc
+& $Csc /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ "/out:$TrayOut" "/win32icon:$LinkIcon" /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll $TraySrc $VersionSrc
 if ($LASTEXITCODE -ne 0) { throw "csc.exe failed" }
 
 # 2. Bundle Node.js x64 runtime
@@ -63,7 +64,7 @@ if (-not $MakensisExe) { throw "makensis.exe not found. Install NSIS first." }
 
 $OutExe = Join-Path $DistDir "SuperAgentLink-Setup-x64.exe"
 $Nsi = Join-Path $Root "installer\SuperAgentLink.nsi"
-& $MakensisExe "/DAPP_VERSION=$Version" "/DSTAGE_DIR=$StageDir" "/DOUT_FILE=$OutExe" $Nsi
+& $MakensisExe "/DAPP_VERSION=$Version" "/DSTAGE_DIR=$StageDir" "/DOUT_FILE=$OutExe" "/DLINK_ICON=$LinkIcon" $Nsi
 if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
 
 $Hash = (Get-FileHash -Path $OutExe -Algorithm SHA256).Hash.ToLowerInvariant()

@@ -23,7 +23,7 @@ export const orgToolId = (recId: string) => `tool-org-${recId}`;
 
 const norm = (s: string) => s.toLowerCase().replace(/[\s\-_·.,，。、/()（）]+/g, '');
 
-export function createOrganizationSink(employees: () => EmployeeService, tools: () => ToolService): OrganizationSink {
+export function createOrganizationSink(employees: () => EmployeeService, tools: () => ToolService, hasOpenWork?: (id: string) => boolean): OrganizationSink {
   return {
     ensureEmployee({ recId, name, duty, prompt, owner, manual }) {
       const { employee, created } = employees().ensure({ id: orgEmployeeId(recId), name, duty, prompt, owner, source: manual ? 'manual' : 'recommended' });
@@ -47,6 +47,7 @@ export function createOrganizationSink(employees: () => EmployeeService, tools: 
       return { toolId, created: true };
     },
     retireEmployee(employeeId) {
+      if (hasOpenWork?.(employeeId)) return false;
       const svc = employees();
       if (!svc.has(employeeId)) return true;
       try { svc.remove(employeeId); return true; } catch { return false; }

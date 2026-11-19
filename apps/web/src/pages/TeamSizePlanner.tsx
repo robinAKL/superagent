@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useT } from '../i18n';
 
 /**
@@ -14,8 +14,9 @@ interface Named { id?: string; key: string; name: string }
 
 export const PLAN_TEXT = {
   en: {
-    title: 'Team size', current: 'Now {n} roles', label: 'Number of digital employees', plan: 'Re-plan for this size', planning: 'Super Agent is planning…',
-    hint: 'Super Agent merges or splits responsibilities to fit the number, keeping every tool and workflow covered. You see a preview first.',
+    title: 'Team size', current: 'Current size: {n}', label: 'Number of digital employees', plan: 'Set team to {n}', planning: 'Updating team…',
+    hint: 'Updates the team and combines or splits responsibilities.',
+    decrease: 'Decrease team size', increase: 'Increase team size',
     same: 'That is the current size.',
     previewTitle: 'Proposal: {n} roles', byModel: 'Planned by Super Agent', byMerge: 'Merged by shared work (no model used)',
     replaces: 'Replaces all {n} current roles', editedWarn: '{n} of them were edited by you; their edits guided this plan but the roles themselves will be replaced.',
@@ -34,8 +35,9 @@ export const PLAN_TEXT = {
     sep: ', ',
   },
   zh: {
-    title: '团队规模', current: '当前 {n} 个岗位', label: '数字员工人数', plan: '按人数重新规划', planning: '超级智能体正在规划…',
-    hint: '超级智能体会按人数合并或拆分职责，保证所有工具和流程都有人负责。先给你看预览，确认后才生效。',
+    title: '团队人数', current: '当前 {n} 人', label: '数字员工人数', plan: '调整为 {n} 人', planning: '正在更新团队…',
+    hint: '提交后直接更新团队，合并或拆分职责。',
+    decrease: '减少人数', increase: '增加人数',
     same: '已经是这个人数。',
     previewTitle: '新方案：{n} 个岗位', byModel: '超级智能体规划', byMerge: '按职责重叠自动合并（未使用模型）',
     replaces: '将替换当前全部 {n} 个岗位', editedWarn: '其中 {n} 个是你改过的；你的修改已作为规划依据，但这些岗位本身会被替换。',
@@ -97,30 +99,33 @@ export function TeamPlanPreview({ plan, roles, tools, sops, busy, onAdopt, onDis
   </section>;
 }
 
-export function TeamSizePlanner({ current, busy, planning, onPlan }: { current: number; busy: boolean; planning: boolean; onPlan: (count: number) => void }) {
+export function TeamSizePlanner({ current, initial = current, busy, planning, onPlan }: { current: number; initial?: number; busy: boolean; planning: boolean; onPlan: (count: number) => void }) {
   const t = useT(PLAN_TEXT);
-  const [value, setValue] = useState(String(current));
+  const [value, setValue] = useState(String(initial));
+  const inputId = useId();
   const count = Number(value);
   const valid = Number.isInteger(count) && count >= 1 && count <= 20;
-  function submit() { if (valid && count !== current) onPlan(count); }
-  return <div className="team-size" aria-labelledby="team-size-title">
+  return <form className="team-size" aria-labelledby="team-size-title" onSubmit={event => {
+    event.preventDefault();
+    if (!busy && valid && count !== current) onPlan(count);
+  }}>
     <div className="team-size-text">
       <h2 id="team-size-title">{t('title')}</h2>
       <p className="helper">{t('current', { n: current })} · {t('hint')}</p>
     </div>
     <div className="team-size-controls">
-      <label className="team-size-field">
-        <span>{t('label')}</span>
+      <div className="team-size-field">
+        <label htmlFor={inputId}>{t('label')}</label>
         <span className="team-size-stepper">
-          <button type="button" aria-label="−" disabled={busy || count <= 1} onClick={() => setValue(String(Math.max(1, (valid ? count : current) - 1)))}>−</button>
-          <input type="number" inputMode="numeric" min={1} max={20} step={1} value={value} onChange={e => setValue(e.target.value)} />
-          <button type="button" aria-label="+" disabled={busy || count >= 20} onClick={() => setValue(String(Math.min(20, (valid ? count : current) + 1)))}>+</button>
+          <button type="button" aria-label={t('decrease')} disabled={busy || count <= 1} onClick={() => setValue(String(Math.max(1, (valid ? count : current) - 1)))}>−</button>
+          <input id={inputId} type="number" inputMode="numeric" min={1} max={20} step={1} value={value} disabled={busy} onChange={e => setValue(e.target.value)} />
+          <button type="button" aria-label={t('increase')} disabled={busy || count >= 20} onClick={() => setValue(String(Math.min(20, (valid ? count : current) + 1)))}>+</button>
         </span>
-      </label>
-      <button className="btn primary" type="button" disabled={busy || !valid || count === current} onClick={submit}>{planning ? t('planning') : t('plan')}</button>
+      </div>
+      <button className="btn primary" type="submit" disabled={busy || !valid || count === current}>{planning ? t('planning') : t('plan', { n: valid ? count : current })}</button>
     </div>
     {valid && count === current ? <small className="helper">{t('same')}</small> : null}
-  </div>;
+  </form>;
 }
 
 export function planErrorKey(code: string): PlanKey | null {
