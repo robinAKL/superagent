@@ -37,9 +37,10 @@ const AGENTS = [
 
 export async function discoverWindowsAgents() {
   const dirs = [...new Set([
-    ...(process.env.PATH ?? '').split(delimiter).map(dir => dir.trim().replace(/^"|"$/g, '')),
+    ...(process.env.LOCALAPPDATA ? [join(process.env.LOCALAPPDATA, 'Programs', 'OpenAI', 'Codex', 'bin')] : []),
     join(homedir(), '.local', 'bin'),
     ...(process.env.APPDATA ? [join(process.env.APPDATA, 'npm')] : []),
+    ...(process.env.PATH ?? '').split(delimiter).map(dir => dir.trim().replace(/^"|"$/g, '')),
   ].filter(isAbsolute))];
   return (await Promise.all(AGENTS.map(async ({ agent, bin, npm, status }) => {
     let installed;
