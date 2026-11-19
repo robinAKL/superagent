@@ -158,4 +158,9 @@ export class EmployeeService {
     if (n > 0) throw new Error(`employee has ${n} active task(s); reassign them before deleting`);
     this.employees.delete(id);
   }
+
+  /** The confirmed roster has already retired this employee. Drop only the local copy. */
+  forgetProjectedEmployee(id: string): void {
+    this.employees.delete(id);
+  }
 }

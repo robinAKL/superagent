@@ -8,11 +8,6 @@ mkdirSync(DIR, { recursive: true });
 
 test.skip(!process.env.T16_SHOTS, 'set T16_SHOTS=1 to capture T-16 evidence screenshots');
 
-const readyOrg = {
-  employees: [{ id: 'role-1', name: '应付专员', tools: [], sops: [] }],
-  tools: [], sops: [], confirmation: null, changedSinceConfirmation: false, missing: 0, blocked: null, canConfirm: true,
-};
-
 async function shot(page: Page, name: string, lang: 'zh' | 'en') {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.screenshot({ path: resolve(DIR, `${name}-1440-${lang}.png`), fullPage: true });
@@ -41,18 +36,14 @@ test.describe('T-08 company setup shots', () => {
     await expect(page.getByRole('status').filter({ hasText: '已保存配置' })).toBeVisible();
     await shot(page, 't08-save', 'zh');
 
-    await page.route('**/api/v1/knowledge/organization**', async route => {
-      if (route.request().method() === 'POST' && route.request().url().endsWith('/confirm')) {
-        return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'generic' }) });
-      }
-      if (route.request().method() !== 'GET') return route.continue();
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(readyOrg) });
+    await page.route('**/api/v1/sop/company-context', async route => {
+      if (route.request().method() === 'PUT') return route.fulfill({ status: 400, json: { error: 'invalid_company_context' } });
+      return route.continue();
     });
     await page.reload();
     await fillCompany(page, 'zh');
-    await expect(page.getByRole('button', { name: '确认并发布配置，生成数字员工' })).toBeEnabled();
-    await page.getByRole('button', { name: '确认并发布配置，生成数字员工' }).click();
-    await expect(page.getByRole('alert').filter({ hasText: '无法生成数字员工' })).toBeVisible();
+    await page.getByRole('button', { name: '保存配置', exact: true }).click();
+    await expect(page.getByRole('alert').filter({ hasText: '无法保存配置' })).toBeVisible();
     await expect(page.getByRole('status').filter({ hasText: '已保存配置' })).toHaveCount(0);
     await shot(page, 't08-publish-fail', 'zh');
   });
@@ -65,18 +56,14 @@ test.describe('T-08 company setup shots', () => {
       await expect(page.getByRole('status').filter({ hasText: 'Saved configuration' })).toBeVisible();
       await shot(page, 't08-save', 'en');
 
-      await page.route('**/api/v1/knowledge/organization**', async route => {
-        if (route.request().method() === 'POST' && route.request().url().endsWith('/confirm')) {
-          return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'generic' }) });
-        }
-        if (route.request().method() !== 'GET') return route.continue();
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(readyOrg) });
+      await page.route('**/api/v1/sop/company-context', async route => {
+        if (route.request().method() === 'PUT') return route.fulfill({ status: 400, json: { error: 'invalid_company_context' } });
+        return route.continue();
       });
       await page.reload();
       await fillCompany(page, 'en');
-      await expect(page.getByRole('button', { name: 'Confirm and publish configuration, generate digital employees' })).toBeEnabled();
-      await page.getByRole('button', { name: 'Confirm and publish configuration, generate digital employees' }).click();
-      await expect(page.getByRole('alert').filter({ hasText: 'Could not generate digital employees' })).toBeVisible();
+      await page.getByRole('button', { name: 'Save configuration', exact: true }).click();
+      await expect(page.getByRole('alert').filter({ hasText: 'Could not save the configuration' })).toBeVisible();
       await expect(page.getByRole('status').filter({ hasText: 'Saved configuration' })).toHaveCount(0);
       await shot(page, 't08-publish-fail', 'en');
     });

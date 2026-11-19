@@ -257,7 +257,7 @@ workItemEvents.decided.push(async (item) => {
   await flushGateway();
 });
 
-export const executionModule: FastifyPluginAsync = async (app) => {
+export const executionModule: FastifyPluginAsync<{ resolveWorkflowTeam?: (tenantId: string) => Promise<Record<string, string>> }> = async (app, opts) => {
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ExecutionError) return reply.code(err.statusCode).send({ error: err.code, message: err.message });
     if (err instanceof Error && /not_found|version_not_found/.test(err.message)) return reply.code(404).send({ error: 'not_found', message: err.message });
@@ -270,8 +270,10 @@ export const executionModule: FastifyPluginAsync = async (app) => {
         typeof b.input !== 'object' || b.input === null || Array.isArray(b.input)) return reply.code(400).send({ error: 'missing_fields' });
     const { tenantId, userId } = req.user!;
     if (b.sopId !== undefined && (typeof b.sopId !== 'string' || !b.sopId)) return reply.code(400).send({ error: 'missing_fields' });
-    const context = await companyContext.current.read(tenantId);
-    const input = { tenantId, versionId: b.versionId, eventId: b.eventId.trim(), startedBy: userId, data: b.input, companyContext: context };
+    const [context, employeeReplacements] = await Promise.all([
+      companyContext.current.read(tenantId), opts.resolveWorkflowTeam?.(tenantId),
+    ]);
+    const input = { tenantId, versionId: b.versionId, eventId: b.eventId.trim(), startedBy: userId, data: b.input, companyContext: context, employeeReplacements };
     let run: Execution;
     if (b.sopId && runStore) {
       const db = runStore;

@@ -93,7 +93,9 @@ const READ_TIMEOUT_MS = 15_000;
 const TEXT = {
   en: {
     title: 'Super Agent', subtitle: 'Set the work for the digital team, the boundaries they must keep, and the roles to generate',
-    tabConfig: 'Company setup & digital org', tabFlow: 'Company workflows',
+    tabConfig: 'Company settings', tabFlow: 'Workflow management',
+    enableWorkflow: 'Enable workflow', enablingWorkflow: 'Checking and enabling…',
+    enableFailed: 'Could not enable the workflow. Review the checks below.',
     allDrafts: 'All analysis drafts', context: 'Company context', candidates: 'Workflow candidates', useCandidate: 'Open in workflow editor',
     noStepMap: 'Run analysis again to generate source-backed steps for this workflow.',
     legacyStepMap: 'Sequence from an earlier analysis. Analyze again to add evidence and assignments to each step.',
@@ -120,7 +122,9 @@ const TEXT = {
   },
   zh: {
     title: '超级智能体', subtitle: '设定交给数字团队的工作、必须遵守的边界，并生成数字岗位',
-    tabConfig: '企业配置与数字组织', tabFlow: '企业流程',
+    tabConfig: '企业配置', tabFlow: '流程管理',
+    enableWorkflow: '启用流程', enablingWorkflow: '正在检查并启用…',
+    enableFailed: '无法启用流程，请查看下方的检查结果。',
     allDrafts: '所有分析草案', context: '企业上下文', candidates: '候选流程', useCandidate: '在流程编辑器中打开',
     noStepMap: '重新分析来源，即可为这个流程生成带依据的步骤。',
     legacyStepMap: '这是上次分析中记录的步骤顺序。重新分析可补齐逐节点依据和岗位工具。',
@@ -457,6 +461,7 @@ export function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate,
   }
   const canValidate = !!openDraft && !dirty && draft.nodes.every(node => node.label.trim()) && !issues.length && !unconfirmed.length;
   const canPublish = canValidate && vstate.kind === 'valid';
+  const [enabling, setEnabling] = useState(false);
 
   async function save(graph = draft, nextPack = pack, forSop = sopId, metadata = workflow) {
     const base = forSop === sopId ? (openDraft ?? published) : undefined;
@@ -473,13 +478,14 @@ export function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate,
   }
 
   async function validate() {
-    if (!openDraft) return;
+    if (!openDraft) return false;
     const r = await api<{ status?: string; error?: string; issues?: { message: string }[] }>(`/api/v1/sop/${encodeURIComponent(openDraft.id)}/validate`, {
       method: 'POST',
       body: JSON.stringify({ employees: ctx.employees, tools: ctx.tools }),
     });
     await loadVersions(sopId);
     setMsg(r.status === 200 ? (r.body.status === 'passed' ? '校验通过，可以发布' : '校验未通过，见回归用例') : `未校验：${r.body.issues?.map((i) => i.message).join('；') || r.body.error || r.status}`);
+    return r.status === 200 && r.body.status === 'passed';
   }
 
   async function publish() {
@@ -490,6 +496,17 @@ export function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate,
     });
     await loadVersions(sopId); // reload first: it resets the editor state
     setMsg(r.status === 200 ? `v${r.body.number} 已发布；在途实例继续按原版本运行` : `未发布：${r.body.issues?.map((i) => i.message).join('；') || (r.body.error === 'validation_stale' ? '校验已失效，请重新校验' : r.body.error) || r.status}`);
+  }
+  async function enableWorkflow() {
+    if (!canValidate || enabling) return;
+    setEnabling(true);
+    try {
+      if (canPublish || await validate()) await publish();
+    } catch {
+      setMsg(t('enableFailed'));
+    } finally {
+      setEnabling(false);
+    }
   }
 
   /** Applying a pack never touches a published version and never replaces a non-empty draft without confirmation. */
@@ -680,7 +697,9 @@ export function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate,
             {vstate.kind === 'stale' ? <p className="warn" data-block="stale">草稿已修改，之前的校验已失效（校验于第 {vstate.validatedRevision} 次修订，当前第 {vstate.revision} 次）。请重新校验。</p> : null}
             {vstate.kind === 'incomplete' ? <p className="warn" data-block="incomplete">校验缺少回归用例：{vstate.missing.map((m) => GATE_LABEL[m] ?? m).join('，')}。不能发布。</p> : null}
             {vstate.kind === 'failed' ? <p className="warn" data-block="failed">校验未通过，修改后重新校验。</p> : null}
-            <button className="btn" type="button" disabled={!canValidate} onClick={() => void validate()}>校验（运行回归用例）</button>
+            {!published && openDraft ? <button className="btn primary" type="button" disabled={!canValidate || enabling}
+              onClick={() => void enableWorkflow()}>{t(enabling ? 'enablingWorkflow' : 'enableWorkflow')}</button> : null}
+            <button className="btn" type="button" disabled={!canValidate || enabling} onClick={() => void validate()}>校验（运行回归用例）</button>
             {openDraft?.report ? (
               <ul className="gates" aria-label="回归用例">
                 {Object.entries(openDraft.report.gates).map(([k, g]) => (
@@ -692,7 +711,7 @@ export function SopWorkspace({ knowledge, retryKnowledge, initialSop, candidate,
               <span>生效时间（可选）</span>
               <input type="datetime-local" value={effectiveAt} onChange={(e) => setEffectiveAt(e.target.value)} />
             </label>
-            <button className="btn primary" type="button" disabled={!canPublish} onClick={() => void publish()}>发布</button>
+            <button className={published ? 'btn primary' : 'btn'} type="button" disabled={!canPublish || enabling} onClick={() => void publish()}>发布</button>
             {!openDraft ? <p className="helper">先保存草稿，再校验和发布。</p> : null}
           </section>
 

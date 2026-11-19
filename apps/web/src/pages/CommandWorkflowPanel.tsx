@@ -9,14 +9,14 @@ const TEXT = {
   en: {
     title: 'Business workflows', select: 'Published workflow', placeholder: 'Choose a workflow',
     loading: 'Loading published workflows…', unavailable: 'Could not load published workflows.', retry: 'Try again',
-    empty: 'Publish a workflow before starting it here.', missing: 'The selected workflow is currently unavailable.',
-    settings: 'Open workflow editor',
+    empty: 'No workflow is enabled yet. Choose the agreed workflow in Workflow management and enable it once.',
+    missing: 'The selected workflow is currently unavailable.', settings: 'Go to workflow management',
   },
   zh: {
     title: '业务流程', select: '已发布流程', placeholder: '选择流程',
     loading: '正在读取已发布流程…', unavailable: '无法读取已发布流程。', retry: '重试',
-    empty: '流程发布生效后即可在这里启动。', missing: '所选流程目前尚未生效。',
-    settings: '打开流程编辑器',
+    empty: '还没有已启用的流程。到流程管理选择已定的流程，启用一次即可。',
+    missing: '所选流程目前尚未生效。', settings: '去流程管理',
   },
 };
 
@@ -53,7 +53,7 @@ export function CommandWorkflowPanel({ defaultOpen = false }: { defaultOpen?: bo
     return () => controller.abort();
   }, [open, attempt]);
 
-  const workflow = workflows?.find(row => row.sopId === selected);
+  const workflow = workflows?.find(row => row.sopId === selected) ?? (!selected && workflows?.length === 1 ? workflows[0] : undefined);
 
   return <details className="panel command-workflows" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>{t('title')}</summary>

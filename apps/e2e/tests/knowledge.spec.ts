@@ -435,7 +435,7 @@ test('a saved team size proposal is preselected and applies with one click', asy
   await page.reload();
   await expect(page.getByRole('spinbutton', { name: '数字员工人数' })).toHaveValue('2');
   await page.getByRole('button', { name: '调整为 2 人', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: '移除 8 名' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: '正式团队现有 2 名员工' })).toBeVisible();
   await page.goto('/#employees');
   await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(2);
   const registry = await (await page.request.get('/api/v1/employees/')).json() as { id: string }[];
@@ -462,7 +462,7 @@ test('one team size submission leaves one employee and that employee can be boun
 
   await page.locator('.team-size-stepper input').fill('1');
   await page.getByRole('button', { name: '调整为 1 人', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: '移除 12 名' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: '正式团队现有 1 名员工' })).toBeVisible();
   await page.goto('/#employees');
   await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(1);
   const registry = await (await page.request.get('/api/v1/employees/')).json() as { id: string; name: string }[];

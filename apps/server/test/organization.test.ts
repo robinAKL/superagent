@@ -12,6 +12,8 @@ import { validateProposals } from '../src/modules/analysis/service.js';
 import { EmployeeService } from '../src/modules/employees/employees.js';
 import { ToolService } from '../src/modules/tools/lifecycle.js';
 import { createOrganizationSink } from '../src/modules/employees/organization.js';
+import { employeesState } from '../src/modules/employees/index.js';
+import { buildApp } from '../src/app.js';
 
 const owner: UserContext = { tenantId: 'tenant-a', userId: 'alice', roles: ['owner'], projectScopes: ['project-a'] };
 const GUIDE = '订单审核指南\n\n1. 收到订单后核对客户信用额度。\n2. 金额超过 5 万需主管审批。\n3. 用知识库问答查找价格政策，核对后在 CRM 中登记。';
@@ -132,6 +134,50 @@ describe('organization draft → confirmed team (PRD §3.3)', () => {
     expect(employeesB.list().map(e => e.id).sort()).toEqual(first.employees.map(e => e.employeeId).sort());
     expect(toolsB.list()).toHaveLength(1);
     expect(await processB.restoreOrganizations([owner.tenantId])).toBe(0);
+  });
+
+  it('refreshes the employee list and command room on a replica that cached the former team', async () => {
+    const f = await fixture();
+    const first = await f.service.confirmOrganization(owner);
+    const cached = new EmployeeService(), toolsB = new ToolService();
+    const deps = { repo: f.repo, organization: createOrganizationSink(() => cached, () => toolsB) };
+    const replica = new KnowledgeService(deps);
+    await replica.refreshConfirmedTeam(owner.tenantId);
+    expect(cached.list()).toHaveLength(2);
+    cached.ensure({ id: 'emp-org-other-tenant', name: 'Other tenant', duty: 'Independent', prompt: 'Independent', owner: 'bob', source: 'manual' });
+
+    const reduced = await f.service.resizeTeam(owner, { count: 1 });
+    const [employee] = reduced.employees;
+    expect(cached.list()).toHaveLength(3);
+    const oldRegistry = employeesState.current;
+    employeesState.current = cached;
+    const app = await buildApp({ auth: { mode: 'dev', platformTenantId: owner.tenantId }, knowledgeDeps: deps });
+    const headers = { 'x-dev-user': 'alice|owner|project-a' };
+    try {
+      const wall = await app.inject({ method: 'GET', url: '/api/v1/employees/', headers });
+      expect(wall.statusCode).toBe(200);
+      expect(wall.json()).toContainEqual(expect.objectContaining({ id: employee!.employeeId }));
+      expect(wall.json()).not.toContainEqual(expect.objectContaining({ id: first.employees[0]!.employeeId }));
+      expect(cached.has('emp-org-other-tenant')).toBe(true);
+
+      // A command-room-only visit to another stale replica must also reconcile.
+      const removed = first.employees[0]!;
+      cached.ensure({ id: removed.employeeId, name: removed.name, duty: removed.duty, prompt: removed.prompt, owner: owner.userId, source: 'recommended' });
+      const room = await app.inject({ method: 'GET', url: '/api/v1/room/roster', headers });
+      expect(room.statusCode).toBe(200);
+      expect(room.json().employees).toContainEqual(expect.objectContaining({ id: employee!.employeeId }));
+      expect(room.json().employees).not.toContainEqual(expect.objectContaining({ id: removed.employeeId }));
+
+      cached.ensure({ id: removed.employeeId, name: removed.name, duty: removed.duty, prompt: removed.prompt, owner: owner.userId, source: 'recommended' });
+      const retry = await app.inject({ method: 'POST', url: '/api/v1/knowledge/organization/resize', headers, payload: { count: 1 } });
+      expect(retry.statusCode).toBe(200);
+      expect(retry.json()).toMatchObject({ revision: reduced.revision, employees: reduced.employees, createdEmployees: 0 });
+      expect(cached.has(removed.employeeId)).toBe(false);
+      expect(await replica.resolveWorkflowTeam(owner.tenantId)).toEqual(Object.fromEntries(first.employees.map(e => [e.employeeId, employee!.employeeId])));
+    } finally {
+      await app.close();
+      employeesState.current = oldRegistry;
+    }
   });
 
   it('refuses confirmation while the latest analysis is stale, and for non-managers', async () => {
