@@ -676,14 +676,23 @@ export class KnowledgeService {
    * merges or splits; without a model, shrinking falls back to merging the roles that share the most work.
    * The proposal is stored for preview only — nothing changes until the owner adopts it.
    */
-  async planTeam(ctx: UserContext, input: Record<string, unknown>) {
+  private async prepareTeamPlan(ctx: UserContext, input: Record<string, unknown>, reuse = false) {
     requireManager(ctx);
     const count = input.count;
     if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > TEAM_SIZE_MAX) throw new KnowledgeError('invalid_team_size', `团队规模必须是 1 到 ${TEAM_SIZE_MAX} 之间的整数。`);
     const state = await this.deps.repo.read(ctx);
     const { draft, roles, basis } = this.planSources(state, ctx);
     if (!roles.length) throw new KnowledgeError('no_employees', '组织草案里还没有岗位。', 409);
-    if (count === roles.length) throw new KnowledgeError('team_size_unchanged', '团队已经是这个人数。', 409);
+    if (count === roles.length) {
+      if (!reuse || count === Object.keys(state.organization?.employees ?? {}).length) {
+        throw new KnowledgeError('team_size_unchanged', '团队已经是这个人数。', 409);
+      }
+      return { plan: null, roles, basis, modelError: null };
+    }
+    const pending = state.teamPlan;
+    if (reuse && pending?.target === count && pending.createdBy === ctx.userId && JSON.stringify(pending.basis) === JSON.stringify(basis)) {
+      return { plan: pending, roles, basis, modelError: null };
+    }
     const toolKeys = draft.tools.map(t => t.key), sopKeys = draft.sops.map(p => p.key);
     let planned: PlanRole[] | null = null, method: TeamPlan['method'] = 'model', modelError: string | null = null;
     const model = this.deps.model;
@@ -708,11 +717,32 @@ export class KnowledgeService {
       method = 'merge';
     }
     const plan: TeamPlan = { id: id(), target: count, method, createdAt: stamp(), createdBy: ctx.userId, basis, roles: planned };
+    return { plan, roles, basis, modelError };
+  }
+  async planTeam(ctx: UserContext, input: Record<string, unknown>) {
+    const { plan, roles, modelError } = await this.prepareTeamPlan(ctx, input);
+    if (!plan) throw new Error('Expected a team plan');
     await this.deps.repo.transact(ctx, s => {
-      if (JSON.stringify(this.planSources(s, ctx).basis) !== JSON.stringify(basis)) throw new KnowledgeError('plan_stale', '岗位草案刚刚有变化，请重新规划。', 409);
+      this.assertTeamBasis(s, ctx, plan.basis);
       s.teamPlan = plan;
     });
-    return { plan: { ...plan, stale: false, replaces: roles.length, editedReplaced: roles.filter(r => r.edited).length }, fallbackReason: method === 'merge' ? modelError : null };
+    return { plan: { ...plan, stale: false, replaces: roles.length, editedReplaced: roles.filter(r => r.edited).length }, fallbackReason: plan.method === 'merge' ? modelError : null };
+  }
+  async resizeTeam(ctx: UserContext, input: Record<string, unknown>) {
+    requireManager(ctx);
+    if (!this.deps.organization) throw new KnowledgeError('organization_unavailable', '数字员工服务暂不可用。', 503);
+    const { plan, basis } = await this.prepareTeamPlan(ctx, input, true);
+    return this.deps.repo.transact(ctx, s => {
+      if (plan) return this.applyTeamPlan(s, ctx, plan, true);
+      this.assertTeamBasis(s, ctx, basis);
+      delete s.teamPlan;
+      return this.applyConfirmedOrganization(s, ctx);
+    });
+  }
+  private assertTeamBasis(s: KnowledgeState, ctx: UserContext, expected: string[]) {
+    const { basis } = this.planSources(s, ctx);
+    if (JSON.stringify(basis) !== JSON.stringify(expected)) throw new KnowledgeError('plan_stale', '岗位草案在规划后有变化，请重新规划。', 409);
+    return basis;
   }
   async discardTeamPlan(ctx: UserContext) {
     requireManager(ctx);
@@ -725,9 +755,11 @@ export class KnowledgeService {
     return this.deps.repo.transact(ctx, s => {
       const plan = s.teamPlan;
       if (!plan || plan.id !== planId || plan.createdBy !== ctx.userId) throw new KnowledgeError('plan_not_found', '这个方案已不存在，请重新规划。', 404);
-      const { basis } = this.planSources(s, ctx);
-      if (JSON.stringify(basis) !== JSON.stringify(plan.basis)) throw new KnowledgeError('plan_stale', '岗位草案在规划后有变化，请重新规划。', 409);
-      const hadTeam = !!s.organization;
+      return this.applyTeamPlan(s, ctx, plan, !!s.organization);
+    });
+  }
+  private applyTeamPlan(s: KnowledgeState, ctx: UserContext, plan: TeamPlan, publish: boolean) {
+      const basis = this.assertTeamBasis(s, ctx, plan.basis);
       const sources = new Map(s.recommendations.filter(r => basis.includes(r.id)).map(r => [r.id, r]));
       const created = plan.roles.map((role, index) => {
         const from = role.from.map(rid => sources.get(rid)!).filter(Boolean);
@@ -748,9 +780,8 @@ export class KnowledgeService {
         old.mergedInto = created.find(c => plan.roles[created.indexOf(c)]!.from.includes(old.id))?.id;
       }
       delete s.teamPlan;
-      const confirmed = hadTeam ? this.applyConfirmedOrganization(s, ctx) : null;
+      const confirmed = publish ? this.applyConfirmedOrganization(s, ctx) : null;
       return { adopted: plan.id, roles: created.map(r => ({ id: r.id, name: r.name })), ...confirmed };
-    });
   }
   async adoptRecommendation(ctx: UserContext, recId: string) {
     requireManager(ctx); return this.deps.repo.transact(ctx, s => {

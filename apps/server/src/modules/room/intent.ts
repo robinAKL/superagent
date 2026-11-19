@@ -30,7 +30,7 @@ export function isExternalAction(body: string): boolean {
 
 /** The message with its @mentions removed: what is left is the work being asked for. */
 export function workText(body: string): string {
-  return body.replace(/@[^\s@]+/gu, ' ').replace(/[ \t]+/gu, ' ').trim();
+  return body.replace(/(?<![\p{L}\p{N}_.+-])@[^\s@]+/gu, ' ').replace(/[ \t]+/gu, ' ').trim();
 }
 
 /**

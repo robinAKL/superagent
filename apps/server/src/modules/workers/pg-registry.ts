@@ -1,5 +1,5 @@
 import type { Queryable } from '../runtime/pg-queue.js';
-import { mergeCapabilities, type HeartbeatInput, type WorkerCapabilities, type WorkerEvent, type WorkerEventKind, type WorkerKind, type WorkerRecord, type WorkerRegistry } from './registry.js';
+import { cleanCapabilities, type HeartbeatInput, type WorkerCapabilities, type WorkerEvent, type WorkerEventKind, type WorkerKind, type WorkerRecord, type WorkerRegistry } from './registry.js';
 
 interface Row {
   id: string;
@@ -49,7 +49,7 @@ RETURNING id;
 
 export const PATCH_CAPABILITIES_SQL = `
 UPDATE workers
-SET capabilities = $3::jsonb
+SET capabilities = capabilities || $3::jsonb
 WHERE id = $2::uuid
   AND tenant_id = $1::uuid
   AND revoked_at IS NULL
@@ -156,10 +156,7 @@ export class PgWorkerRegistry implements WorkerRegistry {
   }
 
   async patchCapabilities(tenantId: string, id: string, capabilities: WorkerCapabilities): Promise<WorkerRecord | null> {
-    const current = await this.get(tenantId, id);
-    if (!current || current.revokedAt !== null) return null;
-    const next = mergeCapabilities(current.capabilities, capabilities);
-    const { rows } = await this.db.query<Row>(PATCH_CAPABILITIES_SQL, [tenantId, id, JSON.stringify(next)]);
+    const { rows } = await this.db.query<Row>(PATCH_CAPABILITIES_SQL, [tenantId, id, JSON.stringify(cleanCapabilities(capabilities))]);
     return rows[0] ? fromRow(rows[0]) : null;
   }
 

@@ -18,9 +18,9 @@ const render = (lang: 'en' | 'zh', node: JSX.Element) => renderToStaticMarkup(<L
 describe('team size planner', () => {
   it('starts at the current size and disables planning until the number changes', () => {
     const html = render('zh', <TeamSizePlanner current={3} busy={false} planning={false} onPlan={() => undefined} />);
-    expect(html).toContain('当前 3 个岗位');
+    expect(html).toContain('当前 3 人');
     expect(html).toMatch(/type="number"[^>]*value="3"/);
-    expect(html).toMatch(/<button class="btn primary" type="button" disabled="">按人数重新规划<\/button>/);
+    expect(html).toMatch(/<button class="btn primary" type="submit" disabled="">调整为 3 人<\/button>/);
     expect(html).toContain('已经是这个人数。');
   });
 

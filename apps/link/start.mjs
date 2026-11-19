@@ -38,7 +38,7 @@ export async function stayAlive(origin, token, fetchImpl = fetch, sleep = (ms) =
       res = await fetchImpl(originUrl(origin, '/api/v1/worker-link/heartbeat'), {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify({ capabilities: { projects: [] } }),
         signal: AbortSignal.timeout(10_000),
       });
     } catch {

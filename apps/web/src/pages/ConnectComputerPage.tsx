@@ -12,6 +12,8 @@ const TEXT = {
     allow: 'Allow',
     deny: 'Deny',
     allowed: 'This computer is connected. Link will store the token on this device; you can close the tab.',
+    next: 'In the Link tray menu, choose Set up local agent. Then bind the project to a digital employee.',
+    manageLink: 'Manage Link devices',
     denied: 'Pairing declined. Link will ask to pair again.',
     expired: 'This code expired. Start Link again to get a new one.',
     taken: 'This code was already used.',
@@ -28,6 +30,8 @@ const TEXT = {
     allow: '允许',
     deny: '拒绝',
     allowed: '此电脑已连接。Link 会把令牌存在本机，可以关闭此页。',
+    next: '在 Link 托盘菜单选择「配置本地 Agent」，再把项目绑定到数字员工。',
+    manageLink: '管理 Link 设备',
     denied: '已拒绝配对。Link 会再次请求配对。',
     expired: '配对码已过期。请重新打开 Link 获取新码。',
     taken: '这个配对码已经用过了。',
@@ -111,6 +115,10 @@ export function ConnectComputerPage() {
           </div>
         ) : null}
         {notice ? <p className="helper" role="status">{notice}</p> : null}
+        {pair?.status === 'allowed' ? <>
+          <p className="helper">{t('next')}</p>
+          <a className="btn primary" href="#settings?link=1">{t('manageLink')}</a>
+        </> : null}
       </section>
     </>
   );

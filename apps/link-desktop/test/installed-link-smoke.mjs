@@ -18,6 +18,7 @@ const dataDir = path.join(process.env.LOCALAPPDATA, 'SuperAgentLink');
 const uninstaller = path.join(installDir, 'Uninstall.exe');
 const sentinel = path.join(installDir, 'unrelated-file.txt');
 const log = path.join(dataDir, 'logs', 'link.log');
+const shortcut = path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'SuperAgent Link.lnk');
 assert.ok(
   [installDir, dataDir, tokenPath()].every((target) => !existsSync(target)),
   'Use a Windows account with no existing SuperAgent Link installation.',
@@ -31,6 +32,7 @@ const assignment = {
   payload: { roomTaskId: assignmentId, projectId: 'windows-ci', prompt: 'Check the installed client' },
 };
 let heartbeatCount = 0;
+let projects;
 let revoke = false;
 const progress = [];
 const reports = [];
@@ -46,6 +48,7 @@ const server = createServer(async (req, res) => {
     switch (route) {
       case '/heartbeat':
         heartbeatCount++;
+        if (body.capabilities?.projects) projects = body.capabilities.projects;
         return res.writeHead(heartbeatCount === 1 ? 503 : 200).end('{}');
       case '/poll':
         if (body.since > 0) await delay(200);
@@ -115,6 +118,7 @@ try {
   const tray = path.join(installDir, 'SuperAgentLink.exe');
   const selfCheck = JSON.parse((await run(tray, ['--self-check'])).stdout);
   assert.deepEqual(selfCheck, { ok: true, version });
+  assert.ok(existsSync(shortcut));
   const task = await run('schtasks.exe', ['/Query', '/TN', 'SuperAgentLink', '/XML']);
   assert.match(task.stdout, /<LogonTrigger>/);
   assert.match(task.stdout, /<LogonType>InteractiveToken<\/LogonType>/);
@@ -168,6 +172,8 @@ try {
   assert.ok(latestWorker > 0);
   process.kill(latestWorker);
 
+  await waitFor('the installed worker to advertise the configured project', () => projects?.length === 1);
+  assert.deepEqual(projects, [{ id: 'windows-ci', name: 'CI project', agent: 'codex' }]);
   await waitFor('the installed worker to start its assigned CLI', async () =>
     progress.includes('Agent started.') && (await readLog()).includes('LINK_TASK:start'));
   await waitFor('Windows to show the tray sleep request during the task', trayRequestsSystemAwake);
@@ -199,6 +205,7 @@ try {
 
 assert.equal(await readFile(sentinel, 'utf8'), 'keep existing user files');
 assert.ok(!existsSync(path.join(installDir, 'runtime')));
+assert.ok(!existsSync(shortcut));
 await assert.rejects(
   run('schtasks.exe', ['/Query', '/TN', 'SuperAgentLink']),
   (error) => Number.isInteger(error.code) && error.code !== 0,

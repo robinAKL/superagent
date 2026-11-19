@@ -25,6 +25,11 @@ export interface RoomAssignment {
   employeeId: string;
   projectId: string;
 }
+export interface LinkProject {
+  id: string;
+  name: string;
+  agent: 'codex' | 'claude-code';
+}
 
 export interface WorkerCapabilities {
   roomAssignments?: RoomAssignment[];
@@ -32,6 +37,8 @@ export interface WorkerCapabilities {
   kinds?: string[];
   /** Agent CLIs the device can start, e.g. ["claude-code", "codex"]. Reported, not trusted for authorisation. */
   agents?: string[];
+  /** Project labels reported by Link. Local paths and executable locations stay on the device. */
+  projects?: LinkProject[];
   /** Empty or absent: every digital employee on the tenant may run here. */
   allowEmployees?: string[];
   /** Empty or absent: every project on the tenant may run here. */
@@ -156,6 +163,17 @@ export function cleanCapabilities(value: unknown): WorkerCapabilities {
   const agents = cleanList(raw.agents);
   const allowEmployees = cleanList(raw.allowEmployees);
   const allowProjects = cleanList(raw.allowProjects);
+  if (Array.isArray(raw.projects)) {
+    const projects = new Map<string, LinkProject>();
+    for (const entry of raw.projects.slice(0, 32)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const { id, name, agent } = entry as Partial<LinkProject>;
+      if (typeof id !== 'string' || !id || id.length > 128 || typeof name !== 'string' || !name
+        || name.length > 128 || (agent !== 'codex' && agent !== 'claude-code')) continue;
+      projects.set(id, { id, name, agent });
+    }
+    out.projects = [...projects.values()];
+  }
   if (Array.isArray(raw.roomAssignments)) {
     out.roomAssignments = raw.roomAssignments.flatMap((entry: unknown) => {
       if (!entry || typeof entry !== 'object') return [];

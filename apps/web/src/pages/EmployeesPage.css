@@ -171,3 +171,4 @@
 
 /* The sticky confirm bar must not cover the last card. */
 .org-page { padding-bottom: 96px; }
+.emp-link-device { display: block; color: var(--color-muted); overflow-wrap: anywhere; }

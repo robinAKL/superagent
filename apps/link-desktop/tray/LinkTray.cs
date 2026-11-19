@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
@@ -10,6 +11,8 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -143,6 +146,7 @@ namespace SuperAgentLinkTray
 
             _statusItem = new ToolStripMenuItem("Status: Unpaired") { Enabled = false };
             var openRoomItem = new ToolStripMenuItem("Open Command Room / 打开指挥室", null, OnOpenRoom);
+            var configureItem = new ToolStripMenuItem("Set up local agent / 配置本地 Agent", null, OnConfigureAgent);
             var repairItem = new ToolStripMenuItem("Re-pair / 重新配对", null, OnRepair);
             var logsItem = new ToolStripMenuItem("View Logs / 查看日志", null, OnViewLogs);
             var exitItem = new ToolStripMenuItem("Exit / 退出", null, OnExit);
@@ -151,6 +155,7 @@ namespace SuperAgentLinkTray
             menu.Items.Add(_statusItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(openRoomItem);
+            menu.Items.Add(configureItem);
             menu.Items.Add(repairItem);
             menu.Items.Add(logsItem);
             menu.Items.Add(new ToolStripSeparator());
@@ -550,6 +555,11 @@ namespace SuperAgentLinkTray
 
         private void OnOpenRoom(object sender, EventArgs e)
         {
+            OpenWorkspace("/#room");
+        }
+
+        private void OpenWorkspace(string route)
+        {
             if (string.IsNullOrEmpty(_serverUrl))
             {
                 var nextUrl = PromptServerUrl("https://");
@@ -557,8 +567,132 @@ namespace SuperAgentLinkTray
                 _serverUrl = nextUrl;
                 SaveConfiguredServerUrl(_serverUrl);
             }
-            var url = (_serverUrl.TrimEnd('/')) + "/#command";
+            var url = _serverUrl.TrimEnd('/') + route;
             Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+        }
+
+        private async void OnConfigureAgent(object sender, EventArgs e)
+        {
+            var item = (ToolStripMenuItem)sender;
+            item.Enabled = false;
+            try
+            {
+                var serializer = new JavaScriptSerializer();
+                var detector = Path.Combine(Path.GetDirectoryName(_linkEntry), "detect-agents.mjs");
+                var output = await Task.Run(() =>
+                {
+                    using (var process = Process.Start(new ProcessStartInfo
+                    {
+                        FileName = _nodeExe, Arguments = "\"" + detector + "\"",
+                        UseShellExecute = false, CreateNoWindow = true,
+                        RedirectStandardOutput = true, StandardOutputEncoding = Encoding.UTF8
+                    }))
+                    {
+                        return process.StandardOutput.ReadToEnd();
+                    }
+                });
+                var agents = serializer.Deserialize<Dictionary<string, object>[]>(output);
+                var available = new List<Dictionary<string, object>>();
+                foreach (var agent in agents)
+                    if (true.Equals(agent["signedIn"])) available.Add(agent);
+                if (available.Count == 0)
+                {
+                    MessageBox.Show("Sign in to Codex or Claude Code on this computer, then try again.\n请先在这台电脑登录 Codex 或 Claude Code，再重试。",
+                        "SuperAgent Link", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var configPath = Path.Combine(_dataDir, "link-runtime.json");
+                var config = File.Exists(configPath)
+                    ? serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(configPath))
+                    : new Dictionary<string, object>();
+                object rawProjects;
+                var projects = config.TryGetValue("projects", out rawProjects)
+                    ? (Dictionary<string, object>)rawProjects : new Dictionary<string, object>();
+                using (var folder = new FolderBrowserDialog())
+                {
+                    folder.Description = "Choose the folder this agent can work in / 选择 Agent 可使用的项目文件夹";
+                    folder.ShowNewFolderButton = false;
+                    if (folder.ShowDialog() != DialogResult.OK) return;
+                    if (string.Equals(Path.GetPathRoot(folder.SelectedPath), folder.SelectedPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        MessageBox.Show("Choose a project folder inside the drive. / 请选择磁盘下的项目文件夹。", "SuperAgent Link");
+                        return;
+                    }
+                    string projectId = null;
+                    Dictionary<string, object> project = null;
+                    foreach (var entry in projects)
+                    {
+                        var saved = entry.Value as Dictionary<string, object>;
+                        object directory;
+                        if (saved != null && saved.TryGetValue("directory", out directory)
+                            && string.Equals(directory as string, folder.SelectedPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            projectId = entry.Key;
+                            project = saved;
+                            break;
+                        }
+                    }
+                    var agentIndex = available.Count == 1 ? 0 : ChooseAgent(available);
+                    if (agentIndex < 0) return;
+                    if (_taskActive)
+                    {
+                        MessageBox.Show("Try again when the current task finishes. / 请在当前任务完成后再试。", "SuperAgent Link");
+                        return;
+                    }
+                    var selected = available[agentIndex];
+                    if (project == null) project = new Dictionary<string, object>();
+                    if (project.ContainsKey("agent") && !Equals(project["agent"], selected["agent"])) project.Remove("approvals");
+                    project["directory"] = folder.SelectedPath;
+                    project["agent"] = selected["agent"];
+                    project["executable"] = selected["executable"];
+                    projects[projectId ?? Guid.NewGuid().ToString()] = project;
+                    config["projects"] = projects;
+                    var temporary = configPath + ".tmp";
+                    File.WriteAllText(temporary, serializer.Serialize(config), new UTF8Encoding(false));
+                    if (File.Exists(configPath)) File.Replace(temporary, configPath, null);
+                    else File.Move(temporary, configPath);
+                }
+                StartLinkProcess(pairMode: false);
+                OpenWorkspace("/#settings?link=1");
+            }
+            catch (Exception ex)
+            {
+                Log("Local setup failed: " + ex.Message);
+                MessageBox.Show("Local setup failed. Open Link logs for details. / 配置失败，请查看 Link 日志。", "SuperAgent Link");
+            }
+            finally { item.Enabled = true; }
+        }
+
+        private static int ChooseAgent(List<Dictionary<string, object>> agents)
+        {
+            using (var form = new Form())
+            using (var select = new ComboBox())
+            using (var save = new Button())
+            using (var cancel = new Button())
+            {
+                form.Text = "Choose a local agent / 选择本地 Agent";
+                form.ClientSize = new Size(360, 100);
+                form.StartPosition = FormStartPosition.CenterScreen;
+                form.FormBorderStyle = FormBorderStyle.FixedDialog;
+                form.MaximizeBox = false;
+                form.MinimizeBox = false;
+                select.AccessibleName = "Local agent / 本地 Agent";
+                select.DropDownStyle = ComboBoxStyle.DropDownList;
+                select.SetBounds(12, 12, 336, 28);
+                foreach (var agent in agents) select.Items.Add("codex".Equals(agent["agent"]) ? "Codex" : "Claude Code");
+                select.SelectedIndex = 0;
+                save.Text = "Use / 使用";
+                save.DialogResult = DialogResult.OK;
+                save.SetBounds(154, 55, 92, 30);
+                cancel.Text = "Cancel / 取消";
+                cancel.DialogResult = DialogResult.Cancel;
+                cancel.SetBounds(256, 55, 92, 30);
+                form.Controls.AddRange(new Control[] { select, save, cancel });
+                form.AcceptButton = save;
+                form.CancelButton = cancel;
+                return form.ShowDialog() == DialogResult.OK ? select.SelectedIndex : -1;
+            }
         }
 
         private void OnRepair(object sender, EventArgs e)

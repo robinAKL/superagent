@@ -37,7 +37,6 @@ export const TEXT = {
     subtitle: 'Review the organization draft from your company knowledge: who does what, with which tools, in which workflows.',
     wallSubtitle: 'Make duties, owners and tools clear, then hand work to the right employee.',
     backToWall: 'All employees',
-    stepKnowledge: '1 Knowledge', stepTeam: '2 Organization', stepFlow: '3 Workflows', stepRun: '4 Command room',
     loading: 'Loading the organization draft…',
     loadFailed: 'Could not load the organization draft.',
     retry: 'Try again',
@@ -67,7 +66,7 @@ export const TEXT = {
     toolExisting: 'Reusable: {name}', toolPlaceholder: 'Missing · placeholder will be created', toolCreated: 'Placeholder created', toolReused: 'Reusing existing tool',
     usedBy: 'Used by: {list}', joinedBy: 'Roles: {list}', nobody: 'no role yet',
     addRole: 'Add a role', roleName: 'Role name', addRoleBtn: 'Add role',
-    confirmBtn: 'Confirm organization', applyBtn: 'Apply changes', confirming: 'Confirming…',
+    confirmBtn: 'Create team', applyBtn: 'Save team changes', confirming: 'Saving team…',
     summaryNew: 'Creates {e} employees (not connected, no tools or accounts granted) and {t} tool placeholders.',
     summaryChanged: 'You changed the draft since it was confirmed. Applying updates the same team — nothing is duplicated.',
     summaryDone: 'Team created: {e} employees and {t} tools. Next, review and publish the workflows.',
@@ -96,7 +95,6 @@ export const TEXT = {
     subtitle: '审阅从企业知识生成的组织草案：谁负责什么、用哪些工具、参与哪些流程。',
     wallSubtitle: '明确职责、负责人和可用工具，再把工作交给合适的员工。',
     backToWall: '全部员工',
-    stepKnowledge: '1 企业知识', stepTeam: '2 确认组织', stepFlow: '3 发布流程', stepRun: '4 指挥室执行',
     loading: '正在加载组织草案…',
     loadFailed: '组织草案加载失败。',
     retry: '重试',
@@ -126,7 +124,7 @@ export const TEXT = {
     toolExisting: '可复用：{name}', toolPlaceholder: '缺失 · 确认后建占位', toolCreated: '已建占位', toolReused: '复用已有工具',
     usedBy: '使用岗位：{list}', joinedBy: '参与岗位：{list}', nobody: '暂无岗位',
     addRole: '新增岗位', roleName: '岗位名称', addRoleBtn: '添加岗位',
-    confirmBtn: '确认组织', applyBtn: '应用修改', confirming: '正在确认…',
+    confirmBtn: '创建团队', applyBtn: '保存团队修改', confirming: '正在保存团队…',
     summaryNew: '将创建 {e} 名数字员工（未连接，不授予工具或账号）和 {t} 个工具占位。',
     summaryChanged: '确认之后草案有改动。应用修改会更新同一套团队，不会重复创建。',
     summaryDone: '团队已建立：{e} 名数字员工、{t} 个工具。下一步审阅并发布流程。',
@@ -295,7 +293,6 @@ export function EmployeesPage() {
   const [newRole, setNewRole] = useState(''), [newDuty, setNewDuty] = useState('');
   const [removingTool, setRemovingTool] = useState<string | null>(null);
   const [planning, setPlanning] = useState(false);
-  const [planFallback, setPlanFallback] = useState(false);
   const planT = (key: keyof typeof PLAN_TEXT.en) => translate(PLAN_TEXT, lang, key);
 
   const describe = useCallback((caught: unknown) => {
@@ -338,8 +335,10 @@ export function EmployeesPage() {
   async function planTeam(count: number) {
     setBusy(true); setPlanning(true); setError(null); setNotice(null);
     try {
-      const result = await post('/organization/plan', { count }) as { fallbackReason: string | null };
-      setPlanFallback(!!result.fallbackReason);
+      const result = await post('/organization/resize', { count }) as { createdEmployees: number; createdTools: number; retiredEmployees: number; busyEmployees: string[] };
+      const done = t('confirmedRetired', { e: result.createdEmployees, r: result.retiredEmployees, t: result.createdTools });
+      setNotice(result.busyEmployees.length ? `${done} ${t('busyKept', { names: result.busyEmployees.join(t('sep')) })}` : done);
+      window.location.hash = 'employees';
       await load();
     } catch (caught) {
       const key = planErrorKey(caught instanceof RequestError ? caught.code : 'generic');
@@ -350,7 +349,6 @@ export function EmployeesPage() {
     setBusy(true); setError(null); setNotice(null);
     try {
       const result = await post('/organization/plan/adopt', { planId }) as { createdEmployees?: number; createdTools?: number; retiredEmployees?: number; busyEmployees?: string[] };
-      setPlanFallback(false);
       if (result.createdEmployees != null) {
         const done = result.retiredEmployees
           ? t('confirmedRetired', { e: result.createdEmployees, r: result.retiredEmployees, t: result.createdTools ?? 0 })
@@ -361,7 +359,7 @@ export function EmployeesPage() {
     } catch (caught) { setError(describe(caught)); }
     finally { setBusy(false); }
   })();
-  const discardPlan = () => void run(() => post('/organization/plan/discard'), '').then(() => setPlanFallback(false));
+  const discardPlan = () => void run(() => post('/organization/plan/discard'), '');
   async function confirm() {
     setBusy(true); setError(null); setNotice(null);
     try {
@@ -394,16 +392,18 @@ export function EmployeesPage() {
       </div>
     </header>
     {loadError ? <div className="org-alert" role="alert">{loadError}</div> : null}
+    {error ? <div className="org-alert" role="alert">{error}</div> : null}
+    {notice ? <div className="org-notice" role="status">{notice}</div> : null}
+    {org?.canConfirm && !org.blocked ? <div className="panel team-size-panel">
+      <TeamSizePlanner key={`${team.length}:${org.teamPlan?.id ?? ''}`} current={team.length}
+        initial={org.teamPlan?.stale ? undefined : org.teamPlan?.target} busy={busy} planning={planning} onPlan={count => void planTeam(count)} />
+    </div> : null}
     <EmployeeWall employees={team} hasDraft={!!org && org.blocked !== 'no_employees'}
       onManage={employee => { window.location.hash = `employees?manage=${encodeURIComponent(employee.id)}`; }} />
     <EmployeeFeedback employees={team} />
     {team.find(employee => employee.id === route.manage) ?
       <EmployeeManage employee={team.find(employee => employee.id === route.manage)!} lang={lang}
         onClose={() => { window.location.hash = 'employees'; }} onChanged={() => void load()} /> : null}
-    {confirmedState ? <footer className="org-bar">
-      <p>{t('summaryDone', { e: org!.confirmation!.employees, t: org!.confirmation!.tools })}</p>
-      <a className="btn primary" href="#brain?org=1">{t('nextFlow')}</a>
-    </footer> : null}
   </div>;
 
   return <div className="org-page">
@@ -417,12 +417,6 @@ export function EmployeesPage() {
         {org.confirmation ? (org.changedSinceConfirmation ? t('unsaved') : t('confirmedAt', { date: new Date(org.confirmation.confirmedAt).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' }), n: org.confirmation.revision })) : t('draft')}
       </span> : null}
     </header>
-    <ol className="org-steps" aria-label={t('title')}>
-      <li className="is-done"><a href="#knowledge">{t('stepKnowledge')}</a></li>
-      <li aria-current="step">{t('stepTeam')}</li>
-      <li className={confirmedState ? 'is-next' : ''}><a href="#brain?org=1">{t('stepFlow')}</a></li>
-      <li><a href="#room">{t('stepRun')}</a></li>
-    </ol>
 
     {error ? <div className="org-alert" role="alert">{error}</div> : null}
     {notice ? <div className="org-notice" role="status">{notice}</div> : null}
@@ -443,7 +437,7 @@ export function EmployeesPage() {
       {!org.canConfirm ? <p className="helper">{t('noAccess')}</p> : null}
       {org.canConfirm ? <div className="panel team-size-panel">
         <TeamSizePlanner key={org.employees.length} current={org.employees.length} busy={busy} planning={planning} onPlan={count => void planTeam(count)} />
-        {org.teamPlan ? <TeamPlanPreview plan={org.teamPlan} roles={org.employees} tools={org.tools} sops={org.sops} busy={busy} fallback={planFallback}
+        {org.teamPlan ? <TeamPlanPreview plan={org.teamPlan} roles={org.employees} tools={org.tools} sops={org.sops} busy={busy} fallback={org.teamPlan.method === 'merge'}
           onAdopt={() => adoptPlan(org.teamPlan!.id)} onDiscard={discardPlan} /> : null}
       </div> : null}
 

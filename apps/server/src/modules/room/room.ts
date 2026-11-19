@@ -207,6 +207,10 @@ export class CommandRoom {
     return this.employees().filter((employee) => isOwner(viewer) || employee.ownerUserId === viewer.userId);
   }
 
+  hasOpenWork(employeeId: string): boolean {
+    return this.tasks.some(task => task.employeeId === employeeId && OPEN.has(task.status));
+  }
+
   post(input: PostInput): { message: RoomMessage; reply: RoomMessage | null; task: RoomTask | null; duplicate: boolean } {
     const key = `${input.roomId}:${input.clientMessageId}`;
     const prior = this.byClientId.get(key);
@@ -221,7 +225,7 @@ export class CommandRoom {
       roles: input.authorRoles && input.authorRoles.length > 0 ? input.authorRoles : ['owner'],
       projectScopes: input.authorProjectScopes ?? [],
     };
-    const mentions = this.resolveMentions(input.body);
+    const { mentions, work } = this.resolveMentions(input.body);
     const original = input.followupTo ? this.tasks.find((item) => item.id === input.followupTo) ?? null : null;
     const originalVisible = original !== null && original.roomId === input.roomId && this.canSeeTask(original, author);
     const message = this.push({
@@ -266,10 +270,10 @@ export class CommandRoom {
     if (!isOwner(author) && employee.ownerUserId !== author.userId) {
       return noTask(`@${employee.name} 不在当前身份可以指派的范围内，我不会创建这个任务。`);
     }
-    if (isGreeting(body) || workText(body) === '') {
+    if (isGreeting(work) || work === '') {
       return noTask(`已看到 @${mentions.map((item) => item.name).join(' @')}，这条还不是明确的工作请求。`);
     }
-    if (needsParameters(body)) {
+    if (needsParameters(work)) {
       return noTask('这是对外动作。请先补充具体对象（收件人或单号）、内容和依据，我再交给数字员工。');
     }
 
@@ -285,7 +289,7 @@ export class CommandRoom {
       assigneeUserId: employee.ownerUserId,
       employeeId: employee.id,
       // The task is named by the work asked for; who it went to is on the task, not repeated in its name.
-      title: workText(body),
+      title: work,
       status: waiting ? 'waiting' : 'assigned',
       waitingReason: modelDown ? '等待模型' : offline ? '等待连接' : null,
       createdByUserId: input.authorUserId,
@@ -296,10 +300,10 @@ export class CommandRoom {
         modelTier: employee.modelTier ?? null,
         takenAt: this.now().toISOString(),
       },
-      approval: isExternalAction(body) ? 'required' : 'none',
+      approval: isExternalAction(work) ? 'required' : 'none',
       reviewedByUserId: null,
       // A draft is unsent from the moment it exists. Nothing is marked done until a person reports it.
-      evidence: workText(body).includes('草稿') ? { fields: { subject: null, body: null }, sent: false } : null,
+      evidence: work.includes('草稿') ? { fields: { subject: null, body: null }, sent: false } : null,
       verification: 'none',
       inputSupplement: null,
       hold: null,
@@ -712,15 +716,23 @@ export class CommandRoom {
     return !(input.authorProjectScopes ?? []).includes(projectId);
   }
 
-  private resolveMentions(body: string): EmployeeRef[] {
-    const names = [...body.matchAll(/@([^\s@]+)/gu)].map((match) => match[1] ?? '');
-    const all = this.employees();
-    const found: EmployeeRef[] = [];
-    for (const name of names) {
-      const employee = all.find((item) => item.name === name || item.id === name);
-      if (employee && !found.some((item) => item.id === employee.id)) found.push(employee);
+  private resolveMentions(body: string): { mentions: EmployeeRef[]; work: string } {
+    const aliases = this.employees().flatMap(employee => [employee.name, employee.id]
+      .filter(Boolean).map(alias => ({ alias, employee }))).sort((a, b) => b.alias.length - a.alias.length);
+    const mentions = new Map<string, EmployeeRef>();
+    let cursor = 0;
+    let text = '';
+    for (const marker of body.matchAll(/(?<![\p{L}\p{N}_.+-])@/gu)) {
+      const index = marker.index!;
+      if (index < cursor) continue;
+      const match = aliases.find(({ alias }) => body.startsWith(alias, index + 1)
+        && /^[\s@,，。:：!?！？;；]?$/.test(body.charAt(index + 1 + alias.length)));
+      if (!match) continue;
+      mentions.set(match.employee.id, match.employee);
+      text += body.slice(cursor, index) + ' ';
+      cursor = index + 1 + match.alias.length;
     }
-    return found;
+    return { mentions: [...mentions.values()], work: workText(text + body.slice(cursor)) };
   }
 
   private push(input: Omit<RoomMessage, 'id' | 'seq'>): RoomMessage {

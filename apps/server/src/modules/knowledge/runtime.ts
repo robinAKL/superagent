@@ -12,6 +12,7 @@ import { LiveMcpKnowledge } from './live-mcp.js';
 import { employeesState } from '../employees/index.js';
 import { toolsState } from '../tools/index.js';
 import { createOrganizationSink } from '../employees/organization.js';
+import { roomState } from '../room/index.js';
 
 export function createKnowledgeDeps(runtime: Runtime & { llm?: AnalysisGateway }): KnowledgeDeps {
   const sourceResources = runtime.config.sourceResources ?? [], plugins = managedSourcePlugins(sourceResources, runtime.app.setupDeps.secrets);
@@ -22,7 +23,7 @@ export function createKnowledgeDeps(runtime: Runtime & { llm?: AnalysisGateway }
   const repo = config.mode === 'dev' ? new MemoryKnowledgeRepository() : pool && new PgKnowledgeRepository(pool);
   if (!repo) throw Error('Knowledge requires persistent runtime dependencies');
   const liveMcp = new LiveMcpKnowledge(repo, runtime.app.setupDeps.secrets);
-  const organization = createOrganizationSink(() => employeesState.current, () => toolsState.current);
+  const organization = createOrganizationSink(() => employeesState.current, () => toolsState.current, id => roomState.current.hasOpenWork(id));
   if (config.mode === 'dev') return { repo, organization, liveMcp, mcpAnswerGateway: runtime.llm, sourceResources, plugins, model, database: database.gateway, close: database.close, enqueue: async () => undefined };
   if (!pool || !config.blobUrl || !config.docIntelEndpoint) throw Error('Knowledge requires persistent runtime dependencies');
   return {

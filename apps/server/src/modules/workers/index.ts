@@ -110,6 +110,7 @@ export async function resolveRoomDispatch(task: RoomTask, projectScopes: readonl
     const projects = new Set(worker.capabilities.roomAssignments?.filter(assignment =>
       assignment.employeeId === task.employeeId &&
       (!task.projectId || assignment.projectId === task.projectId) &&
+      (!worker.capabilities.projects || worker.capabilities.projects.some(project => project.id === assignment.projectId)) &&
       (!projectScopes || projectScopes.includes(assignment.projectId)) &&
       workerMayRun(worker, assignment),
     ).map(assignment => assignment.projectId));
@@ -217,6 +218,42 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return { worker: toView(worker, workersState.now()) };
   });
 
+  app.post('/:id/room-binding', async (req, reply) => {
+    const user = req.user;
+    if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
+    const { id } = req.params as { id: string };
+    const { employeeId, projectId, remove } = (req.body ?? {}) as { employeeId?: unknown; projectId?: unknown; remove?: boolean };
+    if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
+    if (typeof employeeId !== 'string' || !employeeId || employeeId.length > 128
+      || typeof projectId !== 'string' || !projectId || projectId.length > 128) return reply.code(400).send({ error: 'invalid_binding' });
+    const registry = workersState.registry;
+    const device = await registry.get(user.tenantId, id);
+    if (!device || device.kind !== 'link' || device.revokedAt !== null) return reply.code(404).send({ error: 'not_found' });
+    const pair = { employeeId, projectId };
+    const existing = device.capabilities.roomAssignments ?? [];
+    const remaining = existing.filter(binding => binding.employeeId !== employeeId || binding.projectId !== projectId);
+    if (remove !== true) {
+      const roster = roomState.current.roster({ userId: user.userId, roles: ['owner'], projectScopes: [] });
+      if (!roster.some(employee => employee.id === employeeId) || !device.capabilities.projects?.some(project => project.id === projectId)
+        || !workerMayRun(device, pair)) return reply.code(409).send({ error: 'binding_unavailable' });
+      if (workersState.db) {
+        const confirmed = await workersState.db.query(`SELECT 1 FROM knowledge_tenants k
+          CROSS JOIN LATERAL jsonb_each(k.doc->'organization'->'employees') e
+          WHERE k.tenant_id = $1 AND e.value->>'employeeId' = $2 LIMIT 1`, [user.tenantId, employeeId]);
+        if (!confirmed.rows.length) return reply.code(409).send({ error: 'binding_unavailable' });
+      }
+      const devices = await registry.list(user.tenantId);
+      if (devices.some(other => other.revokedAt === null && other.capabilities.roomAssignments?.some(binding =>
+        binding.employeeId === employeeId && (other.id !== id || binding.projectId !== projectId),
+      ))) return reply.code(409).send({ error: 'employee_already_bound' });
+      if (remaining.length >= 32) return reply.code(409).send({ error: 'binding_limit' });
+      remaining.push(pair);
+    }
+    const updated = await registry.patchCapabilities(user.tenantId, id, { roomAssignments: remaining });
+    if (!updated) return reply.code(404).send({ error: 'not_found' });
+    return { worker: toView(updated, workersState.now()) };
+  });
+
   app.post('/:id/revoke', async (req, reply) => {
     const tenantId = req.user?.tenantId;
     if (!tenantId) return reply.code(401).send({ error: 'unauthenticated' });
@@ -313,8 +350,12 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     };
     const worker = req.worker!;
     if (body.capabilities && typeof body.capabilities === 'object') {
-      const agents = cleanCapabilities(body.capabilities).agents;
-      if (agents) await workersState.registry.patchCapabilities(worker.tenantId, worker.id, { agents });
+      const { agents, projects } = cleanCapabilities(body.capabilities);
+      if (agents || (projects && worker.kind === 'link')) {
+        await workersState.registry.patchCapabilities(worker.tenantId, worker.id, {
+          ...(agents ? { agents } : {}), ...(worker.kind === 'link' && projects ? { projects } : {}),
+        });
+      }
     }
     if (!(await workersState.registry.heartbeat(worker.id, now, input))) return reply.code(401).send({ error: 'bad_worker_token' });
     const fresh = await workersState.registry.get(worker.tenantId, worker.id);

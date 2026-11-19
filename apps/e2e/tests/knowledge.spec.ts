@@ -421,25 +421,20 @@ test('[qa-database-knowledge#38] No browser errors or real SQL execution', async
   await expect(page.getByRole('cell', { name: 'LOT-P1', exact: true })).toBeVisible();
 });
 
-test('shrinking a team of 8 to 2 and confirming leaves exactly 2 employees on the wall and in the command room; an unadopted plan is called out first', async ({ page }) => {
+test('a saved team size proposal is preselected and applies with one click', async ({ page }) => {
   await response(page.request.post('/__test/knowledge/reset', { data: {} }));
   const EIGHT = ['采购专员', '财务专员', '仓储专员', '业务主管', '客服专员', '质检专员', '物流专员', '合同专员']
     .map((name, i) => `角色：${name}；责任：负责第${i + 1}类业务的核对与登记。`).concat('工具：只读单据查询；职责：按编号查证业务记录。').join(String.fromCharCode(10));
   await localFile(page, true, EIGHT); await analyse(page);
   await page.goto('/#employees?view=draft');
-  await page.getByRole('button', { name: '确认组织', exact: true }).click();
+  await page.getByRole('button', { name: '创建团队', exact: true }).click();
   await page.goto('/#employees');
   await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(8);
 
-  await page.goto('/#employees?view=draft');
-  await page.locator('.team-size-stepper input').fill('2');
-  await page.getByRole('button', { name: '按人数重新规划', exact: true }).click();
-  await expect(page.getByText('新方案：2 个岗位')).toBeVisible();
-  // Not adopted yet: confirming now would keep 8 roles, and the bar says so.
-  await expect(page.locator('.org-plan-pending')).toContainText('2 个岗位的人数方案还没采用');
-  await expect(page.locator('.org-plan-pending')).toContainText('当前 8 个岗位');
-  await page.getByRole('button', { name: '采用这个方案并更新正式团队', exact: true }).click();
-  await expect(page.locator('.org-plan-pending')).toHaveCount(0);
+  await response(page.request.post('/api/v1/knowledge/organization/plan', { data: { count: 2 } }));
+  await page.reload();
+  await expect(page.getByRole('spinbutton', { name: '数字员工人数' })).toHaveValue('2');
+  await page.getByRole('button', { name: '调整为 2 人', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: '移除 8 名' })).toBeVisible();
   await page.goto('/#employees');
   await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(2);
@@ -455,35 +450,63 @@ test('shrinking a team of 8 to 2 and confirming leaves exactly 2 employees on th
   await response(page.request.post('/__test/knowledge/reset', { data: {} }));
 });
 
-test('shrinking a confirmed team of 12 to 1 on adopt leaves one employee on the wall, registry and command room', async ({ page }) => {
+test('one team size submission leaves one employee and that employee can be bound to Link from the web', async ({ page }) => {
   await response(page.request.post('/__test/knowledge/reset', { data: {} }));
   const TWELVE = ['采购专员', '财务专员', '仓储专员', '业务主管', '客服专员', '质检专员', '物流专员', '合同专员', '订单专员', '信用专员', '出纳专员', '复核专员']
     .map((name, i) => `角色：${name}；责任：负责第${i + 1}类业务的核对与登记。`).concat('工具：只读单据查询；职责：按编号查证业务记录。').join(String.fromCharCode(10));
   await localFile(page, true, TWELVE); await analyse(page);
   await page.goto('/#employees?view=draft');
-  await page.getByRole('button', { name: '确认组织', exact: true }).click();
+  await page.getByRole('button', { name: '创建团队', exact: true }).click();
   await page.goto('/#employees');
   await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(12);
 
-  await page.goto('/#employees?view=draft');
-  await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: /岗位（12）/ })).toBeVisible();
   await page.locator('.team-size-stepper input').fill('1');
-  await page.getByRole('button', { name: '按人数重新规划', exact: true }).click();
-  await expect(page.getByText('新方案：1 个岗位')).toBeVisible();
-  await expect(page.getByRole('heading', { name: /岗位（12）/ })).toBeVisible();
-  await page.getByRole('button', { name: '采用这个方案并更新正式团队', exact: true }).click();
+  await page.getByRole('button', { name: '调整为 1 人', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: '移除 12 名' })).toBeVisible();
   await page.goto('/#employees');
   await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(1);
-  const registry = await (await page.request.get('/api/v1/employees/')).json() as { id: string }[];
+  const registry = await (await page.request.get('/api/v1/employees/')).json() as { id: string; name: string }[];
   const team = registry.filter(e => e.id.startsWith('emp-org-'));
   expect(team).toHaveLength(1);
   await page.goto('/#room');
   await page.getByRole('button', { name: '团队', exact: true }).click();
   await expect(page.locator('#room-team [data-team-member^="emp-org-"]')).toHaveCount(1);
   await expect(page.locator(`#room-team [data-team-member="${team[0]!.id}"]`)).toBeVisible();
-  await response(page.request.post('/__test/knowledge/reset', { data: {} }));
+
+  const device = await response(page.request.post('/api/v1/workers', { data: { name: 'E2E Link', kind: 'link' } }));
+  const workerHeaders = { authorization: `Bearer ${device.token}` };
+  const projectId = 'e2e-link-project';
+  await response(page.request.post('/api/v1/worker-link/heartbeat', { headers: workerHeaders, data: {
+    capabilities: { agents: ['codex'], projects: [{ id: projectId, name: 'Orders', agent: 'codex' }] },
+  } }));
+  try {
+    await page.goto('/#settings?link=1');
+    const card = page.locator('[data-worker]').filter({ hasText: 'E2E Link' });
+    await expect(card.getByText('在线', { exact: true })).toBeVisible();
+    await expect(card.getByLabel('本地项目')).toHaveValue(projectId);
+    await expect(card.getByLabel('数字员工')).toHaveValue(team[0]!.id);
+    await card.getByRole('button', { name: '绑定员工', exact: true }).click();
+    await expect(card.getByRole('button', { name: '移除绑定' })).toBeVisible();
+    await page.goto('/#employees');
+    await expect(page.getByText('已绑定 · 可接任务')).toBeVisible();
+
+    const posted = await response(page.request.post('/api/v1/room/messages', { data: {
+      roomId: 'room-1', clientMessageId: 'resize-and-bind-e2e', body: `@${team[0]!.name} Summarize the orders in this folder.`,
+    } }));
+    expect(posted.task.projectId).toBe(projectId);
+    const poll = await response(page.request.post('/api/v1/worker-link/poll', {
+      headers: workerHeaders, data: { waitMs: 0 },
+    }));
+    expect(poll.events).toEqual(expect.arrayContaining([expect.objectContaining({
+      kind: 'wake', payload: expect.objectContaining({ roomTaskId: posted.task.id, projectId }),
+    })]));
+    await response(page.request.post(`/api/v1/worker-link/room-tasks/${posted.task.id}/report`, {
+      headers: workerHeaders, data: { body: 'Summary ready.' },
+    }));
+  } finally {
+    await response(page.request.post(`/api/v1/workers/${device.worker.id}/revoke`, { data: {} }));
+    await response(page.request.post('/__test/knowledge/reset', { data: {} }));
+  }
 });
 
 test('Workflows / SOP opens on the extracted flowchart when the only workflow is a private MCP draft', async ({ page }) => {

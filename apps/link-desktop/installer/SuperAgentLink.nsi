@@ -10,6 +10,9 @@
 !ifndef OUT_FILE
   !define OUT_FILE "..\dist\SuperAgentLink-Setup-x64.exe"
 !endif
+!ifndef LINK_ICON
+  !define LINK_ICON "..\assets\SuperAgentLink.ico"
+!endif
 
 Name "SuperAgent Link ${APP_VERSION}"
 OutFile "${OUT_FILE}"
@@ -20,6 +23,8 @@ Unicode True
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\SuperAgentLink"
 !define RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
 
+!define MUI_ICON "${LINK_ICON}"
+!define MUI_UNICON "${LINK_ICON}"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -49,9 +54,11 @@ Section "Main" SecMain
   File /r "${STAGE_DIR}\*.*"
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
+  CreateShortcut "$SMPROGRAMS\SuperAgent Link.lnk" "$INSTDIR\SuperAgentLink.exe"
 
   ; Add/Remove Programs registration
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "SuperAgent Link"
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\SuperAgentLink.exe,0"
   WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "SuperAgent"
@@ -76,6 +83,7 @@ Section "Uninstall"
   nsExec::ExecToLog 'schtasks /Delete /TN "SuperAgentLink" /F'
   DeleteRegValue HKCU "${RUN_KEY}" "SuperAgentLink"
   DeleteRegKey HKCU "${UNINST_KEY}"
+  Delete "$SMPROGRAMS\SuperAgent Link.lnk"
 
   ; Clean install directory and user token/config/logs
   Delete "$INSTDIR\SuperAgentLink.exe"
