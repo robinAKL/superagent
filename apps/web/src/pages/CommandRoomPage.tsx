@@ -303,7 +303,11 @@ export function CommandRoomPage() {
   const [acting, setActing] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
   // Business workflows live behind a header button (prototype); a #room?workflow= link opens them directly.
-  const linkedWorkflow = () => typeof window !== 'undefined' && new URLSearchParams(window.location.hash.split('?')[1] ?? '').has('workflow');
+  const linkedWorkflow = () => {
+    if (typeof window === 'undefined') return false;
+    const query = new URLSearchParams(window.location.hash.split('?')[1]);
+    return query.has('workflow') || query.has('workflows');
+  };
   const [flowsOpen, setFlowsOpen] = useState(linkedWorkflow);
   useEffect(() => {
     const open = () => { if (linkedWorkflow()) setFlowsOpen(true); };

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { modules } from './modules/index.js';
 import { createAuthenticate, requireRole, type AuthConfig } from './auth.js';
 import type { SetupDeps } from './modules/setup/service.js';
-import type { KnowledgeDeps } from './modules/knowledge/service.js';
+import { KnowledgeService, type KnowledgeDeps } from './modules/knowledge/service.js';
 import { longWorkModule, mailWebhook, type LongWorkDeps } from './modules/longwork/http.js';
 import { workerLinkModule, workerPairModule } from './modules/workers/index.js';
 import { MCP_CALLBACK, MCP_CLIENT_DOCUMENT, mcpClientDocument } from './modules/knowledge/mcp-oauth.js';
@@ -81,6 +81,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   const auth = opts.auth ?? { mode: 'dev' as const, platformTenantId: 'default' };
   const authCfgForBrowser = auth;
   const authenticate = createAuthenticate(auth);
+  const knowledge = opts.knowledgeDeps?.organization ? new KnowledgeService(opts.knowledgeDeps) : undefined;
   await app.register(mailWebhook, { deps: opts.longWorkDeps });
   // Pairing has no token yet. The worker channel itself uses a revocable bearer token, not a user sign-in.
   await app.register(workerPairModule, { prefix: '/api/v1/worker-link' });
@@ -93,8 +94,14 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     for (const m of modules) {
       await api.register(async (scoped) => {
         if (m.roles) scoped.addHook('preHandler', requireRole(...m.roles));
+        if (knowledge && ['employees', 'room', 'workers', 'executions', 'work-items'].includes(m.prefix)) {
+          scoped.addHook('preHandler', async req => {
+            if (req.user) await knowledge.refreshConfirmedTeam(req.user.tenantId);
+          });
+        }
         const deps = m.prefix === 'setup' ? opts.setupDeps : m.prefix === 'knowledge' ? opts.knowledgeDeps : m.prefix === 'work-items' ? opts.longWorkDeps : undefined;
-        await scoped.register(m.plugin, { ...(deps ? { deps } : {}), tenantOf: (req: any) => req.user?.tenantId ?? 'default' });
+        const workflowTeam = m.prefix === 'executions' && knowledge ? { resolveWorkflowTeam: (tenantId: string) => knowledge.resolveWorkflowTeam(tenantId) } : {};
+        await scoped.register(m.plugin, { ...(deps ? { deps } : {}), ...workflowTeam, tenantOf: (req: any) => req.user?.tenantId ?? 'default' });
       }, { prefix: `/api/v1/${m.prefix}` });
     }
   });

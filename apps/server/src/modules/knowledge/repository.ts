@@ -1,11 +1,19 @@
 import type { UserContext } from '@superagent/shared';
 import { Pool, type PoolClient } from 'pg';
-import { emptyState, itemSignature, positionedChunks, selectedItem, type Evidence, type KnowledgeState } from './domain.js';
+import { emptyState, itemSignature, positionedChunks, selectedItem, type Evidence, type KnowledgeState, type OrganizationRecord } from './domain.js';
 import { appendPgAudit, auditDiff, auditSnapshot } from './audit.js';
 import type { AuditEntry } from '../audit/audit.js';
 export interface SearchHit extends Evidence { title: string; score: number }
+export interface ConfirmedTeam {
+  organization?: OrganizationRecord | null;
+  roles: { id: string; mergedInto?: string | null }[];
+}
+export function confirmedTeamOf(state: KnowledgeState): ConfirmedTeam {
+  return { organization: state.organization, roles: state.recommendations.filter(role => role.kind === 'employee').map(({ id, mergedInto }) => ({ id, mergedInto })) };
+}
 export interface KnowledgeRepository {
   read(ctx: UserContext): Promise<KnowledgeState>;
+  readConfirmedTeam(tenantId: string): Promise<ConfirmedTeam>;
   transact<T>(ctx: UserContext, change: (state: KnowledgeState) => T | Promise<T>): Promise<T>;
   search(ctx: UserContext, query: string, limit: number): Promise<SearchHit[]>;
 }
@@ -30,6 +38,13 @@ export class PgKnowledgeRepository implements KnowledgeRepository {
   constructor(readonly pool: Pool) {}
   async read(ctx: UserContext): Promise<KnowledgeState> {
     const r = await this.pool.query<{ doc: KnowledgeState }>('SELECT doc FROM knowledge_tenants WHERE tenant_id=$1', [ctx.tenantId]); return r.rows[0] ? normalized(r.rows[0].doc) : emptyState();
+  }
+  async readConfirmedTeam(tenantId: string): Promise<ConfirmedTeam> {
+    const result = await this.pool.query<ConfirmedTeam>(`SELECT doc->'organization' AS organization,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('id', role->>'id', 'mergedInto', role->>'mergedInto'))
+        FROM jsonb_array_elements(doc->'recommendations') role WHERE role->>'kind' = 'employee'), '[]'::jsonb) AS roles
+      FROM knowledge_tenants WHERE tenant_id = $1`, [tenantId]);
+    return result.rows[0] ?? { roles: [] };
   }
   async transact<T>(ctx: UserContext, change: (state: KnowledgeState) => T | Promise<T>): Promise<T> {
     const client = await this.pool.connect();
@@ -63,6 +78,7 @@ export class MemoryKnowledgeRepository implements KnowledgeRepository {
   private tenants = new Map<string, KnowledgeState>(); private pending: Promise<unknown> = Promise.resolve();
   readonly auditEntries: AuditEntry[] = [];
   async read(ctx: UserContext) { return structuredClone(this.tenants.get(ctx.tenantId) ?? emptyState()); }
+  async readConfirmedTeam(tenantId: string) { return structuredClone(confirmedTeamOf(this.tenants.get(tenantId) ?? emptyState())); }
   async transact<T>(ctx: UserContext, change: (state: KnowledgeState) => T | Promise<T>): Promise<T> {
     const work = this.pending.then(async () => { const state = await this.read(ctx), before=auditSnapshot(state), result = await change(state); this.tenants.set(ctx.tenantId, state); this.auditEntries.push(...auditDiff(before,auditSnapshot(state)).map(e=>({...e,tenantId:ctx.tenantId,actor:ctx.userId}))); return structuredClone(result); }); this.pending = work.catch(() => undefined); return work;
   }

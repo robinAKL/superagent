@@ -35,6 +35,8 @@ export interface ExecutionStep {
   readback: unknown | null;
   resumeReason?: 'input' | 'readiness';
   missingFields?: string[];
+  /** Current team assignment, fixed when this run starts. Older runs still use the pinned graph. */
+  employeeId?: string;
 }
 
 export interface Execution {
@@ -94,6 +96,16 @@ export class ExecutionError extends Error {
   }
 }
 
+interface StartInput {
+  tenantId: string;
+  versionId: string;
+  eventId: string;
+  startedBy: string;
+  data: Record<string, unknown>;
+  companyContext?: CompanyContext | null;
+  employeeReplacements?: Record<string, string>;
+}
+
 /** Topological order from the trigger (the graph is a DAG; publish already validated it). */
 export function stepOrder(g: SopGraph): string[] {
   const indeg = new Map(g.nodes.map((n) => [n.id, 0]));
@@ -109,6 +121,17 @@ export function stepOrder(g: SopGraph): string[] {
     }
   }
   return out;
+}
+
+function executionSteps(graph: SopGraph, replacements?: Record<string, string>): ExecutionStep[] {
+  const byId = new Map(graph.nodes.map(node => [node.id, node]));
+  return stepOrder(graph).map(id => {
+    const node = byId.get(id)!;
+    const employeeId = node.kind === 'employee' && node.ref && replacements && Object.hasOwn(replacements, node.ref)
+      ? replacements[node.ref] : undefined;
+    return { nodeId: id, kind: node.kind, label: node.label, status: 'pending', detail: null, workItemId: null, actionId: null, readback: null,
+      ...(employeeId ? { employeeId } : {}) };
+  });
 }
 
 export class SopExecutor {
@@ -209,7 +232,7 @@ export class SopExecutor {
   }
 
   /** Trigger: open a SOP instance for a published version and run until a human step or the end. */
-  async start(input: { tenantId: string; versionId: string; eventId: string; startedBy: string; data: Record<string, unknown>; companyContext?: CompanyContext | null }): Promise<Execution> {
+  async start(input: StartInput): Promise<Execution> {
     const sop = this.deps.sop();
     const version = sop.get(input.versionId);
     if (version.status !== 'published') throw new ExecutionError('not_published', 'only a published SOP version can run');
@@ -217,7 +240,6 @@ export class SopExecutor {
     if (!graph?.nodes.length) throw new ExecutionError('no_graph', 'the SOP version has no flow graph');
     const instance = sop.manualStart(input.tenantId, input.versionId, input.eventId, true);
     if (!instance) throw new ExecutionError('not_started', 'the same event already opened an instance, or the SOP is paused');
-    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
     const run: Execution = {
       id: `ex_${++this.seq}`,
       tenantId: input.tenantId,
@@ -229,7 +251,7 @@ export class SopExecutor {
       startedBy: input.startedBy,
       input: structuredClone(input.data),
       status: 'running',
-      steps: stepOrder(graph).map((id) => ({ nodeId: id, kind: byId.get(id)!.kind, label: byId.get(id)!.label, status: 'pending', detail: null, workItemId: null, actionId: null, readback: null })),
+      steps: executionSteps(graph, input.employeeReplacements),
       exceptionItemId: null,
       companyContext: input.companyContext,
       startedAt: new Date().toISOString(),
@@ -245,7 +267,7 @@ export class SopExecutor {
    * commitRun is awaited before any tool call; if it throws, the local run is dropped and nothing is invoked.
    */
   async runClaimed(
-    input: { tenantId: string; versionId: string; instanceId: string; eventId: string; startedBy: string; data: Record<string, unknown>; companyContext?: CompanyContext | null },
+    input: StartInput & { instanceId: string },
     commitRun?: (run: Execution) => Promise<void>,
   ): Promise<Execution> {
     const existing = this.byInstance(input.tenantId, input.instanceId);
@@ -255,7 +277,6 @@ export class SopExecutor {
     if (version.status !== 'published') throw new ExecutionError('not_published', 'only a published SOP version can run');
     const graph = (version.definition as { graph?: SopGraph }).graph;
     if (!graph?.nodes.length) throw new ExecutionError('no_graph', 'the SOP version has no flow graph');
-    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
     const run: Execution = {
       id: `run_${input.instanceId}`,
       tenantId: input.tenantId,
@@ -267,7 +288,7 @@ export class SopExecutor {
       startedBy: input.startedBy,
       input: structuredClone(input.data),
       status: 'running',
-      steps: stepOrder(graph).map((id) => ({ nodeId: id, kind: byId.get(id)!.kind, label: byId.get(id)!.label, status: 'pending', detail: null, workItemId: null, actionId: null, readback: null })),
+      steps: executionSteps(graph, input.employeeReplacements),
       exceptionItemId: null,
       companyContext: input.companyContext,
       startedAt: new Date().toISOString(),
@@ -348,7 +369,7 @@ export class SopExecutor {
       if (step.status !== 'pending') return; // waiting / blocked / unknown stop the run here
       const node = graph.nodes.find((n) => n.id === step.nodeId)!;
       if (node.kind === 'employee' && node.ref) {
-        const unavailable = this.deps.employeeUnavailable?.(node.ref);
+        const unavailable = this.deps.employeeUnavailable?.(step.employeeId ?? node.ref);
         if (unavailable) {
           this.block(run, step, unavailable, 'readiness');
           return;
@@ -481,17 +502,16 @@ export class SopExecutor {
 
   /** The digital employee that performs a tool step: the nearest employee node before it in run order. */
   private employeeFor(run: Execution, toolNodeId: string): string | null {
-    const graph = (this.deps.sop().get(run.versionId).definition as { graph?: SopGraph }).graph!;
-    const order = run.steps.map((s) => s.nodeId);
-    for (const id of order.slice(0, order.indexOf(toolNodeId)).reverse()) {
-      const n = graph.nodes.find((x) => x.id === id)!;
-      if (n.kind === 'employee') return n.ref ?? null;
+    const at = run.steps.findIndex(step => step.nodeId === toolNodeId);
+    for (let i = at - 1; i >= 0; i--) {
+      const step = run.steps[i];
+      if (step?.kind === 'employee') return this.assignedEmployee(run, step);
     }
     return null;
   }
 
   assignedEmployee(run: Execution, step: ExecutionStep): string | null {
-    if (step.kind === 'employee') return this.deps.sop().get(run.versionId).definition.graph?.nodes.find(node => node.id === step.nodeId)?.ref ?? null;
+    if (step.kind === 'employee') return step.employeeId ?? this.deps.sop().get(run.versionId).definition.graph?.nodes.find(node => node.id === step.nodeId)?.ref ?? null;
     return step.kind === 'tool' ? this.employeeFor(run, step.nodeId) : null;
   }
 

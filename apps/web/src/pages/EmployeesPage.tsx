@@ -36,6 +36,7 @@ export const TEXT = {
     title: 'Digital employees',
     subtitle: 'Review the organization draft from your company knowledge: who does what, with which tools, in which workflows.',
     wallSubtitle: 'Make duties, owners and tools clear, then hand work to the right employee.',
+    runWorkflow: 'Run a workflow', teamUpdated: 'Team updated to {n} employees.',
     backToWall: 'All employees',
     loading: 'Loading the organization draft…',
     loadFailed: 'Could not load the organization draft.',
@@ -94,6 +95,7 @@ export const TEXT = {
     title: '数字员工',
     subtitle: '审阅从企业知识生成的组织草案：谁负责什么、用哪些工具、参与哪些流程。',
     wallSubtitle: '明确职责、负责人和可用工具，再把工作交给合适的员工。',
+    runWorkflow: '运行流程', teamUpdated: '正式团队现有 {n} 名员工。',
     backToWall: '全部员工',
     loading: '正在加载组织草案…',
     loadFailed: '组织草案加载失败。',
@@ -335,8 +337,8 @@ export function EmployeesPage() {
   async function planTeam(count: number) {
     setBusy(true); setPlanning(true); setError(null); setNotice(null);
     try {
-      const result = await post('/organization/resize', { count }) as { createdEmployees: number; createdTools: number; retiredEmployees: number; busyEmployees: string[] };
-      const done = t('confirmedRetired', { e: result.createdEmployees, r: result.retiredEmployees, t: result.createdTools });
+      const result = await post('/organization/resize', { count }) as { employees: unknown[]; busyEmployees: string[] };
+      const done = t('teamUpdated', { n: result.employees.length });
       setNotice(result.busyEmployees.length ? `${done} ${t('busyKept', { names: result.busyEmployees.join(t('sep')) })}` : done);
       window.location.hash = 'employees';
       await load();
@@ -390,6 +392,7 @@ export function EmployeesPage() {
         <h1>{t('title')}</h1>
         <p>{t('wallSubtitle')}</p>
       </div>
+      <div className="page-head-actions"><a className="btn primary" href="#room?workflows=1">{t('runWorkflow')}</a></div>
     </header>
     {loadError ? <div className="org-alert" role="alert">{loadError}</div> : null}
     {error ? <div className="org-alert" role="alert">{error}</div> : null}

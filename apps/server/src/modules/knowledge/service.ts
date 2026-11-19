@@ -3,7 +3,7 @@ import { confirmSource, evidenceValid, hash, hydrate, id, invalidateAnalyses, Kn
 import { managedSource, publicSourceScope, sourceScope, type SourceResource } from './sources.js';
 import type { Connection, Item } from './store.js';
 import type { AuditSink } from '../audit/audit.js';
-import type { KnowledgeRepository, SearchHit } from './repository.js';
+import { confirmedTeamOf, type ConfirmedTeam, type KnowledgeRepository, type SearchHit } from './repository.js';
 import { syncConnection } from './sync.js';
 import { createLocalFilePlugin, textWithLineAnchors } from './plugins/local-file.js';
 import type { AnalysisModel } from '../analysis/service.js';
@@ -559,9 +559,15 @@ export class KnowledgeService {
    * Re-creates, in this process's registries, the employees and tool placeholders a confirmation recorded — after a
    * restart or on another web process sharing the tenant document. Same ids, same name/duty/prompt; no document write.
    */
-  restoreOrganization(s: KnowledgeState): number {
-    const sink = this.deps.organization, org = s.organization;
+  private restoreOrganization(team: ConfirmedTeam): number {
+    const sink = this.deps.organization, org = team.organization;
     if (!sink || !org) return 0;
+    const current = new Set(Object.values(org.employees).map(employee => employee.employeeId));
+    // Another web process may already have committed a resize. The recommendation IDs
+    // include historical roles and belong to this tenant, even when they are tombstoned.
+    for (const id of new Set([...Object.keys(org.created ?? {}), ...team.roles.map(role => orgEmployeeId(role.id))])) {
+      if (!current.has(id)) sink.forgetEmployee?.(id);
+    }
     let restored = 0;
     for (const [recId, e] of Object.entries(org.employees)) {
       if (sink.present('employee', e.employeeId)) continue;
@@ -575,16 +581,43 @@ export class KnowledgeService {
     }
     return restored;
   }
+  async refreshConfirmedTeam(tenantId: string): Promise<number> {
+    if (!this.deps.organization) return 0;
+    return this.restoreOrganization(await this.deps.repo.readConfirmedTeam(tenantId));
+  }
+  async resolveWorkflowTeam(tenantId: string): Promise<Record<string, string>> {
+    if (!this.deps.organization) return {};
+    const team = await this.deps.repo.readConfirmedTeam(tenantId);
+    this.restoreOrganization(team);
+    const current = team.organization?.employees ?? {};
+    const lineage = new Map(team.roles.map(role => [role.id, role.mergedInto]));
+    const replacements: Record<string, string> = {};
+    for (const { id, mergedInto } of team.roles) {
+      if (current[id] || !mergedInto) continue;
+      const visited = new Set([id]);
+      let successor: string | null | undefined = mergedInto;
+      while (successor && !visited.has(successor)) {
+        const live = current[successor];
+        if (live) {
+          replacements[orgEmployeeId(id)] = live.employeeId;
+          break;
+        }
+        visited.add(successor);
+        successor = lineage.get(successor);
+      }
+    }
+    return replacements;
+  }
   /** Startup hook: restore every confirmed organization of these tenants into the registries of this process. */
   async restoreOrganizations(tenantIds: string[]): Promise<number> {
     let restored = 0;
-    for (const tenantId of tenantIds) restored += this.restoreOrganization(await this.deps.repo.read({ tenantId, userId: 'system:restore', roles: [], projectScopes: [] }));
+    for (const tenantId of tenantIds) restored += await this.refreshConfirmedTeam(tenantId);
     return restored;
   }
   /** Organization draft (PRD §3.3 step 3): roles, the tools they use and the SOPs they take part in, plus confirmation state. */
   async organization(ctx: UserContext) {
     const s = await this.deps.repo.read(ctx);
-    this.restoreOrganization(s);
+    this.restoreOrganization(confirmedTeamOf(s));
     const draft = this.organizationDraft(s, ctx), org = s.organization;
     const missing = org ? Object.values(org.employees).filter(e => !this.deps.organization?.present('employee', e.employeeId)).length : 0;
     const changed = !!org && draft.employees.some(e => {
@@ -676,11 +709,9 @@ export class KnowledgeService {
    * merges or splits; without a model, shrinking falls back to merging the roles that share the most work.
    * The proposal is stored for preview only — nothing changes until the owner adopts it.
    */
-  private async prepareTeamPlan(ctx: UserContext, input: Record<string, unknown>, reuse = false) {
-    requireManager(ctx);
+  private async prepareTeamPlan(ctx: UserContext, input: Record<string, unknown>, state: KnowledgeState, reuse = false) {
     const count = input.count;
     if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > TEAM_SIZE_MAX) throw new KnowledgeError('invalid_team_size', `团队规模必须是 1 到 ${TEAM_SIZE_MAX} 之间的整数。`);
-    const state = await this.deps.repo.read(ctx);
     const { draft, roles, basis } = this.planSources(state, ctx);
     if (!roles.length) throw new KnowledgeError('no_employees', '组织草案里还没有岗位。', 409);
     if (count === roles.length) {
@@ -720,7 +751,8 @@ export class KnowledgeService {
     return { plan, roles, basis, modelError };
   }
   async planTeam(ctx: UserContext, input: Record<string, unknown>) {
-    const { plan, roles, modelError } = await this.prepareTeamPlan(ctx, input);
+    requireManager(ctx);
+    const { plan, roles, modelError } = await this.prepareTeamPlan(ctx, input, await this.deps.repo.read(ctx));
     if (!plan) throw new Error('Expected a team plan');
     await this.deps.repo.transact(ctx, s => {
       this.assertTeamBasis(s, ctx, plan.basis);
@@ -731,13 +763,26 @@ export class KnowledgeService {
   async resizeTeam(ctx: UserContext, input: Record<string, unknown>) {
     requireManager(ctx);
     if (!this.deps.organization) throw new KnowledgeError('organization_unavailable', '数字员工服务暂不可用。', 503);
-    const { plan, basis } = await this.prepareTeamPlan(ctx, input, true);
+    const state = await this.deps.repo.read(ctx);
+    const unchanged = this.alreadySizedTeam(state, input.count);
+    if (unchanged) return unchanged;
+    const { plan, basis } = await this.prepareTeamPlan(ctx, input, state, true);
     return this.deps.repo.transact(ctx, s => {
+      const unchanged = this.alreadySizedTeam(s, input.count);
+      if (unchanged) return unchanged;
       if (plan) return this.applyTeamPlan(s, ctx, plan, true);
       this.assertTeamBasis(s, ctx, basis);
       delete s.teamPlan;
       return this.applyConfirmedOrganization(s, ctx);
     });
+  }
+  private alreadySizedTeam(state: KnowledgeState, count: unknown) {
+    const org = state.organization;
+    if (!org || typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > TEAM_SIZE_MAX) return;
+    const employees = Object.values(org.employees);
+    if (employees.length !== count) return;
+    this.restoreOrganization(confirmedTeamOf(state));
+    return { revision: org.revision, employees, tools: Object.values(org.tools), createdEmployees: 0, createdTools: 0, retiredEmployees: 0, busyEmployees: [] };
   }
   private assertTeamBasis(s: KnowledgeState, ctx: UserContext, expected: string[]) {
     const { basis } = this.planSources(s, ctx);

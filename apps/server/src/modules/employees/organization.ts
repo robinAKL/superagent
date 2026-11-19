@@ -16,6 +16,8 @@ export interface OrganizationSink {
   present(kind: 'employee' | 'tool', id: string): boolean;
   /** Removes an employee whose role left the organization; false (kept) while it still has active work. */
   retireEmployee?(employeeId: string): boolean;
+  /** Evict stale local data after observing a retirement committed by another server. */
+  forgetEmployee?(employeeId: string): void;
 }
 
 export const orgEmployeeId = (recId: string) => `emp-org-${recId}`;
@@ -51,6 +53,9 @@ export function createOrganizationSink(employees: () => EmployeeService, tools: 
       const svc = employees();
       if (!svc.has(employeeId)) return true;
       try { svc.remove(employeeId); return true; } catch { return false; }
+    },
+    forgetEmployee(employeeId) {
+      employees().forgetProjectedEmployee(employeeId);
     },
     present(kind, id) {
       if (kind === 'employee') return employees().has(id);

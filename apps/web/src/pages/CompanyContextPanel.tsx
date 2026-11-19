@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useT } from '../i18n';
-import { OrganizationPublish } from './OrganizationPublish';
 
 export interface PublishedWorkflow {
   id: string;
@@ -24,35 +23,29 @@ const TEXT = {
   en: {
     title: 'Company information and work boundaries', name: 'Company name', goal: 'Work to hand to the digital team',
     boundaries: 'Boundaries that must be followed', boundaryHint: 'Name the decisions that still need a person, and the limits the digital team must not cross.',
-    saveDraft: 'Save configuration', save: 'Confirm and publish configuration, generate digital employees',
-    saving: 'Saving…', publishing: 'Publishing…', saved: 'Saved configuration v{version}.',
+    save: 'Save configuration', saving: 'Saving…', saved: 'Saved configuration v{version}.',
     loading: 'Loading company setup…', loadError: 'Could not load the company setup.',
     conflict: 'The configuration changed while you were editing. Reload to see the latest version.',
     saveError: 'Could not save the configuration. Try again.',
-    publishError: 'Could not generate digital employees. This action is not shown as saved.',
     reload: 'Reload',
-    enable: 'Confirm before enabling', knowledge: 'Enterprise knowledge', knowledgeHint: '{n} confirmed sources; rules stay evidence-backed',
+    enable: 'Set up work', knowledge: 'Enterprise knowledge', knowledgeHint: '{n} confirmed sources; rules stay evidence-backed',
     knowledgeEmpty: 'Confirm sources so rules have evidence.',
-    flow: 'Business workflows', flowHint: '{name} / v{version}', flowEmpty: 'Publish a company workflow.',
-    employees: 'Digital employees', employeeHint: 'Roles, owners, connections and tools are confirmed separately.',
-    enableNote: 'Publishing generates role drafts. New roles still need a bound agent and tools before they can work.',
+    flow: 'Run a workflow', flowHint: '{name} · ready to start', flowEmpty: 'No workflow is enabled yet.',
+    employees: 'Digital employees', employeeHint: 'Set the number of employees who will do the work.',
     review: 'Review workflow candidates',
   },
   zh: {
     title: '企业信息与工作边界', name: '企业名称', goal: '希望交给数字团队的工作',
     boundaries: '必须遵守的边界', boundaryHint: '写清哪些事需要人决定，以及数字团队不得越过的限制。',
-    saveDraft: '保存配置', save: '确认并发布配置，生成数字员工',
-    saving: '保存中…', publishing: '正在发布…', saved: '已保存配置 v{version}。',
+    save: '保存配置', saving: '保存中…', saved: '已保存配置 v{version}。',
     loading: '正在读取企业配置…', loadError: '无法读取企业配置。',
     conflict: '编辑期间配置已更新，请重新读取最新版本。',
     saveError: '无法保存配置，请重试。',
-    publishError: '无法生成数字员工。这次操作不会显示为已保存配置。',
     reload: '重新读取',
-    enable: '启用前确认', knowledge: '企业知识', knowledgeHint: '{n}个来源已确认，规则有据可查',
+    enable: '工作设置', knowledge: '企业知识', knowledgeHint: '{n}个来源已确认，规则有据可查',
     knowledgeEmpty: '先确认资料来源，规则才有依据。',
-    flow: '业务流程', flowHint: '{name} / v{version}', flowEmpty: '先发布一条企业流程。',
-    employees: '数字员工', employeeHint: '岗位、负责人、连接和工具分别确认',
-    enableNote: '发布企业配置会生成岗位建议。新岗位仍需人工绑定 Agent、配置工具，才能开始工作。',
+    flow: '运行流程', flowHint: '{name} · 可启动', flowEmpty: '还没有已启用的流程。',
+    employees: '数字员工', employeeHint: '设置执行工作所需的员工人数。',
     review: '审阅候选流程',
   },
 };
@@ -61,16 +54,13 @@ const TIMEOUT = 12_000;
 
 export function CompanyContextPanel({ fromOrganization }: { fromOrganization: boolean }) {
   const t = useT(TEXT);
-  const confirmRef = useRef<(() => Promise<boolean>) | null>(null);
-  const [orgGate, setOrgGate] = useState({ loaded: false, ready: false, busy: false });
   const [context, setContext] = useState<CompanyContext | null>();
   const [fields, setFields] = useState(EMPTY);
-  const [published, setPublished] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [workflows, setWorkflows] = useState<PublishedWorkflow[] | null>();
   const [knowledgeCount, setKnowledgeCount] = useState<number | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [state, setState] = useState<'loading' | 'ready' | 'error' | 'saving' | 'conflict' | 'saveError' | 'publishError'>('loading');
-  const [savingKind, setSavingKind] = useState<'draft' | 'publish' | null>(null);
+  const [state, setState] = useState<'loading' | 'ready' | 'error' | 'saving' | 'conflict' | 'saveError'>('loading');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -105,38 +95,17 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
     return next;
   }
 
-  async function saveDraft() {
-    if (state === 'saving' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()) return;
-    setSavingKind('draft');
-    setState('saving');
-    setPublished(false);
-    try {
-      if (!(await persistContext())) return;
-      setPublished(true);
-      setState('ready');
-    } catch {
-      setState('saveError');
-    } finally {
-      setSavingKind(null);
-    }
-  }
-
-  async function publish(event: FormEvent) {
+  async function save(event: FormEvent) {
     event.preventDefault();
-    if (state === 'saving' || state === 'conflict' || !orgGate.loaded || orgGate.busy || !orgGate.ready) return;
-    setSavingKind('publish');
+    if (state === 'saving' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()) return;
     setState('saving');
-    setPublished(false);
+    setSaved(false);
     try {
       if (!(await persistContext())) return;
-      const confirmed = await confirmRef.current?.() ?? false;
-      if (!confirmed) { setState('publishError'); return; }
-      setPublished(true);
+      setSaved(true);
       setState('ready');
     } catch {
       setState('saveError');
-    } finally {
-      setSavingKind(null);
     }
   }
 
@@ -148,7 +117,7 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
   return <div className="ux-company-layout">
     <section className="panel stack company-setup" aria-labelledby="company-context-heading">
       <h2 className="h2" id="company-context-heading">{t('title')}</h2>
-      {state === 'error' ? <p className="warn" role="alert">{t('loadError')}</p> : <form className="stack" onSubmit={event => void publish(event)}>
+      {state === 'error' ? <p className="warn" role="alert">{t('loadError')}</p> : <form className="stack" onSubmit={event => void save(event)}>
           {state === 'loading' ? <p className="helper" role="status">{t('loading')}</p> : null}
           <label className="field"><span>{t('name')}</span><input required maxLength={160} disabled={state === 'saving' || state === 'loading'} value={fields.name}
             onChange={event => setFields({ ...fields, name: event.target.value })} /></label>
@@ -157,18 +126,13 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
           <label className="field"><span>{t('boundaries')}</span><textarea maxLength={4000} rows={3} disabled={state === 'saving' || state === 'loading'} value={fields.boundaries}
             aria-describedby="company-context-boundary-hint" onChange={event => setFields({ ...fields, boundaries: event.target.value })} /></label>
           <p className="helper" id="company-context-boundary-hint">{t('boundaryHint')}</p>
-          <OrganizationPublish embedded confirmRef={confirmRef} onGate={setOrgGate} />
-          {state === 'conflict' || state === 'saveError' || state === 'publishError' ? <p className="warn" role="alert">{t(state)}</p> : null}
+          {state === 'conflict' || state === 'saveError' ? <p className="warn" role="alert">{t(state)}</p> : null}
           <div className="org-row">
-            <button type="button" className="btn" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()}
-              onClick={() => void saveDraft()}>
-              {savingKind === 'draft' ? t('saving') : t('saveDraft')}
-            </button>
-            <button className="btn primary" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !orgGate.loaded || orgGate.busy || !orgGate.ready || !fields.name.trim() || !fields.goal.trim()}>
-              {savingKind === 'publish' ? t('publishing') : t('save')}
+            <button className="btn primary" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()}>
+              {state === 'saving' ? t('saving') : t('save')}
             </button>
           </div>
-          {state === 'ready' && published && context && !dirty ? <p className="helper" role="status">{t('saved', { version: context.version })}</p> : null}
+          {state === 'ready' && saved && context && !dirty ? <p className="helper" role="status">{t('saved', { version: context.version })}</p> : null}
         </form>}
       {state === 'error' || state === 'conflict' ? <button type="button" className="btn" onClick={() => setAttempt(value => value + 1)}>{t('reload')}</button> : null}
       {fromOrganization ? <a className="btn" href="#brain?tab=results&org=1">{t('review')}</a> : null}
@@ -176,9 +140,8 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
     <aside className="ux-setup-guide">
       <h2>{t('enable')}</h2>
       <a href="#knowledge"><span><strong>{t('knowledge')}</strong><small>{knowledgeCount ? t('knowledgeHint', { n: knowledgeCount }) : t('knowledgeEmpty')}</small></span></a>
-      <a href="#brain?tab=sop"><span><strong>{t('flow')}</strong><small>{flow ? t('flowHint', { name: flow.title, version: flow.version }) : t('flowEmpty')}</small></span></a>
       <a href="#employees"><span><strong>{t('employees')}</strong><small>{t('employeeHint')}</small></span></a>
-      <p>{t('enableNote')}</p>
+      <a href="#room?workflows=1"><span><strong>{t('flow')}</strong><small>{flow ? t('flowHint', { name: flow.title }) : t('flowEmpty')}</small></span></a>
     </aside>
   </div>;
 }
