@@ -482,7 +482,8 @@ test('one team size submission leaves one employee and that employee can be boun
     capabilities: { agents: ['codex'], projects: [{ id: projectId, name: 'Orders', agent: 'codex' }] },
   } }));
   try {
-    await page.goto('/#settings?link=1');
+    await page.goto('/#employees');
+    await page.locator(`[data-employee="${team[0]!.id}"]`).getByRole('link', { name: '管理 Link' }).click();
     const card = page.locator('[data-worker]').filter({ hasText: 'E2E Link' });
     await expect(card.getByText('在线', { exact: true })).toBeVisible();
     await expect(card.getByLabel('本地项目')).toHaveValue(projectId);

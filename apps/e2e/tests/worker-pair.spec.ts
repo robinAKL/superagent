@@ -29,6 +29,7 @@ test.describe('T-30 Link device pairing', () => {
     await page.goto('/#settings');
     await expect(page.getByRole('heading', { name: '已连接的电脑' })).toBeVisible();
     const card = page.locator('article').filter({ hasText: 'Robin-PC' });
+    await card.locator('summary').filter({ hasText: '设备权限' }).click();
     await card.getByLabel('允许的员工（留空=全部）').fill('emp-a');
     await card.getByRole('button', { name: '保存限制' }).click();
     await expect(page.getByRole('status').filter({ hasText: '限制已保存' })).toBeVisible();
