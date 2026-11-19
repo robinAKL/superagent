@@ -34,6 +34,11 @@ describe('link-desktop Windows installer & tray', () => {
     assert.match(cs, /LinkStatus\.Unpaired/);
     assert.match(cs, /LinkStatus\.Revoked/);
     assert.match(cs, /SHA256SUMS/);
+    assert.match(cs, /setup-agents\.mjs/);
+    assert.match(cs, /安装并登录 Codex/);
+    assert.match(cs, /安装并登录 Claude Code/);
+    assert.match(cs, /登录 Codex/);
+    assert.doesNotMatch(cs, /请先在这台电脑登录 Codex 或 Claude Code，再重试。/);
   });
 
   it('cleans up Scheduled Task, Run key, install dir, and link.token on uninstall in SuperAgentLink.nsi', () => {

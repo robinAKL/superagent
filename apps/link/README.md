@@ -1,8 +1,10 @@
 # Super Agent Link
 
-On Windows, pair Link to the workspace and open **Set up local agent** in the tray menu. Choose a project folder.
-Link detects signed-in Codex and Claude Code CLIs and asks which to use if both are available. The folder path and
-executable stay on the computer. Link reports the project label and agent type to the workspace.
+On Windows, pair Link to the workspace and open **Set up local agent** in the tray menu. If Codex or Claude Code
+is missing, choose **安装并登录**. Link runs the official installer, opens that client's sign-in window, and continues
+after the command line reports a signed-in account. Then choose a project folder. When both clients are already
+signed in, Link asks which to use. The folder path and executable stay on the computer. Link reports the project
+label and agent type to the workspace.
 
 In **Admin settings → Linked computers**, bind the project to a digital employee. If there is one available
 employee and one project, both are selected automatically. In the Command room, mention that employee to assign

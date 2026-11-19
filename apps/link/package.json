@@ -6,6 +6,6 @@
   "scripts": {
     "start": "node start.mjs",
     "test": "node --test",
-    "typecheck": "node --check detect-agents.mjs pair-store.mjs pair-flow.mjs start.mjs link.mjs agent.mjs codex-app-server.mjs"
+    "typecheck": "node --check detect-agents.mjs setup-agents.mjs pair-store.mjs pair-flow.mjs start.mjs link.mjs agent.mjs codex-app-server.mjs"
   }
 }

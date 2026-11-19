@@ -578,28 +578,17 @@ namespace SuperAgentLinkTray
             try
             {
                 var serializer = new JavaScriptSerializer();
-                var detector = Path.Combine(Path.GetDirectoryName(_linkEntry), "detect-agents.mjs");
-                var output = await Task.Run(() =>
-                {
-                    using (var process = Process.Start(new ProcessStartInfo
-                    {
-                        FileName = _nodeExe, Arguments = "\"" + detector + "\"",
-                        UseShellExecute = false, CreateNoWindow = true,
-                        RedirectStandardOutput = true, StandardOutputEncoding = Encoding.UTF8
-                    }))
-                    {
-                        return process.StandardOutput.ReadToEnd();
-                    }
-                });
-                var agents = serializer.Deserialize<Dictionary<string, object>[]>(output);
+                var setupScript = Path.Combine(Path.GetDirectoryName(_linkEntry), "setup-agents.mjs");
+                var output = await Task.Run(() => RunNodeScript(setupScript, ""));
+                var choices = serializer.Deserialize<Dictionary<string, object>[]>(output);
                 var available = new List<Dictionary<string, object>>();
-                foreach (var agent in agents)
-                    if (true.Equals(agent["signedIn"])) available.Add(agent);
+                foreach (var agent in choices)
+                    if ("ready".Equals(agent["state"])) available.Add(agent);
                 if (available.Count == 0)
                 {
-                    MessageBox.Show("Sign in to Codex or Claude Code on this computer, then try again.\n请先在这台电脑登录 Codex 或 Claude Code，再重试。",
-                        "SuperAgent Link", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
+                    var guided = await GuideLocalAgent(serializer, setupScript, choices);
+                    if (guided == null) return;
+                    available.Add(guided);
                 }
 
                 var configPath = Path.Combine(_dataDir, "link-runtime.json");
@@ -662,6 +651,166 @@ namespace SuperAgentLinkTray
                 MessageBox.Show("Local setup failed. Open Link logs for details. / 配置失败，请查看 Link 日志。", "SuperAgent Link");
             }
             finally { item.Enabled = true; }
+        }
+
+        private string RunNodeScript(string script, string extra)
+        {
+            var stderr = new StringBuilder();
+            using (var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = _nodeExe,
+                Arguments = "\"" + script + "\"" + (string.IsNullOrEmpty(extra) ? "" : " " + extra),
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
+            }))
+            {
+                process.ErrorDataReceived += (s, ev) => { if (ev.Data != null) stderr.AppendLine(ev.Data); };
+                process.BeginErrorReadLine();
+                var stdout = process.StandardOutput.ReadToEnd();
+                process.WaitForExit();
+                var payload = (stdout ?? "").Trim();
+                if (process.ExitCode != 0 && !payload.StartsWith("{") && !payload.StartsWith("["))
+                    throw new InvalidOperationException(stderr.Length > 0 ? stderr.ToString().Trim() : "命令行检测失败。");
+                return payload;
+            }
+        }
+
+        private async Task<Dictionary<string, object>> GuideLocalAgent(
+            JavaScriptSerializer serializer, string setupScript, Dictionary<string, object>[] choices)
+        {
+            using (var form = new Form())
+            using (var intro = new Label())
+            using (var status = new Label())
+            using (var cancel = new Button())
+            {
+                form.Text = "Install a local agent / 安装本地 Agent";
+                form.ClientSize = new Size(460, 250);
+                form.StartPosition = FormStartPosition.CenterScreen;
+                form.FormBorderStyle = FormBorderStyle.FixedDialog;
+                form.MaximizeBox = false;
+                form.MinimizeBox = false;
+                intro.Text = "Link did not find a signed-in Codex or Claude Code command line.\r\n点下面的按钮后，Link 会安装客户端、打开登录，然后继续绑定项目。";
+                intro.SetBounds(12, 12, 436, 52);
+                status.SetBounds(12, 156, 436, 48);
+                cancel.Text = "取消";
+                cancel.DialogResult = DialogResult.Cancel;
+                cancel.SetBounds(348, 210, 100, 28);
+                form.CancelButton = cancel;
+                var buttons = new List<Button>();
+                var top = 72;
+                foreach (var choice in choices)
+                {
+                    if ("ready".Equals(choice["state"])) continue;
+                    var button = new Button();
+                    var id = choice["agent"] as string;
+                    var install = "install".Equals(choice["action"]);
+                    button.Text = install
+                        ? ("codex".Equals(id) ? "安装并登录 Codex" : "安装并登录 Claude Code")
+                        : ("codex".Equals(id) ? "登录 Codex" : "登录 Claude Code");
+                    button.SetBounds(12, top, 436, 34);
+                    top += 42;
+                    var selected = choice;
+                    button.Click += async (s, ev) =>
+                    {
+                        foreach (var other in buttons) other.Enabled = false;
+                        cancel.Enabled = false;
+                        try
+                        {
+                            form.Tag = await InstallAndSignIn(serializer, setupScript, selected, status);
+                            form.DialogResult = DialogResult.OK;
+                            form.Close();
+                        }
+                        catch (Exception ex)
+                        {
+                            if (form.IsDisposed) return;
+                            Log("Local agent setup failed: " + ex.Message);
+                            status.Text = ex.Message;
+                            foreach (var other in buttons) other.Enabled = true;
+                            cancel.Enabled = true;
+                        }
+                    };
+                    buttons.Add(button);
+                    form.Controls.Add(button);
+                }
+                form.Controls.Add(intro);
+                form.Controls.Add(status);
+                form.Controls.Add(cancel);
+                if (form.ShowDialog() != DialogResult.OK) return null;
+                return form.Tag as Dictionary<string, object>;
+            }
+        }
+
+        private async Task<Dictionary<string, object>> InstallAndSignIn(
+            JavaScriptSerializer serializer, string setupScript, Dictionary<string, object> choice, Label status)
+        {
+            var id = choice["agent"] as string;
+            var label = (choice["label"] as string) ?? id;
+            var executable = choice["executable"] as string;
+            if ("install".Equals(choice["action"]))
+            {
+                status.Text = "正在安装 " + label + "…";
+                var raw = await Task.Run(() => RunNodeScript(setupScript, "install " + id));
+                var result = serializer.Deserialize<Dictionary<string, object>>(raw);
+                if (!true.Equals(result["ok"]))
+                {
+                    object error;
+                    throw new InvalidOperationException(result.TryGetValue("error", out error) && error != null
+                        ? error.ToString() : "安装失败。");
+                }
+                executable = result["executable"] as string;
+                object loginArgs;
+                if (result.TryGetValue("loginArgs", out loginArgs)) choice["loginArgs"] = loginArgs;
+                if (true.Equals(result["signedIn"]))
+                {
+                    result["agent"] = id;
+                    result["label"] = label;
+                    return result;
+                }
+            }
+            if (string.IsNullOrEmpty(executable)) throw new InvalidOperationException("没有找到 " + label + " 命令行。");
+            status.Text = "已打开 " + label + " 登录。请在弹出的窗口或浏览器里完成登录，完成后会自动继续。";
+            object rawLogin;
+            var loginArgsText = JoinArgs(choice.TryGetValue("loginArgs", out rawLogin) ? rawLogin : null);
+            var start = new ProcessStartInfo { UseShellExecute = true };
+            if (executable.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
+            {
+                start.FileName = _nodeExe;
+                start.Arguments = "\"" + executable + "\" " + loginArgsText;
+            }
+            else
+            {
+                start.FileName = executable;
+                start.Arguments = loginArgsText;
+            }
+            var login = Process.Start(start);
+            for (var attempt = 0; attempt < 150; attempt++)
+            {
+                await Task.Run(() => Thread.Sleep(2000));
+                var again = serializer.Deserialize<Dictionary<string, object>[]>(
+                    await Task.Run(() => RunNodeScript(setupScript, "")));
+                foreach (var agent in again)
+                {
+                    if (string.Equals(agent["agent"] as string, id, StringComparison.Ordinal) && "ready".Equals(agent["state"]))
+                        return agent;
+                }
+                if (login != null && login.HasExited)
+                    throw new InvalidOperationException("登录未完成，请再试一次。");
+            }
+            throw new InvalidOperationException("登录超时，请再试一次。");
+        }
+
+        private static string JoinArgs(object raw)
+        {
+            if (raw == null) return "";
+            var items = raw as System.Collections.IEnumerable;
+            if (items == null || raw is string) return raw.ToString();
+            var parts = new List<string>();
+            foreach (var item in items) if (item != null) parts.Add(item.ToString());
+            return string.Join(" ", parts.ToArray());
         }
 
         private static int ChooseAgent(List<Dictionary<string, object>> agents)
