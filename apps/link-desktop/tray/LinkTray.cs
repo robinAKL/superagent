@@ -97,7 +97,8 @@ namespace SuperAgentLinkTray
     internal sealed class TrayApp : ApplicationContext
     {
         internal static readonly string AppVersion = Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
-        private const string ReleasesApiUrl = "https://api.github.com/repos/robinAKL/superagent/releases/latest";
+        // The rolling link-latest release always holds the newest Link, whatever else the repository releases.
+        private const string ReleasesApiUrl = "https://api.github.com/repos/robinAKL/superagent/releases/tags/link-latest";
         private const string InstallerName = "SuperAgentLink-Setup-x64.exe";
 
         private readonly string _installDir;
@@ -487,7 +488,8 @@ namespace SuperAgentLinkTray
                 {
                     wc.Headers.Add("User-Agent", "SuperAgentLink/" + AppVersion);
                     var json = wc.DownloadString(ReleasesApiUrl);
-                    var tagMatch = Regex.Match(json, "\"tag_name\"\\s*:\\s*\"link-v([0-9]+\\.[0-9]+\\.[0-9]+)\"");
+                    // link-latest carries its version in the release title, e.g. "SuperAgent Link v0.1.3".
+                    var tagMatch = Regex.Match(json, "\"name\"\\s*:\\s*\"SuperAgent Link v([0-9]+\\.[0-9]+\\.[0-9]+)\"");
                     if (!tagMatch.Success) return;
                     var remoteVer = new Version(tagMatch.Groups[1].Value);
                     var localVer = new Version(AppVersion);
