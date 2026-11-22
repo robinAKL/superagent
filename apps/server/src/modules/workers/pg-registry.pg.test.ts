@@ -84,3 +84,57 @@ live('PgWorkerRegistry: register, authenticate, heartbeat, waiting_auth, offline
     await pool.end();
   }
 });
+
+live('PgWorkerRegistry.bindRoom: concurrent binds from separate connections neither lose a binding nor bind an employee twice', async () => {
+  const schema = `t03b_${randomUUID().replace(/-/g, '')}`;
+  const setup = new pg.Pool({ connectionString: databaseUrl });
+  await setup.query(`CREATE SCHEMA "${schema}"; SET search_path TO "${schema}"; ${MIGRATION}`);
+  await setup.end();
+  const pool = new pg.Pool({ connectionString: databaseUrl, options: `-c search_path="${schema}"`, max: 8 });
+  const wrap = (q: { query: (text: string, params: unknown[]) => Promise<{ rows: unknown[] }> }) =>
+    ({ query: async <T>(text: string, params: readonly unknown[]) => ({ rows: (await q.query(text, params as unknown[])).rows as T[] }) });
+  const transactional = {
+    ...wrap(pool),
+    async transaction<T>(work: (tx: ReturnType<typeof wrap>) => Promise<T>): Promise<T> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const result = await work(wrap(client));
+        await client.query('COMMIT');
+        return result;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  };
+  try {
+    const reg = new PgWorkerRegistry(transactional);
+    const tenant = randomUUID();
+    const device = async (name: string) => (await registerWorker(reg, { tenantId: tenant, name, kind: 'link', capabilities: {}, createdBy: 'u1' }, Date.now())).worker;
+    const box = await device('box');
+    // Separate registries, as separate web processes would have.
+    const outcomes = await Promise.all(Array.from({ length: 6 }, (_, i) =>
+      new PgWorkerRegistry(transactional).bindRoom(tenant, box.id, { employeeId: `emp-${i}`, projectId: 'p1', remove: false })));
+    expect(outcomes.every(o => o.ok)).toBe(true);
+    expect((await reg.get(tenant, box.id))?.capabilities.roomAssignments).toHaveLength(6);
+
+    const [left, right] = [await device('left'), await device('right')];
+    const race = await Promise.all([left, right].map(d => new PgWorkerRegistry(transactional).bindRoom(tenant, d.id, { employeeId: 'emp-solo', projectId: 'p1', remove: false })));
+    expect(race.filter(o => o.ok)).toHaveLength(1);
+    expect(race.find(o => !o.ok)).toEqual({ ok: false, error: 'employee_already_bound' });
+
+    // Without a transaction the compare-and-set still keeps every binding on one device.
+    const plain = new PgWorkerRegistry(wrap(pool));
+    const solo = await device('solo');
+    await Promise.all(Array.from({ length: 4 }, (_, i) => plain.bindRoom(tenant, solo.id, { employeeId: `cas-${i}`, projectId: 'p2', remove: false })));
+    expect((await reg.get(tenant, solo.id))?.capabilities.roomAssignments).toHaveLength(4);
+    expect(await reg.bindRoom(tenant, solo.id, { employeeId: 'cas-0', projectId: 'p2', remove: true })).toMatchObject({ ok: true });
+    expect((await reg.get(tenant, solo.id))?.capabilities.roomAssignments).toHaveLength(3);
+  } finally {
+    await pool.query(`DROP SCHEMA "${schema}" CASCADE`).catch(() => undefined);
+    await pool.end();
+  }
+});

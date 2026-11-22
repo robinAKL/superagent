@@ -34,7 +34,24 @@ if (role === 'web') {
     const db = { query: async <T>(text: string, params: readonly unknown[]) => ({ rows: (await pool.query(text, params as unknown[])).rows as T[] }) };
     bindRoomStore(db);
     bindRuntimeDb(db);
-    bindWorkersDb(db);
+    bindWorkersDb({
+      ...db,
+      // Room-binding changes run several statements on one connection under a per-tenant lock.
+      async transaction<T>(work: (tx: typeof db) => Promise<T>): Promise<T> {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const result = await work({ query: async <R>(text: string, params: readonly unknown[]) => ({ rows: (await client.query(text, params as unknown[])).rows as R[] }) });
+          await client.query('COMMIT');
+          return result;
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => undefined);
+          throw error;
+        } finally {
+          client.release();
+        }
+      },
+    });
     // One dedicated connection LISTENs for new work and worker events so held polls wake at once (T-07).
     startPgListener(() => pool.connect());
     bindSopStore(db);

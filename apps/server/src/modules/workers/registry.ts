@@ -115,6 +115,8 @@ export interface WorkerRegistry {
   heartbeat(id: string, at: number, input: HeartbeatInput): Promise<boolean>;
   revoke(tenantId: string, id: string, at: number): Promise<boolean>;
   patchCapabilities(tenantId: string, id: string, capabilities: WorkerCapabilities): Promise<WorkerRecord | null>;
+  /** Adds or removes one room binding atomically against the tenant's other bindings (no lost update, no double binding). */
+  bindRoom(tenantId: string, id: string, change: RoomBindingChange): Promise<RoomBindingOutcome>;
   appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number, roomTaskId?: string): Promise<WorkerEvent | null>;
   hasRoomDispatch(tenantId: string, workerId: string, roomTaskId: string): Promise<boolean>;
   /** Oldest first, at most `limit`, strictly after `since`. */
@@ -188,6 +190,34 @@ export function cleanCapabilities(value: unknown): WorkerCapabilities {
   if (allowEmployees) out.allowEmployees = allowEmployees;
   if (allowProjects) out.allowProjects = allowProjects;
   return out;
+}
+
+export const ROOM_BINDINGS_MAX = 32;
+
+export interface RoomBindingChange extends RoomAssignment {
+  remove: boolean;
+}
+export type RoomBindingError = 'not_found' | 'employee_already_bound' | 'binding_limit';
+export type RoomBindingOutcome = { ok: true; worker: WorkerRecord } | { ok: false; error: RoomBindingError };
+
+/**
+ * The room assignments device `id` should hold after `change`, judged against every device of the tenant.
+ * An employee is bound to one place: one live device and one project. Callers must read `devices` and write the
+ * result without another binding change in between (see WorkerRegistry.bindRoom).
+ */
+export function nextRoomAssignments(devices: readonly WorkerRecord[], id: string, change: RoomBindingChange):
+  { assignments: RoomAssignment[] } | { error: RoomBindingError } {
+  const device = devices.find(other => other.id === id);
+  if (!device || device.kind !== 'link' || device.revokedAt !== null) return { error: 'not_found' };
+  const { employeeId, projectId } = change;
+  const assignments = (device.capabilities.roomAssignments ?? [])
+    .filter(binding => binding.employeeId !== employeeId || binding.projectId !== projectId);
+  if (change.remove) return { assignments };
+  if (devices.some(other => other.revokedAt === null && other.capabilities.roomAssignments?.some(binding =>
+    binding.employeeId === employeeId && (other.id !== id || binding.projectId !== projectId),
+  ))) return { error: 'employee_already_bound' };
+  if (assignments.length >= ROOM_BINDINGS_MAX) return { error: 'binding_limit' };
+  return { assignments: [...assignments, { employeeId, projectId }] };
 }
 
 export function mergeCapabilities(current: WorkerCapabilities, patch: WorkerCapabilities): WorkerCapabilities {
@@ -300,5 +330,15 @@ export class MemoryWorkerRegistry implements WorkerRegistry {
     if (!row || row.tenantId !== tenantId || row.revokedAt !== null) return null;
     row.capabilities = mergeCapabilities(row.capabilities, capabilities);
     return { ...row };
+  }
+
+  // No await between the read and the write, so concurrent calls cannot interleave.
+  async bindRoom(tenantId: string, id: string, change: RoomBindingChange): Promise<RoomBindingOutcome> {
+    const devices = [...this.rows.values()].filter(row => row.tenantId === tenantId);
+    const next = nextRoomAssignments(devices, id, change);
+    if ('error' in next) return { ok: false, error: next.error };
+    const row = this.rows.get(id)!;
+    row.capabilities = mergeCapabilities(row.capabilities, { roomAssignments: next.assignments });
+    return { ok: true, worker: { ...row } };
   }
 }
