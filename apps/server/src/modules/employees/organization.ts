@@ -55,6 +55,7 @@ export function createOrganizationSink(employees: () => EmployeeService, tools: 
       try { svc.remove(employeeId); return true; } catch { return false; }
     },
     forgetEmployee(employeeId) {
+      if (hasOpenWork?.(employeeId)) return;
       employees().forgetProjectedEmployee(employeeId);
     },
     present(kind, id) {

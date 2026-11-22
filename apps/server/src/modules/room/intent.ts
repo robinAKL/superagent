@@ -30,7 +30,8 @@ export function isExternalAction(body: string): boolean {
 
 /** The message with its @mentions removed: what is left is the work being asked for. */
 export function workText(body: string): string {
-  return body.replace(/(?<![\p{L}\p{N}_.+-])@[^\s@]+/gu, ' ').replace(/[ \t]+/gu, ' ').trim();
+  // Only ASCII before "@" marks an email address; "请@某员工" is still a mention.
+  return body.replace(/(?<![A-Za-z0-9_.+-])@[^\s@]+/gu, ' ').replace(/[ \t]+/gu, ' ').trim();
 }
 
 /**
