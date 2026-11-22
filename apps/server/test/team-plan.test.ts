@@ -160,6 +160,10 @@ describe('team plan flow (按人数重新规划)', () => {
     const ids = f.employees.list().map(e => e.id);
     expect(ids).toEqual(expect.arrayContaining(['emp-org-other-tenant', 'emp-manual', busyRole!.employeeId!]));
     expect(ids).not.toContain(legacy!.employeeId);
+    // Reading the team (or any request that refreshes it) must not drop the employee that was kept for its open work.
+    await f.service.organization(owner);
+    await f.service.refreshConfirmedTeam(owner.tenantId);
+    expect(f.employees.has(busyRole!.employeeId!)).toBe(true);
 
     busy.clear();
     expect(await f.service.confirmOrganization(owner)).toMatchObject({ retiredEmployees: 1, busyEmployees: [] });

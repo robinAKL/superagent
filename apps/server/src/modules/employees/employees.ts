@@ -159,8 +159,13 @@ export class EmployeeService {
     this.employees.delete(id);
   }
 
-  /** The confirmed roster has already retired this employee. Drop only the local copy. */
-  forgetProjectedEmployee(id: string): void {
+  /**
+   * The confirmed roster has already retired this employee. Drop only the local copy — unless it still has active
+   * work here, which is the same reason a confirmation keeps it. A later refresh drops it once that work is done.
+   */
+  forgetProjectedEmployee(id: string): boolean {
+    if (this.activeTaskCount(id) > 0) return false;
     this.employees.delete(id);
+    return true;
   }
 }

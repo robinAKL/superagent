@@ -722,7 +722,8 @@ export class CommandRoom {
     const mentions = new Map<string, EmployeeRef>();
     let cursor = 0;
     let text = '';
-    for (const marker of body.matchAll(/(?<![\p{L}\p{N}_.+-])@/gu)) {
+    // Email local parts are ASCII; a mention may follow Chinese text directly ("请@销售员工").
+    for (const marker of body.matchAll(/(?<![A-Za-z0-9_.+-])@/gu)) {
       const index = marker.index!;
       if (index < cursor) continue;
       const match = aliases.find(({ alias }) => body.startsWith(alias, index + 1)

@@ -164,3 +164,18 @@ it('a repeated employee report with the same client id stays one message', () =>
   assert.equal(third.id, first.id);
   assert.equal(reloaded.eventsAfter('room-1', 0, owner).filter((message) => message.clientMessageId === 'report-1').length, 1);
 });
+
+it('a mention written straight after Chinese text still assigns the task, while an email address does not', () => {
+  const service = room();
+  const result = service.post({
+    roomId: 'room-1', tenantId: 't', projectId: 'p1', authorUserId: 'user-owner',
+    body: '请@销售员工 整理询价草稿', clientMessageId: 'c-cn',
+  });
+  assert.equal(result.task?.employeeId, 'emp-sales');
+  assert.equal(result.task?.title, '请 整理询价草稿');
+  const email = service.post({
+    roomId: 'room-1', tenantId: 't', projectId: 'p1', authorUserId: 'user-owner',
+    body: '整理发给 buyer@销售员工 的询价', clientMessageId: 'c-mail',
+  });
+  assert.equal(email.task, null);
+});
