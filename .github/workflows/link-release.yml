@@ -88,3 +88,35 @@ jobs:
           files: |
             apps/link-desktop/dist/SuperAgentLink-Setup-x64.exe
             apps/link-desktop/dist/SHA256SUMS.txt
+
+      # A fixed download address that does not depend on which release GitHub marks "Latest" for the whole repo:
+      #   https://github.com/<repo>/releases/download/link-latest/SuperAgentLink-Setup-x64.exe
+      # Versioned copies stay at .../releases/download/link-v<version>/... . Re-running an older version never
+      # moves link-latest backwards.
+      - name: Update rolling link-latest release
+        if: startsWith(github.ref, 'refs/tags/link-v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $tag = 'link-latest'
+          $title = "SuperAgent Link v$env:VERSION"
+          $notes = "Always the newest SuperAgent Link (currently v$env:VERSION). Versioned installers: https://github.com/$env:GITHUB_REPOSITORY/releases/tag/link-v$env:VERSION"
+          $files = @('apps/link-desktop/dist/SuperAgentLink-Setup-x64.exe', 'apps/link-desktop/dist/SHA256SUMS.txt')
+          $current = gh release view $tag --json name --jq .name 2>$null
+          if ($LASTEXITCODE -ne 0 -or -not $current) {
+            gh release create $tag @files --target $env:GITHUB_SHA --title $title --notes $notes --latest=false
+            if ($LASTEXITCODE -ne 0) { throw "Could not create $tag." }
+            exit 0
+          }
+          if ($current -match 'v(\d+\.\d+\.\d+)$' -and [version]$Matches[1] -gt [version]$env:VERSION) {
+            Write-Host "$tag already holds v$($Matches[1]); leaving it."
+            exit 0
+          }
+          gh api -X PATCH "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$tag" -f sha=$env:GITHUB_SHA -F force=true | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Could not move tag $tag." }
+          gh release upload $tag @files --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Could not upload to $tag." }
+          gh release edit $tag --title $title --notes $notes --latest=false
+          if ($LASTEXITCODE -ne 0) { throw "Could not update $tag." }
