@@ -32,3 +32,14 @@ describe('team foundation', () => {
     expect(html).not.toContain('员工已移除');
   });
 });
+
+describe('linked computers', () => {
+  it('a computer whose employees are all bound does not show the no-project hint', async () => {
+    const { DeviceBindingsForTest } = await import('../src/pages/WorkerConnectPanel');
+    const html = renderToStaticMarkup(<LangProvider initial="zh"><DeviceBindingsForTest
+      worker={{ id: 'w1', name: 'PC', kind: 'link', status: 'registered', capabilities: { projects: [{ id: 'p1', name: 'super agent', agent: 'claude-code' }], roomAssignments: [{ employeeId: 'e1', projectId: 'p1' }] } }}
+      employees={[{ id: 'e1', name: 'Wholesale Operations' }]} employeesLoaded boundEmployees={new Set(['e1'])} defaultEmployee="" busy={false} onSave={async () => undefined} /></LangProvider>);
+    expect(html).toContain('所有数字员工都已绑定');
+    expect(html).not.toContain('配置本地 Agent');
+  });
+});
