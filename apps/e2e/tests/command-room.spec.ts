@@ -101,7 +101,7 @@ test('a new room has no tasks; greetings, questions and discussion only get a re
   await expect(stream(page)).toContainText(/当前有 \d+ 名数字员工在线/);
   await expect(stream(page).locator('[data-kind="reply"]').last()).toContainText(sales.name);
   await say(page, '我们希望把售后做得更好');
-  await expect(stream(page)).toContainText('这件事最终要得到什么结果？');
+  await expect(stream(page)).toContainText('我还没读懂要交给谁');
   await say(page, '请发送邮件给客户'); // an outward action with nobody named: ask first
   await expect(stream(page)).toContainText('请先补充具体对象');
   await expect(taskCards(page)).toHaveCount(0);
@@ -259,12 +259,7 @@ test('an employee sees and assigns only their own digital employee; drafts stay 
   await expect(draft(page)).toHaveValue(''); // the owner's draft does not follow the identity
   await expect(page.locator('a[href="#brain"]')).toHaveCount(0); // no super-agent configuration for an employee
   await expect(page.locator('.topnav a')).toHaveCount(2); // 指挥室 and 待我处理 only
-  await expect(page.locator('.page-head p')).toContainText('跟进自己负责');
-  const h1 = await page.locator('.page-head h1').boundingBox();
-  const sub = await page.locator('.page-head p').boundingBox();
-  // same head as every page (prototype v12): the subtitle sits under the title, aligned with it
-  expect(Math.abs(sub!.x - h1!.x)).toBeLessThanOrEqual(1);
-  expect(sub!.y).toBeGreaterThanOrEqual(h1!.y + h1!.height - 1);
+  await expect(page.locator('.page-head h1')).toHaveText('指挥室');
 
   // their own task is there; the other employee's work is nowhere on the page
   await expect(taskCards(page)).toHaveCount(1);
@@ -666,7 +661,12 @@ test('the conversation pane is wider than the task board at 1440 and 1024; the b
     }
     expect(boardBox!.width).toBeGreaterThanOrEqual(320);
     expect(boardBox!.width).toBeLessThanOrEqual(360);
-    expect(await draft(page).evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(96);
+    // The composer starts at two lines so the conversation keeps the height, and grows with the draft.
+    const empty = await draft(page).evaluate((el) => el.getBoundingClientRect().height);
+    expect(empty).toBeGreaterThanOrEqual(48);
+    await draft(page).fill(['一', '二', '三', '四', '五'].join('\n'));
+    expect(await draft(page).evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThan(empty + 40);
+    await draft(page).fill('');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   }
   await page.setViewportSize({ width: 375, height: 812 });

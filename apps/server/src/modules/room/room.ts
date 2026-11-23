@@ -106,6 +106,11 @@ export interface PostInput {
   clientMessageId: string;
   /** Continue an earlier task instead of naming an employee again. */
   followupTo?: string | null;
+  /**
+   * Super Agent's reading of a message that names nobody: hand it to this employee as this work, or answer it.
+   * Only a roster employee the author may assign is used; everything else still goes through the checks below.
+   */
+  understood?: { employeeId: string; work: string } | { answer: string } | null;
 }
 
 const OPEN: ReadonlySet<TaskStatus> = new Set<TaskStatus>(['assigned', 'running', 'waiting']);
@@ -249,7 +254,7 @@ export class CommandRoom {
       roles: input.authorRoles && input.authorRoles.length > 0 ? input.authorRoles : ['owner'],
       projectScopes: input.authorProjectScopes ?? [],
     };
-    const { mentions, work } = this.resolveMentions(input.body);
+    const { mentions, work: named } = this.resolveMentions(input.body);
     const original = input.followupTo ? this.tasks.find((item) => item.id === input.followupTo) ?? null : null;
     const originalVisible = original !== null && original.roomId === input.roomId && this.canSeeTask(original, author);
     const message = this.push({
@@ -278,7 +283,12 @@ export class CommandRoom {
 
     if (input.followupTo && !originalVisible) return noTask('找不到要追问的任务，这条没有建任务。');
 
-    const employee = mentions[0] ?? (original ? this.employees().find((item) => item.id === original.employeeId) ?? null : null);
+    const understood = !mentions.length && !original ? input.understood ?? null : null;
+    const routed = understood && 'employeeId' in understood
+      ? this.roster(author).find((item) => item.id === understood.employeeId) ?? null
+      : null;
+    const employee = mentions[0] ?? (original ? this.employees().find((item) => item.id === original.employeeId) ?? null : routed);
+    const work = routed && understood && 'work' in understood && understood.work.trim() ? understood.work.trim() : named;
     if (original && !employee) return noTask('原任务的数字员工已经不在了，这条没有建任务。');
 
     if (employee && this.outsideProject(input, original)) return noTask('这超出了你的项目范围，我不会创建这个任务。');
@@ -287,8 +297,12 @@ export class CommandRoom {
     if (!employee) {
       if (isGreeting(body)) return noTask('你好。需要派活时直接 @数字员工，并说清楚要做的事。');
       if (asksAvailability(body)) return noTask(this.availability(author));
+      if (understood && 'answer' in understood && understood.answer.trim()) return noTask(understood.answer.trim());
       if (isExternalAction(body)) return noTask('这是对外动作。请先补充具体对象（收件人或单号）、内容和依据，再 @数字员工，我才会建任务。');
-      return noTask('这件事最终要得到什么结果？说清楚要做的事并 @数字员工，我再建任务。');
+      const names = this.roster(author).filter((item) => item.status !== 'paused').slice(0, 3).map((item) => `@${item.name}`);
+      return noTask(names.length
+        ? `我还没读懂要交给谁。要派活请点名一位数字员工，例如 ${names.join('、')}，再说要做的事。`
+        : '现在没有可以派活的数字员工。先到「数字员工」添加一位，再回来派活。');
     }
 
     if (!isOwner(author) && employee.ownerUserId !== author.userId) {
@@ -744,6 +758,15 @@ export class CommandRoom {
     const projectId = input.projectId ?? original?.projectId ?? null;
     if (!projectId) return false;
     return !(input.authorProjectScopes ?? []).includes(projectId);
+  }
+
+  /** Whether a message names a digital employee with @, so the room can skip reading it with the model. */
+  namesEmployee(body: string): boolean {
+    return this.resolveMentions(body).mentions.length > 0;
+  }
+
+  hasClientMessage(roomId: string, clientMessageId: string): boolean {
+    return this.byClientId.has(`${roomId}:${clientMessageId}`);
   }
 
   private resolveMentions(body: string): { mentions: EmployeeRef[]; work: string } {

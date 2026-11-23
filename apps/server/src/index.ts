@@ -2,7 +2,8 @@ import { APP_ROLES, type AppRole } from '@superagent/shared';
 import { buildApp } from './app.js';
 import { dispatchBound, runWorker } from './worker.js';
 import { bindRuntimeDb, runtimeState } from './modules/runtime/index.js';
-import { bindRoomStore, hydrateRoom } from './modules/room/index.js';
+import { bindRoomBrain, bindRoomStore, hydrateRoom } from './modules/room/index.js';
+import { gatewayBrain } from './modules/room/brain.js';
 import { bindWorkersDb, startPgListener } from './modules/workers/index.js';
 import { bindSopStore, hydrateSop } from './modules/sop/index.js';
 import { bindGatewayStore, hydrateGateway } from './modules/gateway/index.js';
@@ -24,6 +25,7 @@ if (role === 'web') {
   const runtime = await createRuntime(process.env); // throws BootstrapError naming missing settings → container exits
   const knowledge = createKnowledgeDeps(runtime);
   const longwork = createLongWorkDeps(runtime);
+  bindRoomBrain(gatewayBrain(runtime.llm));
   let roomHydrated = !runtime.pool;
   let sopHydrated = !runtime.pool;
   let inboxHydrated = !runtime.pool;

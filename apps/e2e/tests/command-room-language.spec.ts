@@ -11,7 +11,12 @@ test('command room defaults to English and switches system copy live', async ({ 
   await page.goto('/#room');
   const room = page.getByRole('region', { name: 'Command room', exact: true });
   const interfaceCopy = room.locator('.page-head, .exec-grid, .exec-drawer');
-  const expectEnglishCopy = () => expect.poll(() => interfaceCopy.evaluateAll((sections) => sections.map((section) => [
+  // Agent confirmations (in the task column) carry user data written by other specs; they are not interface copy.
+  const expectEnglishCopy = () => expect.poll(() => interfaceCopy.evaluateAll((sections) => sections.map((live) => {
+    const section = live.cloneNode(true) as Element;
+    section.querySelectorAll('.exec-approvals').forEach((approvals) => approvals.remove());
+    return section;
+  }).map((section) => [
     section.textContent,
     ...Array.from(section.querySelectorAll('[aria-label], [placeholder]'), (element) =>
       [element.getAttribute('aria-label'), element.getAttribute('placeholder')].join(' ')),

@@ -4,6 +4,7 @@ import { loadRoomRows, saveRoomRows, type Queryable } from './pg-room.js';
 import { employeesState } from '../employees/index.js';
 import { queueRoomDispatch, resolveRoomDispatch, workersState } from '../workers/index.js';
 import { linkMayBeOnline, linkOnline } from '../workers/presence.js';
+import type { RoomBrain, RoomBrainInput } from './brain.js';
 import { CommandRoom, roomHooks, type EmployeeRef, type EmployeeSource, type RoomSnapshot, type Viewer } from './room.js';
 
 roomHooks.linkMayBeOnline = (employeeId) => linkMayBeOnline(employeeId, workersState.now());
@@ -44,6 +45,13 @@ export function createCommandRoom(employees: EmployeeSource = registryEmployees)
 export const roomState = { current: createCommandRoom() };
 
 let roomStore: Queryable | null = null;
+
+/** Super Agent's model reading of messages that name nobody. Without one the room keeps its fixed wording rules. */
+let roomBrain: RoomBrain | null = null;
+
+export function bindRoomBrain(brain: RoomBrain | null): void {
+  roomBrain = brain;
+}
 
 export function bindRoomStore(db: Queryable | null): void {
   roomStore = db;
@@ -157,10 +165,24 @@ export const roomModule: FastifyPluginAsync = async (app) => {
     const body = (req.body ?? {}) as MessageBody;
     if (!body.roomId || !body.body || !body.clientMessageId) return reply.code(400).send({ error: 'missing_fields' });
     const viewer = viewerFrom(req.headers, req.user);
+    const tenantId = req.user?.tenantId ?? body.tenantId ?? 't';
+    const room = roomState.current;
+    let understood: Awaited<ReturnType<RoomBrain['understand']>> = null;
+    if (roomBrain && !body.followupTo && !room.hasClientMessage(body.roomId, body.clientMessageId) && !room.namesEmployee(body.body)) {
+      const history: RoomBrainInput['history'] = room.eventsAfter(body.roomId, 0, viewer).slice(-12).map((message) => ({
+        from: message.authorUserId === 'super-agent' ? 'super-agent' : message.authorUserId === viewer.userId && !message.clientMessageId.startsWith('worker-') ? 'user' : 'employee',
+        text: message.body.slice(0, 1500),
+      }));
+      try {
+        understood = await roomBrain.understand({ tenantId, body: body.body, roster: room.roster(viewer), history });
+      } catch (error) {
+        req.log.warn({ err: error }, 'room brain failed; using fixed rules');
+      }
+    }
     const posted = roomState.current.post({
       roomId: body.roomId,
       // The signed-in user's tenant wins; the body value is only read where no auth hook is mounted (unit tests).
-      tenantId: req.user?.tenantId ?? body.tenantId ?? 't',
+      tenantId,
       projectId: body.projectId ?? null,
       authorUserId: viewer.userId,
       authorRoles: viewer.roles,
@@ -169,6 +191,7 @@ export const roomModule: FastifyPluginAsync = async (app) => {
       body: body.body,
       clientMessageId: body.clientMessageId,
       followupTo: typeof body.followupTo === 'string' && body.followupTo ? body.followupTo : null,
+      understood,
     });
     const task = posted.task;
     const scopes = viewer.roles.includes('owner') || viewer.roles.includes('admin') ? null : viewer.projectScopes;
