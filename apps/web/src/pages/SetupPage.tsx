@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { useT, type Dict, type Vars } from '../i18n';
 import { WorkerConnectPanel } from './WorkerConnectPanel';
+import { CompanyContextPanel } from './CompanyContextPanel';
 import './SetupPage.css';
 
 interface LlmStatus {
@@ -22,8 +23,9 @@ interface TestResponse {
 
 const TEXT = {
   en: {
-    title: 'Settings', lead: 'Connect a model and set its monthly budget', companyLink: 'Company profile and boundaries',
+    title: 'Settings', lead: 'The company, the model and its budget, computers and the audit trail, in the order they are set up.', companyLink: 'Company profile and boundaries',
     tabRun: 'Runtime settings', tabAudit: 'Audit log', tabArch: 'Architecture',
+    sectionsNav: 'Settings sections', secCompany: 'Company', secModel: 'Model and usage', secComputers: 'Computers', secDanger: 'Danger zone',
     auditLead: 'Append-only events. Secrets and source text are never shown.',
     auditEmpty: 'No model-configuration events on this page yet. Status above is the current runtime setting.',
     auditStatus: 'Current model status',
@@ -72,8 +74,9 @@ const TEXT = {
     resetFailed: 'Could not reset the knowledge base. Check permissions and try again.',
   },
   zh: {
-    title: '管理设置', lead: '连接模型并设置月度预算', companyLink: '企业信息与工作边界',
+    title: '管理设置', lead: '企业信息、模型与用量、电脑和审计，按设置的先后排列。', companyLink: '企业信息与工作边界',
     tabRun: '运行设置', tabAudit: '审计记录', tabArch: '架构说明',
+    sectionsNav: '设置分区', secCompany: '企业', secModel: '模型与用量', secComputers: '电脑', secDanger: '危险区',
     auditLead: '只追加、不可改。密钥和原文不会出现在这里。',
     auditEmpty: '本页还没有列出模型配置事件。上方状态就是当前运行设置。',
     auditStatus: '当前模型状态',
@@ -148,20 +151,24 @@ interface ResetPreview {
     preserved: { connections: number; mcpUsers: number };
   };
 }
-type SetupTab = 'run' | 'audit' | 'arch';
-function setupTab(): SetupTab {
+type SetupSection = 'company' | 'model' | 'computers' | 'audit' | 'danger';
+const SECTIONS: readonly SetupSection[] = ['company', 'model', 'computers', 'audit', 'danger'];
+const ADMIN_SECTIONS = new Set<SetupSection>(['company', 'computers', 'danger']);
+const SECTION_LABELS = { company: 'secCompany', model: 'secModel', computers: 'secComputers', audit: 'tabAudit', danger: 'secDanger' } as const;
+/** Old links (?tab=audit) and section links (?section=…) open the page at that section. */
+function requestedSection(): SetupSection | null {
   const params = new URLSearchParams(typeof window === 'undefined' ? undefined : window.location.hash.split('?')[1]);
-  const tab = params.get('tab');
-  return tab === 'audit' || tab === 'arch' ? tab : 'run';
+  const wanted = params.get('section') ?? params.get('tab');
+  return SECTIONS.find(section => section === wanted) ?? null;
 }
 
 export function SetupPage() {
   const t = useT(TEXT);
-  const [tab, setTab] = useState<SetupTab>(setupTab);
   useEffect(() => {
-    const onHash = () => setTab(setupTab());
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    const jump = () => { const section = requestedSection(); if (section) document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' }); };
+    const timer = window.setTimeout(jump, 300);
+    window.addEventListener('hashchange', jump);
+    return () => { window.clearTimeout(timer); window.removeEventListener('hashchange', jump); };
   }, []);
   const [status, setStatus] = useState<LlmStatus | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -309,36 +316,18 @@ export function SetupPage() {
   const toolFeedback = test?.tools === 'inconclusive' ? 'toolIncomplete' : test?.tools === 'failed' ? 'toolFailed' : undefined;
 
   return <div className="setup-page">
-    <header className="page-head"><h1>{t('title')}</h1><p>{t('lead')}</p>
-      {/* The company profile and work boundaries moved out of the menu (UX plan step 2); they are part of setup. */}
-      <div className="page-head-actions"><a className="btn" href="#brain">{t('companyLink')}</a></div>
-    </header>
-    <div className="page-tabs" role="tablist" aria-label={t('title')}>
-      {([['run', 'tabRun'], ['audit', 'tabAudit'], ['arch', 'tabArch']] as const).map(([id, key]) =>
-        <button key={id} role="tab" type="button" aria-selected={tab === id} onClick={() => {
-          window.location.hash = id === 'run' ? 'settings' : `settings?tab=${id}`;
-        }}>{t(key)}</button>)}
-    </div>
-    {tab === 'audit' ? <section className="panel setup-card" aria-labelledby="setup-audit">
-      <h2 id="setup-audit" className="h2">{t('tabAudit')}</h2>
-      <p className="helper">{t('auditLead')}</p>
-      <dl className="setup-audit">
-        <dt>{t('auditStatus')}</dt>
-        <dd>{status ? t(STATUS[status.status] ?? 'statusUnconfigured') : t(loadFailed ? 'statusUnavailable' : 'loading')}
-          {status?.keyLast4 ? ` · Key ••••${status.keyLast4}` : ''}
-          {status?.primaryModel ? t('primaryModelIs', { model: status.primaryModel }) : ''}
-        </dd>
-      </dl>
-      {status?.reminder ? <p className="warn">{status.reminder}</p> : <p className="helper">{t('auditEmpty')}</p>}
-    </section> : tab === 'arch' ? <section className="panel setup-card" aria-labelledby="setup-arch">
-      <h2 id="setup-arch" className="h2">{t('tabArch')}</h2>
-      <p className="helper">{t('archLead')}</p>
-      <article><h3>{t('archWorkbench')}</h3><p>{t('archWorkbenchBody')}</p></article>
-      <article><h3>{t('archControl')}</h3><p>{t('archControlBody')}</p></article>
-      <article><h3>{t('archWorker')}</h3><p>{t('archWorkerBody')}</p></article>
-    </section> : <>
-    {isAdmin ? <WorkerConnectPanel /> : null}
-    <section className="panel setup-card" aria-labelledby="setup-connection">
+    <header className="page-head"><h1>{t('title')}</h1><p>{t('lead')}</p></header>
+    {/* One page in the order things are set up (UX plan step 6): company, model and usage, computers, audit,
+        and the danger zone last. A section menu jumps; it scrolls rather than changing the route. */}
+    <div className="setup-layout">
+      <nav className="setup-sections" aria-label={t('sectionsNav')}>
+        {SECTIONS.filter(section => isAdmin || !ADMIN_SECTIONS.has(section)).map(section =>
+          <button key={section} type="button" className={`btn quiet${section === 'danger' ? ' is-danger' : ''}`}
+            onClick={() => document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' })}>{t(SECTION_LABELS[section])}</button>)}
+      </nav>
+      <div className="setup-body">
+    {isAdmin ? <div id="settings-company"><CompanyContextPanel fromOrganization={false} guide={false} /></div> : null}
+    <section id="settings-model" className="panel setup-card" aria-labelledby="setup-connection">
       <header className="setup-card-head">
         <h2 id="setup-connection" className="h2">{t('connection')}</h2>
         <p className="helper">
@@ -402,7 +391,20 @@ export function SetupPage() {
       </div>
       {feedback(capNotice)}
     </form>
-    {isAdmin ? <section className="panel setup-card setup-danger" aria-labelledby="setup-knowledge-reset">
+    {isAdmin ? <div id="settings-computers"><WorkerConnectPanel /></div> : null}
+    <section id="settings-audit" className="panel setup-card" aria-labelledby="setup-audit">
+      <h2 id="setup-audit" className="h2">{t('tabAudit')}</h2>
+      <p className="helper">{t('auditLead')}</p>
+      <dl className="setup-audit">
+        <dt>{t('auditStatus')}</dt>
+        <dd>{status ? t(STATUS[status.status] ?? 'statusUnconfigured') : t(loadFailed ? 'statusUnavailable' : 'loading')}
+          {status?.keyLast4 ? ` · Key ••••${status.keyLast4}` : ''}
+          {status?.primaryModel ? t('primaryModelIs', { model: status.primaryModel }) : ''}
+        </dd>
+      </dl>
+      {status?.reminder ? <p className="warn">{status.reminder}</p> : <p className="helper">{t('auditEmpty')}</p>}
+    </section>
+    {isAdmin ? <section id="settings-danger" className="panel setup-card setup-danger" aria-labelledby="setup-knowledge-reset">
       <header className="setup-card-head">
         <h2 id="setup-knowledge-reset" className="h2">{t('resetHeading')}</h2>
         <p className="helper">{t('resetLead')}</p>
@@ -446,6 +448,7 @@ export function SetupPage() {
         {feedback(resetNotice)}
       </form>
     </div> : null}
-    </>}
+      </div>
+    </div>
   </div>;
 }

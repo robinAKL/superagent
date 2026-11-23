@@ -15,7 +15,7 @@ test('owner navigation has 5 entries in 2 groups in the top bar, routed by hash 
   await page.goto('/#tools');
   await expect(nav.locator('[aria-current="page"]')).toHaveText('数字员工');
   await page.goto('/#brain');
-  await expect(nav.locator('[aria-current="page"]')).toHaveText('管理设置');
+  await expect(nav.locator('[aria-current="page"]')).toHaveText('数字员工');
 });
 
 const PAGES = ['room', 'work', 'knowledge', 'employees', 'tools', 'brain', 'settings'];

@@ -21,7 +21,7 @@ const TEXT = {
     restricted: 'Blocked by device permissions', offline: 'Device offline', waitingAuth: 'Sign in on the device',
     missingProject: 'Project not found on the device', busy: 'Running a task', ready: 'Ready for tasks',
     status_offline: 'Offline',
-    employee: 'Employee', state: 'Status', bindComputer: 'Bind a computer', toolsPage: 'Employee tools',
+    employee: 'Employee', state: 'Status', bindComputer: 'Bind a computer', toolsPage: 'Employee tools', workflowsPage: 'Workflows',
   },
   zh: {
     addRole: '新增岗位', suggestRoles: '生成岗位建议', reviewDraft: '审阅组织草案',
@@ -34,7 +34,7 @@ const TEXT = {
     restricted: '受设备权限限制', offline: '设备离线', waitingAuth: '等待本地登录',
     missingProject: '设备上找不到项目', busy: '正在执行任务', ready: '可接任务',
     status_offline: '离线',
-    employee: '员工', state: '状态', bindComputer: '绑定电脑', toolsPage: '员工工具',
+    employee: '员工', state: '状态', bindComputer: '绑定电脑', toolsPage: '员工工具', workflowsPage: '业务流程',
   },
 };
 type Key = keyof typeof TEXT.en;
@@ -59,6 +59,7 @@ export function EmployeeWall({ employees, hasDraft, onManage }: { employees: Wal
       <span className="helper">{t('count', { n: employees.length })}</span>
       <div className="emp-wall-actions">
         <a className="btn quiet" href="#tools">{t('toolsPage')}</a>
+        <a className="btn quiet" href="#brain?tab=sop">{t('workflowsPage')}</a>
         <a className="btn quiet" href="#employees?view=draft&add=1">{t('addRole')}</a>
         <a className="btn quiet" href={hasDraft ? '#employees?view=draft' : '#knowledge?view=analysis'}>{t(hasDraft ? 'reviewDraft' : 'suggestRoles')}</a>
       </div>

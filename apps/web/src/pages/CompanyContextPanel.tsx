@@ -52,7 +52,8 @@ const TEXT = {
 const EMPTY = { name: '', goal: '', boundaries: '' };
 const TIMEOUT = 12_000;
 
-export function CompanyContextPanel({ fromOrganization }: { fromOrganization: boolean }) {
+/** `guide` shows the setup status beside the form; settings leaves it out, the getting-started checklist covers it. */
+export function CompanyContextPanel({ fromOrganization, guide = true }: { fromOrganization: boolean; guide?: boolean }) {
   const t = useT(TEXT);
   const [context, setContext] = useState<CompanyContext | null>();
   const [fields, setFields] = useState(EMPTY);
@@ -114,7 +115,7 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
     return fields[field] !== (context?.[field] ?? '');
   });
   const flow = workflows?.[0];
-  return <div className="ux-company-layout">
+  return <div className={guide ? 'ux-company-layout' : 'ux-company-layout is-single'}>
     <section className="panel stack company-setup" aria-labelledby="company-context-heading">
       <h2 className="h2" id="company-context-heading">{t('title')}</h2>
       {state === 'error' ? <p className="warn" role="alert">{t('loadError')}</p> : <form className="stack" onSubmit={event => void save(event)}>
@@ -137,11 +138,11 @@ export function CompanyContextPanel({ fromOrganization }: { fromOrganization: bo
       {state === 'error' || state === 'conflict' ? <button type="button" className="btn" onClick={() => setAttempt(value => value + 1)}>{t('reload')}</button> : null}
       {fromOrganization ? <a className="btn" href="#brain?tab=results&org=1">{t('review')}</a> : null}
     </section>
-    <aside className="ux-setup-guide">
+    {guide ? <aside className="ux-setup-guide">
       <h2>{t('enable')}</h2>
       <a href="#knowledge"><span><strong>{t('knowledge')}</strong><small>{knowledgeCount ? t('knowledgeHint', { n: knowledgeCount }) : t('knowledgeEmpty')}</small></span></a>
       <a href="#employees"><span><strong>{t('employees')}</strong><small>{t('employeeHint')}</small></span></a>
       <a href="#room?workflows=1"><span><strong>{t('flow')}</strong><small>{flow ? t('flowHint', { name: flow.title }) : t('flowEmpty')}</small></span></a>
-    </aside>
+    </aside> : null}
   </div>;
 }
