@@ -265,3 +265,15 @@
 
 /* Phone: header actions keep their labels on one line and wrap as whole buttons. */
 @media (max-width: 960px) { .room .room-head-actions { justify-content: flex-start; } .room .room-head-btn { white-space: nowrap; } }
+
+/* UX plan step 5: one layer of containment. The conversation sits on the page, its messages are the only boxes. */
+.room .room-chat.panel { background: transparent; border-color: transparent; box-shadow: none; padding-inline: 0; }
+.room .room-chat .room-chat-head { padding-inline: 0; }
+.room .room-more { justify-self: start; margin: var(--space-2xs) 0; }
+.room .room-head-actions .btn { gap: var(--space-xs); }
+
+/* My work with nothing to do: one short block on the page, no frame, the way forward under the sentence. */
+.exec-inbox[data-nothing] .exec-grid { display: block; }
+.exec-inbox[data-nothing] .exec-pane { min-height: 0; height: auto; background: transparent; border-color: transparent; padding: 0; }
+.exec-inbox[data-nothing] .room-tasks-empty { justify-items: start; text-align: left; padding: var(--space-lg) 0; }
+.exec-inbox .room-tasks-empty .btn { justify-self: inherit; }
