@@ -211,6 +211,12 @@ export class CommandRoom {
     return this.tasks.some(task => task.employeeId === employeeId && OPEN.has(task.status));
   }
 
+  /** Tasks for this employee that a computer could still pick up: not started, not held, no approval pending. */
+  dispatchableTasks(tenantId: string, employeeId: string): RoomTask[] {
+    return this.tasks.filter(task => task.tenantId === tenantId && task.employeeId === employeeId
+      && (task.status === 'assigned' || task.status === 'waiting') && task.approval === 'none' && !task.hold);
+  }
+
   post(input: PostInput): { message: RoomMessage; reply: RoomMessage | null; task: RoomTask | null; duplicate: boolean } {
     const key = `${input.roomId}:${input.clientMessageId}`;
     const prior = this.byClientId.get(key);
@@ -270,7 +276,8 @@ export class CommandRoom {
     if (!isOwner(author) && employee.ownerUserId !== author.userId) {
       return noTask(`@${employee.name} 不在当前身份可以指派的范围内，我不会创建这个任务。`);
     }
-    if (isGreeting(work) || work === '') {
+    // Punctuation alone ("@员工 、") is not work; it would become a task named "、".
+    if (isGreeting(work) || !/[\p{L}\p{N}]/u.test(work)) {
       return noTask(`已看到 @${mentions.map((item) => item.name).join(' @')}，这条还不是明确的工作请求。`);
     }
     if (needsParameters(work)) {

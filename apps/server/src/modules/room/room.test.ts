@@ -179,3 +179,11 @@ it('a mention written straight after Chinese text still assigns the task, while 
   });
   assert.equal(email.task, null);
 });
+
+it('a mention followed only by punctuation is not a task', () => {
+  const service = room();
+  for (const [body, id] of [['@销售员工 、', 'p1'], ['@销售员工 。。', 'p2'], ['@销售员工 ...', 'p3']]) {
+    const result = service.post({ roomId: 'room-1', tenantId: 't', projectId: 'p1', authorUserId: 'user-owner', body: body!, clientMessageId: id! });
+    assert.equal(result.task, null, body);
+  }
+});

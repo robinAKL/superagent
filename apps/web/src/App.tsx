@@ -43,7 +43,7 @@ const NAV: { group: NavGroupId; items: NavItem[] }[] = [
   },
 ];
 
-type ShellKey = `group.${NavGroupId}` | `nav.${NavItemId}` | 'menu' | 'signOut' | 'language' | 'workspace' | 'collapse' | 'expand';
+type ShellKey = `group.${NavGroupId}` | `nav.${NavItemId}` | 'menu' | 'signOut' | 'language' | 'workspace' | 'collapse' | 'expand' | 'noRole';
 
 const TEXT: Dict<ShellKey> = {
   en: {
@@ -59,6 +59,7 @@ const TEXT: Dict<ShellKey> = {
     'nav.settings': 'Admin settings',
     menu: 'Main menu',
     signOut: 'Sign out',
+    noRole: 'Your account has no Super Agent role yet, so there is nothing you can open here. Ask an administrator to assign you a role (Owner, Admin, Employee or Reviewer) for this app, then sign out and back in.',
     language: 'Language',
     workspace: 'Workspace',
     collapse: 'Collapse menu',
@@ -77,6 +78,7 @@ const TEXT: Dict<ShellKey> = {
     'nav.settings': '管理设置',
     menu: '主菜单',
     signOut: '退出',
+    noRole: '你的账号还没有 Super Agent 角色，所以这里暂时没有可用的内容。请联系管理员为你分配此应用的角色（所有者、管理员、员工或审核人），然后退出并重新登录。',
     language: '语言',
     workspace: '企业工作区',
     collapse: '收起菜单',
@@ -178,7 +180,7 @@ export function App({ user = { mode: 'dev' } }: { user?: SignedIn }) {
           ))}
         </nav>
         <main className="content">
-          {page === 'connect' ? <ConnectComputerPage canManage={roles === null || roles.some(role => role === 'owner' || role === 'admin')} /> : current.id === 'settings' ? <SetupPage /> : current.id === 'tools' ? <ToolsPage /> : current.id === 'knowledge' ? <KnowledgePage /> : current.id === 'brain' ? <SuperAgentPage /> : current.id === 'room' ? <CommandRoomPage /> : current.id === 'work' ? <WorkInboxPage /> : current.id === 'employees' ? <EmployeesPage /> : <Placeholder title={t(`nav.${current.id}`)} owner={current.owner} />}
+          {roles !== null && roles.length === 0 ? <section className="panel" role="alert"><p>{t('noRole')}</p></section> : page === 'connect' ? <ConnectComputerPage canManage={roles === null || roles.some(role => role === 'owner' || role === 'admin')} /> : current.id === 'settings' ? <SetupPage /> : current.id === 'tools' ? <ToolsPage /> : current.id === 'knowledge' ? <KnowledgePage /> : current.id === 'brain' ? <SuperAgentPage /> : current.id === 'room' ? <CommandRoomPage /> : current.id === 'work' ? <WorkInboxPage /> : current.id === 'employees' ? <EmployeesPage /> : <Placeholder title={t(`nav.${current.id}`)} owner={current.owner} />}
         </main>
       </div>
     </>
