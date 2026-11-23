@@ -2,7 +2,7 @@ import { createInterface } from 'node:readline';
 
 const COMMAND_APPROVAL = 'item/commandExecution/requestApproval';
 const FILE_APPROVAL = 'item/fileChange/requestApproval';
-const AUTH_ERROR = /not logged in|please (log|sign) in|authentication required|unauthorized|invalid api key|login required|token (has )?expired/i;
+import { AUTH_ERROR } from './agent-errors.mjs';
 
 /** One stdio App Server connection and one task turn. The caller supplies the approval channel. */
 export async function runCodexTurn({ input, output, cwd, prompt, session, notify, approve, signal }) {

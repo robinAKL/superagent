@@ -4,7 +4,7 @@ import { isAbsolute, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { runCodexTurn } from './codex-app-server.mjs';
 
-const AUTH_ERROR = /not logged in|please (log|sign) in|authentication required|unauthorized|invalid api key|login required|token (has )?expired/i;
+import { AUTH_ERROR, failureReason } from './agent-errors.mjs';
 const RESULT_LIMIT = 60_000;
 
 export function projectDirectory(projects, projectId) {
@@ -95,7 +95,10 @@ export function launchAgent(project, prompt, session, notify) {
       if (cancelled) resolve({ cancelled: true });
       else if (code === 0 && result) resolve({ result });
       else if (AUTH_ERROR.test(errorText)) resolve({ authentication: project.agent + ' requires sign-in.' });
-      else resolve({ failure: 'Agent CLI did not return a completed result.' });
+      else {
+        const reason = failureReason(errorText);
+        resolve({ failure: 'Agent CLI did not return a completed result.' + (reason ? ' ' + reason : '') });
+      }
     });
   });
   function cancel() {
