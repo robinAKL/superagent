@@ -541,7 +541,7 @@ export function OntologyGraphView({ drafts, time, companyName }: {
           {LANES.filter(type => graph.nodes.some(n => n.type === type)).map(type => {
             const list = graph.nodes.filter(n => n.type === type).sort((a, b) => b.degree - a.degree || a.name.localeCompare(b.name));
             return <div key={type} className="onto-group">
-              <h5 className={`onto-type-${type}`}><i aria-hidden="true" />{typeName(type)}<span>{list.length}</span></h5>
+              <h5 className={`onto-type-${type}`}><span className="onto-swatch" aria-hidden="true" />{typeName(type)}<span>{list.length}</span></h5>
               <ul className="onto-list">{list.map(n => <li key={n.id}>
                 <button type="button" onClick={() => setSelected(n.id)}>
                   <span>{n.name}</span>

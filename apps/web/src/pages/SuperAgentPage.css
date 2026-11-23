@@ -1,7 +1,7 @@
 .graph-editor { display: grid; gap: var(--space-xs); }
 .graph-editor .row { display: flex; flex-wrap: wrap; gap: var(--space-xs); align-items: center; }
 .issues li, .gates li { margin: 2px 0; }
-.gates li.fail, .issues li { color: var(--color-danger, #b42318); }
+.gates li.fail, .issues li { color: var(--color-error); }
 .gates li.ok { color: var(--color-ink); }
 .versions { border-collapse: collapse; width: 100%; font-size: 14px; }
 .versions th, .versions td { text-align: left; padding: var(--space-2xs) var(--space-xs); border-bottom: 1px solid var(--color-soft-rule); }
@@ -28,7 +28,7 @@
 .pack-item small { grid-column: 2; color: var(--color-muted); }
 .onto-list li .btn { margin-left: var(--space-xs); }
 .run-steps { margin: var(--space-2xs) 0 0; padding-left: var(--space-md); font-size: 14px; }
-.run-steps li[data-step-status="outcome_unknown"], .run-steps li[data-step-status="blocked"] { color: var(--color-danger, #b42318); }
+.run-steps li[data-step-status="outcome_unknown"], .run-steps li[data-step-status="blocked"] { color: var(--color-error); }
 .readback { display: block; font-size: 12px; color: var(--color-muted); overflow-wrap: anywhere; }
 textarea { border-radius: var(--radius-sm); border: 1px solid var(--color-rule); background: var(--color-paper); color: var(--color-ink); padding: var(--space-xs) var(--space-sm); font: inherit; }
 

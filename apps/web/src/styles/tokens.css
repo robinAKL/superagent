@@ -1,3 +1,6 @@
+/* Hallmark · checked: 2026-11-23 · genre: modern-minimal (inferred) · scope: app · brand kept: INNOPRO dark paper, gold accent, DM Sans
+ * floor: tokens for every colour, overflow-x clip, instant focus, reduced motion · structural: see the Super Agent UX plan
+ * built: the project · redesign: full (app screens, stepwise) · v2.0.0 */
 /* Design tokens reused from the accepted v12 prototype (innopro-proposal/ui-system.css). */
 :root {
   --color-paper: #101214;
@@ -15,6 +18,23 @@
   --color-success: #8bc5a0;
   --color-warning: #e2bd78;
   --color-error: #e5a09b;
+  /* Destructive actions and faults: one red, its edge, its quiet fill and the ink on it. */
+  --color-danger: #e5484d;
+  --color-danger-edge: rgba(239, 68, 68, 0.45);
+  --color-danger-fill: rgba(127, 29, 29, 0.35);
+  --color-danger-fill-hover: rgba(153, 27, 27, 0.55);
+  --color-danger-ink: #fecaca;
+  /* Overlays and elevation on the dark paper. */
+  --color-backdrop: rgba(5, 6, 8, 0.65);
+  --color-shadow: rgba(5, 6, 8, 0.35);
+  --color-shadow-soft: rgba(5, 6, 8, 0.13);
+  /* Entity types in the ontology and SOP graphs: one hue per type. */
+  --color-type-tool: #8fb4d9;
+  --color-type-employee: #c9a2e0;
+  --color-type-process: #7fc6b4;
+  --color-type-object: #d6b574;
+  --color-type-rule: #e39a8a;
+  --color-type-source: #9aa3ad;
   --space-2xs: 4px;
   --space-xs: 8px;
   --space-sm: 12px;
@@ -23,16 +43,33 @@
   --space-xl: 40px;
   --radius-sm: 8px;
   --radius: 12px;
-  --control: 44px;
+  /* App controls are 36px; touch screens keep a 44px target. */
+  --control: 36px;
+  --control-sm: 30px;
   --sidebar: 224px;
   --header: 64px;
+  /* Type scale at about 1.2: caption, body, title, section, page. */
+  --text-caption: 13px;
+  --text-body: 15px;
+  --text-title: 17px;
+  --text-section: 20px;
+  --text-page: 26px;
+  --dur-micro: 120ms;
+  --dur-short: 180ms;
 }
+@media (pointer: coarse) { :root { --control: 44px; --control-sm: 40px; } }
 * { box-sizing: border-box; }
+html, body { overflow-x: clip; }
 body {
   margin: 0;
   background: var(--color-paper);
   color: var(--color-ink);
-  font: 15px/1.7 "DM Sans", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font: var(--text-body)/1.65 "DM Sans", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 a { color: var(--color-accent); }
 :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+::selection { background: color-mix(in srgb, var(--color-accent) 35%, transparent); }
+input, textarea { caret-color: var(--color-accent); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+}

@@ -174,7 +174,7 @@
   background: var(--color-accent) !important; color: var(--color-accent-ink) !important; cursor: pointer; }
 .room-send:disabled { opacity: .45; cursor: not-allowed; }
 .room .exec-mentions { position: absolute; left: var(--space-sm); right: var(--space-sm); bottom: calc(100% + 6px); z-index: 5; max-height: 260px; overflow: auto;
-  border: 1px solid var(--color-rule); border-radius: 12px; background: var(--color-paper-2); box-shadow: 0 12px 32px rgb(0 0 0 / 35%); padding: var(--space-2xs); display: grid; }
+  border: 1px solid var(--color-rule); border-radius: 12px; background: var(--color-paper-2); box-shadow: 0 12px 32px var(--color-shadow); padding: var(--space-2xs); display: grid; }
 .room .exec-mentions button { display: grid; gap: 2px; text-align: left; border: 0; background: transparent; color: var(--color-ink); border-radius: 8px; padding: var(--space-xs) var(--space-sm); cursor: pointer; font: inherit; }
 .room .exec-mentions button:hover { background: var(--color-well); }
 .room .exec-mentions span { font-size: 12.5px; color: var(--color-muted); }

@@ -20,7 +20,7 @@
 .lens-rule.is-empty { border-color: var(--color-soft-rule); background: var(--color-paper-2); color: var(--color-muted); font-size: 14px; }
 .lens-rule.is-empty p { margin: 0; }
 .lens-rule-main { display: grid; gap: 4px; min-width: 0; }
-.lens-eyebrow { font-size: 12px; letter-spacing: .04em; color: var(--color-accent); }
+.lens-eyebrow { font-size: var(--text-caption); color: var(--color-muted); }
 .lens-rule-main strong { font-size: 20px; line-height: 1.4; overflow-wrap: anywhere; }
 .lens-rule-main p { margin: 0; font-size: 14px; color: var(--color-muted); line-height: 1.6; overflow-wrap: anywhere; }
 .lens-rule-meta { display: flex; flex-wrap: wrap; gap: 4px var(--space-md); font-size: 12.5px !important; color: var(--color-subtle) !important; }
