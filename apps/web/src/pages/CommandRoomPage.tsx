@@ -7,6 +7,7 @@ import { CommandWorkflowPanel } from './CommandWorkflowPanel';
 import { WorkerApprovals } from './WorkerApprovals';
 import { Icon } from '../components/Icon';
 import { RichText } from '../components/RichText';
+import { GettingStarted } from '../components/GettingStarted';
 
 /**
  * Command room (PRD §3.7), layout and copy from the accepted v12 prototype. Everything on the page comes from the
@@ -647,6 +648,7 @@ export function CommandRoomPage() {
         </div>
       </div>
       {viewer?.owner ? <>
+        <GettingStarted />
         {flowsOpen ? <CommandWorkflowPanel defaultOpen /> : null}
         <WorkerApprovals key={viewer.userId} />
       </> : null}

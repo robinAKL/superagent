@@ -1,15 +1,20 @@
 /** App shell — maps prototype QA: qa-room-header, primary navigation (qa-outcomes "Primary navigation changed"). */
 import { test, expect } from './fixtures.js';
 
-test('owner navigation has the 7 accepted entries in 3 groups, routed by hash', async ({ page }) => {
+test('owner navigation has 5 entries in 2 groups in the top bar, routed by hash (UX plan step 2)', async ({ page }) => {
   await page.goto('/');
   const nav = page.getByRole('navigation', { name: '主菜单' });
-  await expect(nav.locator('.nav-group')).toHaveText(['日常工作', '团队与知识', '配置']);
-  await expect(nav.locator('.nav-item')).toHaveText(['指挥室', '待我处理', '企业知识', '数字员工', '员工工具', '超级智能体', '管理设置']);
+  await expect(nav.getByRole('group', { name: '日常工作' }).locator('.nav-item')).toHaveText(['指挥室', '待我处理']);
+  await expect(nav.getByRole('group', { name: '团队与配置' }).locator('.nav-item')).toHaveText(['数字员工', '企业知识', '管理设置']);
   await expect(nav.locator('[aria-current="page"]')).toHaveText('指挥室');
   await nav.getByText('管理设置').click();
   await expect(page).toHaveURL(/#settings$/);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('管理设置');
+  await expect(nav.locator('[aria-current="page"]')).toHaveText('管理设置');
+  // Pages that left the menu keep their routes and light up the destination they belong to.
+  await page.goto('/#tools');
+  await expect(nav.locator('[aria-current="page"]')).toHaveText('数字员工');
+  await page.goto('/#brain');
   await expect(nav.locator('[aria-current="page"]')).toHaveText('管理设置');
 });
 
