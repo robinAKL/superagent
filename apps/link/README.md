@@ -1,6 +1,9 @@
 # Super Agent Link
 
-On Windows, pair Link to the workspace and open **Set up local agent** in the tray menu. If Codex or Claude Code
+On Windows, Link opens the workspace in the browser on first run. The person using the computer signs in with
+their own account and chooses **Allow**; no administrator is needed at that computer. The computer then belongs
+to that member: they see and can revoke only computers they paired, and can bind only digital employees they own.
+Administrators see and manage every computer. Then open **Set up local agent** in the tray menu. If Codex or Claude Code
 is missing, choose **安装并登录**. Link runs the official installer, opens that client's sign-in window, and continues
 after the command line reports a signed-in account. Then choose a project folder. When both clients are already
 signed in, Link asks which to use. The folder path and executable stay on the computer. Link reports the project

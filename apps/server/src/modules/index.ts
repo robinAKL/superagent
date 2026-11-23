@@ -34,6 +34,7 @@ export const modules: ModuleDef[] = [
   { prefix: 'work-items', plugin: humanworkModule }, // T-41 Grok
   { prefix: 'sop', plugin: sopModule, roles: ['admin', 'owner'] }, // T-41 Grok (runtime) / T-48 page
   { prefix: 'executions', plugin: executionModule, roles: ['admin', 'owner'] }, // T-56 executor
-  // Worker registry (register / list / revoke). The worker's own channel is /api/v1/worker-link, outside sign-in.
-  { prefix: 'workers', plugin: workersModule, roles: ['admin', 'owner'] }, // room T-03
+  // Worker registry. Admin/owner except the self-service routes (pairing and the member's own computers), which the
+  // module checks per route. The worker's own channel is /api/v1/worker-link, outside sign-in.
+  { prefix: 'workers', plugin: workersModule }, // room T-03
 ];

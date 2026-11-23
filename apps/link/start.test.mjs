@@ -40,6 +40,31 @@ describe('Link start', () => {
     }
   });
 
+  it('keeps waiting for the whole code lifetime and through a server restart', async () => {
+    const { pollUntilToken } = await import('./pair-flow.mjs');
+    let clock = 0;
+    let polls = 0;
+    const result = await pollUntilToken('http://sa.test', 'dev', async () => {
+      polls++;
+      if (polls === 3) return { ok: false, status: 502, json: async () => { throw new Error('html'); } };
+      if (polls === 4) throw new Error('ECONNRESET');
+      // Still pending after 8 minutes: the old fixed 120 x 2 s loop gave up at 4.
+      return { ok: true, json: async () => (clock >= 8 * 60_000 ? { status: 'denied' } : { status: 'pending' }) };
+    }, async (ms) => { clock += ms; }, 10 * 60_000, () => clock);
+    assert.equal(result.status, 'denied');
+    assert.ok(clock >= 8 * 60_000);
+  });
+
+  it('stops at the code expiry', async () => {
+    const { pollUntilToken } = await import('./pair-flow.mjs');
+    let clock = 0;
+    const result = await pollUntilToken('http://sa.test', 'dev',
+      async () => ({ ok: true, json: async () => ({ status: 'pending' }) }),
+      async (ms) => { clock += ms; }, 60_000, () => clock);
+    assert.equal(result.status, 'expired');
+    assert.ok(clock >= 60_000 && clock <= 70_000);
+  });
+
   it('uses heartbeat (not poll) to notice revoke', async () => {
     const urls = [];
     let cleared = 0;
