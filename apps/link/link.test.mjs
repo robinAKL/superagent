@@ -39,7 +39,7 @@ async function fixture(t, agent = 'codex', options = {}) {
   if (options.launchWithApprovals) config.projects.p1.approvals = 'room';
   const events = [];
   const requests = [];
-  const control = { refuseDispatch: false, pollFailures: 0 };
+  const control = { refuseDispatch: false, pollFailures: 0, authAgents: [] };
   const fetcher = async (url, init) => {
     const path = url.pathname;
     const body = JSON.parse(init.body);
@@ -62,7 +62,7 @@ async function fixture(t, agent = 'codex', options = {}) {
   return {
     make: () => new WorkerLink(config, 'test-token', {
       fetcher, launch: options.launch, launchWithApprovals: options.launchWithApprovals,
-      sleep: options.sleep, renameState: options.renameState,
+      sleep: options.sleep, renameState: options.renameState, onAuth: (agent) => control.authAgents.push(agent),
     }),
     args: async () => (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse),
     state: async () => JSON.parse(await readFile(stateFile, 'utf8')),
@@ -234,6 +234,8 @@ test('reports waiting_auth and retries the task after restarting', async (t) => 
   await link.poll(undefined, 0);
   await link.runNext();
   assert.ok(f.requests.some(({ body }) => body.waitingAuthReason === 'codex requires sign-in.'));
+  // The tray is told which CLI needs signing in, so it can open that CLI's login for the user.
+  assert.deepEqual(f.control.authAgents, ['codex']);
   assert.equal((await f.state()).jobs[0].status, 'waiting_auth');
   const restarted = f.make();
   await restarted.runNext();
