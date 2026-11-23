@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -74,9 +74,9 @@ it('assigns once to the bound device while offline and accepts only its report',
       console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: prompt + ' complete.' } }));
     `);
     const runtimeSource = new URL('../../../../link/', import.meta.url);
-    await Promise.all(['link.mjs', 'agent.mjs', 'codex-app-server.mjs'].map(file =>
-      copyFile(new URL(file, runtimeSource), join(directory, file)),
-    ));
+    // Every Link module, like the installer does, so a new helper module never breaks this copy.
+    const modules = (await readdir(runtimeSource)).filter(file => file.endsWith('.mjs') && !file.endsWith('.test.mjs'));
+    await Promise.all(modules.map(file => copyFile(new URL(file, runtimeSource), join(directory, file))));
     const nativeRequire = createRequire(import.meta.url);
     const { WorkerLink } = nativeRequire(fileURLToPath(pathToFileURL(join(directory, 'link.mjs'))));
     const dispatchFetcher = async (url: URL, init: RequestInit) => {
