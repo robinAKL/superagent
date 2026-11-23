@@ -26,7 +26,7 @@ const TEXT = {
     relDuplicate: 'Same content as “{title}”.',
     relSimilar: 'Very similar to “{title}”. Possibly a newer version of it.',
     relUpdate: 'Replaces an earlier version of this file.',
-    fileMeta: '{file} · {source} · version {version}',
+    fileMeta: '{file}, from {source}',
     editBtn: 'Edit', saveBtn: 'Save', cancelBtn: 'Cancel',
     searchable: 'Searchable', unavailable: 'Unavailable',
     emptyFiltered: 'Nothing in this view.',
@@ -45,7 +45,7 @@ const TEXT = {
     relDuplicate: '与《{title}》内容完全相同。',
     relSimilar: '与《{title}》高度相似，可能是它的新版本。',
     relUpdate: '替换了这个文件之前的版本。',
-    fileMeta: '{file} · {source} · 版本 {version}',
+    fileMeta: '{file}，来自{source}',
     editBtn: '修改', saveBtn: '保存', cancelBtn: '取消',
     searchable: '可搜索', unavailable: '不可用',
     emptyFiltered: '这个视图下没有资料。',
@@ -162,7 +162,7 @@ export function MaterialReview({ items, canManage, request, errorMessage, onChan
               <div className="mr-edit-actions"><button type="button" className="btn primary" disabled={busy || !editing.title.trim()} onClick={() => void saveEdit()}>{t('saveBtn')}</button><button type="button" className="btn" onClick={() => setEditing(null)}>{t('cancelBtn')}</button></div>
             </div> : <>
               <div className="mr-title-row">
-                <strong>{p?.title ?? item.title}</strong>
+                <strong title={p?.title ?? item.title}>{readableTitle(p?.title ?? item.title, item.title)}</strong>
                 {p ? <span className="knowledge-badge is-gold">{catLabel(p.category)}</span> : null}
                 {p?.refining ? <span className="mr-origin mr-refining">{t('refining')}</span> :
                   p?.origin === 'human' ? <span className="mr-origin">{t('originHuman')}</span> : null}
@@ -170,7 +170,7 @@ export function MaterialReview({ items, canManage, request, errorMessage, onChan
               {p?.summary ? <p className="mr-summary">{p.summary}</p> : null}
             </>}
             {rel ? <p className={`mr-related is-${rel.kind}`}>{rel.kind === 'duplicate' ? t('relDuplicate', { title: rel.title }) : rel.kind === 'similar' ? t('relSimilar', { title: rel.title }) : t('relUpdate')}</p> : null}
-            <small className="mr-meta">{t('fileMeta', { file: item.title, source: sourceName(item.pluginId), version: item.version.slice(0, 8) })}</small>
+            <small className="mr-meta">{t('fileMeta', { file: item.title, source: sourceName(item.pluginId) })}</small>
             {renderPreview(item)}
           </div>
           <div className="mr-actions">
@@ -186,4 +186,14 @@ export function MaterialReview({ items, canManage, request, errorMessage, onChan
       <button type="button" className="btn" disabled={busy || activePage >= pageCount - 1} onClick={() => changePage(activePage + 1)}>{t('next')}</button>
     </nav> : null}
   </div>;
+}
+
+/**
+ * Analysis sometimes names a spreadsheet by its first cells ("'In Put'!1:1 B: Company C: Customer Name ..."). That is
+ * not a name a person recognises: show the file name, without its extension, and keep the generated one as a tooltip.
+ */
+export function readableTitle(title: string, file: string): string {
+  const looksLikeCells = /^'?[^'!]*'?!\s*[A-Z]*\d+(:[A-Z]*\d+)?\b/.test(title) || (/(^|\s)[A-Z]:\s/.test(title) && title.split(/\s[A-Z]:\s/).length > 2);
+  if (!looksLikeCells) return title;
+  return file.replace(/\.[A-Za-z0-9]{2,5}$/, '').trim() || title;
 }

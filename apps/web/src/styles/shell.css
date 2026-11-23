@@ -167,3 +167,11 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .getting-started-steps li[aria-current="step"] .getting-started-name { color: var(--color-ink); font-weight: 600; }
 .getting-started-steps li[data-done] .getting-started-name { color: var(--color-subtle); }
 .getting-started-link { font-size: var(--text-caption); color: var(--color-muted); }
+
+/* More menu: a disclosure that opens a short list under its trigger; for actions and views used now and then. */
+.more-menu { position: relative; }
+.more-menu > summary { list-style: none; cursor: pointer; }
+.more-menu > summary::-webkit-details-marker { display: none; }
+.more-menu > summary::after { content: " ▾"; font-size: 11px; color: var(--color-subtle); }
+.more-menu-list { position: absolute; right: 0; top: calc(100% + var(--space-2xs)); z-index: 10; display: grid; gap: 2px; min-width: 200px; padding: var(--space-2xs); border: 1px solid var(--color-rule); border-radius: var(--radius-sm); background: var(--color-paper-2); box-shadow: 0 12px 32px var(--color-shadow); }
+.more-menu-list .btn { justify-content: flex-start; width: 100%; }

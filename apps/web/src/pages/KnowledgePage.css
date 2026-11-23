@@ -260,3 +260,14 @@
 
 .knowledge-flow-empty { display: grid; gap: var(--space-sm); justify-items: start; }
 .knowledge-flow-empty h2 { margin: 0; font-size: 18px; }
+
+/* UX plan step 4: ask first, then the two main views; the rest folds away. */
+.knowledge-ask { display: flex; gap: var(--space-sm); margin-bottom: var(--space-md); max-width: 760px; }
+.knowledge-ask input { flex: 1; min-width: 0; }
+.knowledge-workspace-nav { align-items: center; overflow: visible; }
+.knowledge-more-views > summary { padding: var(--space-sm) 0; color: var(--color-muted); font-size: 14px; }
+.knowledge-more-views > summary[aria-current="page"] { color: var(--color-accent); }
+.knowledge-more-views .more-menu-list { left: 0; right: auto; }
+.knowledge-more-views .more-menu-list .btn[aria-current="page"] { color: var(--color-accent); }
+.knowledge-time-disclosure { margin-bottom: var(--space-sm); }
+.page-tabs .knowledge-more-views .more-menu-list .btn { justify-content: flex-start; text-align: left; padding: 0 var(--space-sm); min-height: var(--control); box-shadow: none; }

@@ -182,6 +182,7 @@ const TEXT = {
     errDocRead: 'Unable to read document file.',
     pageTitle: 'Enterprise Knowledge',
     workspaceNav: 'Knowledge workspace',
+    moreViews: 'More views', moreActions: 'More', timeToday: 'View by date (now: today)', timeOther: 'View by date (another date is selected)',
     workspaceMaterials: 'Library',
     workspaceAnalysis: 'Classification & candidates',
     workspaceGraph: 'Ontology graph',
@@ -437,6 +438,7 @@ const TEXT = {
     errDocRead: '无法读取文档文件。',
     pageTitle: '企业知识',
     workspaceNav: '知识工作区',
+    moreViews: '更多视图', moreActions: '更多', timeToday: '按日期查看（当前：今天）', timeOther: '按日期查看（正在看其他日期）',
     workspaceMaterials: '资料库',
     workspaceAnalysis: '分类与候选',
     workspaceGraph: '本体关系图',
@@ -617,7 +619,8 @@ const STATUS_KEYS: Record<string, TextKey> = {
 const CARD_ORDER = ['local-file', 'mcp', 'database', 'email', 'sharepoint'] as const;
 type KnowledgeView = 'materials' | 'analysis' | 'graph' | 'timeline' | 'sop' | 'search' | 'sources';
 /** The five tabs of prototype v12. Grounded search lives inside the library tab. */
-const WORKSPACE_TABS = ['materials', 'analysis', 'graph', 'timeline', 'sop'] as const;
+const MAIN_TABS = ['materials', 'analysis'] as const;
+const MORE_TABS = ['graph', 'timeline', 'sop'] as const;
 const VIEW_LABELS = { materials: 'workspaceMaterials', analysis: 'workspaceAnalysis', graph: 'workspaceGraph', timeline: 'workspaceTimeline', sop: 'workspaceSop' } as const;
 const TIMED_VIEWS = new Set<KnowledgeView>(['analysis', 'graph', 'timeline']);
 
@@ -1081,6 +1084,7 @@ export function KnowledgePage() {
     finally { actionInFlight.current = false; setBusy(''); }
   }
 
+  const timeChanged = (() => { const now = timeFromParams(new URLSearchParams()); return time.at !== now.at || time.known !== now.known; })();
   function openView(next: KnowledgeView, nextTime = time) {
     setView(next);
     const now = timeFromParams(new URLSearchParams());
@@ -1226,22 +1230,46 @@ export function KnowledgePage() {
     <header className="page-head knowledge-head">
       <div>
         <h1>{t('pageTitle')}</h1>
-        <p className="knowledge-subtitle">{t(view === 'materials' || view === 'search' || view === 'sources' ? 'subtitleLibrary' : view === 'sop' ? 'subtitleSop' : 'subtitleKnowledge')}</p>
+        {/* One sentence that does not change with the tab: what this page is for. */}
+        <p className="knowledge-subtitle">{t('subtitleLibrary')}</p>
         {overview?.spaceName && overview.spaceName !== DEFAULT_SPACE_NAME ? <p className="knowledge-space-name">{overview.spaceName}</p> : null}
       </div>
       <div className="page-head-actions knowledge-actions">
-        <a className="btn knowledge-quiet" href="#brain">{t('viewAgentContext')}</a>
-        <button className="btn knowledge-quiet" type="button" onClick={() => { setAnalysisFeedback(null); void load(); }} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
         <button className="btn" type="button" onClick={() => openView(view === 'sources' ? 'materials' : 'sources')}
           aria-expanded={view === 'sources'} aria-controls="knowledge-sources">{t(view === 'sources' ? 'closeSources' : 'manageSources')}</button>
+        {/* Rarely needed: the super agent's context and a manual refresh. */}
+        <details className="more-menu">
+          <summary className="btn quiet">{t('moreActions')}</summary>
+          <div className="more-menu-list">
+            <a className="btn quiet" href="#brain">{t('viewAgentContext')}</a>
+            <button className="btn quiet" type="button" onClick={() => { setAnalysisFeedback(null); void load(); }} disabled={loading || !!busy}>{loading ? t('loadingBtn') : t('refreshBtn')}</button>
+          </div>
+        </details>
       </div>
     </header>
+    {/* Asking a question is the most common read on this page: a search box, not a button to a separate panel. */}
+    {overview ? <form className="knowledge-ask" role="search" onSubmit={event => { void search(event); if (view !== 'search') openView('search'); }}>
+      <label className="sr-only" htmlFor="knowledge-ask-input">{t('searchLabel')}</label>
+      <input id="knowledge-ask-input" type="search" maxLength={200} value={query} onChange={event => setQuery(event.target.value)} placeholder={t('searchPlaceholder')} />
+      <button className="btn" disabled={searching || !!busy || !query.trim()}>{searching ? t('searchingBtn') : t('searchBtn')}</button>
+    </form> : null}
     {overview ? <nav className="page-tabs knowledge-workspace-nav" aria-label={t('workspaceNav')}>
-      {WORKSPACE_TABS.map(entry => <button key={entry} type="button" aria-current={view === entry || (entry === 'materials' && view === 'search') ? 'page' : undefined}
+      {MAIN_TABS.map(entry => <button key={entry} type="button" aria-current={view === entry || (entry === 'materials' && view === 'search') ? 'page' : undefined}
         onClick={() => openView(entry)}>{t(VIEW_LABELS[entry])}</button>)}
+      {/* The graph, the timeline and workflows are for analysis and audit, not daily work: one menu, not three tabs. */}
+      <details className="more-menu knowledge-more-views" open={MORE_TABS.some(entry => entry === view) || undefined}>
+        <summary aria-current={MORE_TABS.some(entry => entry === view) ? 'page' : undefined}>{t('moreViews')}</summary>
+        <div className="more-menu-list">
+          {MORE_TABS.map(entry => <button key={entry} type="button" className="btn quiet" aria-current={view === entry ? 'page' : undefined} onClick={() => openView(entry)}>{t(VIEW_LABELS[entry])}</button>)}
+        </div>
+      </details>
     </nav> : null}
     {overview && TIMED_VIEWS.has(view) ? <div className="knowledge-lenses">
-      <TimeBar time={time} onChange={changeTime} lastRun={lastRunAt} hidden={hiddenByTime} />
+      {/* Looking at another date is an audit tool: folded unless a date other than today is in use. */}
+      <details className="disclosure knowledge-time-disclosure" open={timeChanged || undefined}>
+        <summary>{t(timeChanged ? 'timeOther' : 'timeToday')}</summary>
+        <TimeBar time={time} onChange={changeTime} lastRun={lastRunAt} hidden={hiddenByTime} />
+      </details>
       <RuleCard drafts={timedDrafts.filter(draft => !draft.stale)} runs={lensRuns} names={names} onSeeAll={() => { setDimension('rule'); openView('analysis'); }} />
     </div> : null}
     {error ? <div className="knowledge-alert" role="alert">{error}</div> : null}
@@ -1256,7 +1284,6 @@ export function KnowledgePage() {
               <button className="btn" type="button" disabled={!!busy || analysisActive} onClick={() => void startAnalysis()}>
                 {analysisActive ? t('analyzingBtn') : t('startAnalysisBtn')}
               </button> : null}
-            <button className="btn" type="button" onClick={() => openView('search')}>{t('workspaceSearch')}</button>
             {canUpload ? <button className="btn primary" type="button" disabled={!!busy} onClick={() => fileInput.current?.click()}>{t('addMaterials')}</button> : null}
           </div>
         </div>
@@ -1429,7 +1456,6 @@ export function KnowledgePage() {
 
       <section className="panel knowledge-section" hidden={view !== 'search'} aria-labelledby="knowledge-search-heading">
         <div className="knowledge-section-head"><div><h2 id="knowledge-search-heading">{t('secSearchTitle')}</h2><p className="helper">{t('secSearchSub')}</p></div></div>
-        <form className="knowledge-search-form" onSubmit={search}><label className="field"><span>{t('searchLabel')}</span><input required maxLength={200} value={query} onChange={event => setQuery(event.target.value)} placeholder={t('searchPlaceholder')} /></label><button className="btn" disabled={searching || !!busy || !query.trim()}>{searching ? t('searchingBtn') : t('searchBtn')}</button></form>
         {searchError ? <p className="knowledge-alert" role="alert">{searchError}</p> : null}
         {searchResult ? <div className="knowledge-search-result" aria-live="polite">{searchResult.hits.length ? <><p className="knowledge-answer">{searchResult.answer || t('searchFoundDefault')}</p><EvidenceList evidence={searchResult.hits} t={t} /></> : <p className="knowledge-empty">{t('searchNoHits')}</p>}</div> : <p className="helper">{t('searchIdleHint')}</p>}
       </section>

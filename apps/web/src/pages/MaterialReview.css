@@ -37,3 +37,9 @@
   .mr-edit { grid-template-columns: 1fr; }
   .mr-toolbar { justify-content: flex-start; margin-inline-start: 0; }
 }
+
+/* Denser rows (UX plan step 4): the title, one line of summary, the file. */
+.mr-item { padding: var(--space-xs) 0; }
+.mr-summary { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.mr-title-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mr-meta { font-size: 12px; }
