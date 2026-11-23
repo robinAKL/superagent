@@ -4,6 +4,7 @@ import type { Role } from '@superagent/shared';
 import { buildApp } from '../../app.js';
 import { resetRuntime, runtimeState } from '../runtime/index.js';
 import { PAIR_TTL_MS } from './pairing.js';
+import { registerWorker } from './registry.js';
 import { resetWorkers, workerLinkModule, workerPairModule, workersModule, workersState } from './index.js';
 import { createCommandRoom, roomState } from '../room/index.js';
 
@@ -227,4 +228,30 @@ it('an employee binds a project on their own computer only to digital employees 
   expect(ok.json().worker.capabilities.roomAssignments).toEqual([{ employeeId: 'emp-mine', projectId: 'proj-1' }]);
   // The admin can still bind a team employee on the member's computer.
   expect((await bind(colleague, 'emp-team', {})).statusCode).toBe(200);
+});
+
+it('binding a project dispatches work that was asked for before the employee had a computer', async () => {
+  const a = await app();
+  roomState.current = createCommandRoom([{ id: 'emp-ops', name: 'Ops', ownerUserId: 'admin-1', status: 'unconnected' }]);
+  const posted = roomState.current.post({
+    roomId: 'room-1', tenantId: TENANT, authorUserId: 'admin-1', authorRoles: ['admin'],
+    body: '@Ops 列出项目根目录的文件', clientMessageId: 'before-binding',
+  });
+  expect(posted.task?.status).toBe('waiting');
+  const { worker, token } = await registerWorker(workersState.registry, {
+    tenantId: TENANT, name: 'Ops-PC', kind: 'link', createdBy: 'admin-1',
+    capabilities: { projects: [{ id: 'proj-1', name: 'repo', agent: 'claude-code' }] },
+  }, clock);
+  const poll = () => a.inject({ method: 'POST', url: '/api/v1/worker-link/poll', headers: { authorization: 'Bearer ' + token }, payload: { waitMs: 0 } });
+  expect((await poll()).json().events).toEqual([]);
+
+  const bound = await a.inject({ method: 'POST', url: `/api/v1/workers/${worker.id}/room-binding`, payload: { employeeId: 'emp-ops', projectId: 'proj-1' } });
+  expect(bound.statusCode).toBe(200);
+  const events = (await poll()).json().events;
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ kind: 'wake', payload: { roomTaskId: posted.task!.id, projectId: 'proj-1', prompt: '列出项目根目录的文件' } });
+
+  // Binding again (or another project) does not send the same task twice.
+  await a.inject({ method: 'POST', url: `/api/v1/workers/${worker.id}/room-binding`, payload: { employeeId: 'emp-ops', projectId: 'proj-1' } });
+  expect((await poll()).json().events.filter((e: { seq: number }) => e.seq > events[0].seq)).toEqual([]);
 });

@@ -325,7 +325,10 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
           ]
         }
       ]
-      scale: { minReplicas: 0, maxReplicas: 3 } // web may scale to zero; background work lives in the worker
+      // Exactly one web replica: the command room keeps its conversation in process memory and numbers messages
+      // per process, so a second replica diverges and collides on room_messages ids (500 on send). Raise this only
+      // after the room reads and numbers through Postgres. min 1 also avoids a cold start on the first request.
+      scale: { minReplicas: 1, maxReplicas: 1 }
     }
   }
   dependsOn: [appAcrPull]

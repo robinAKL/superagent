@@ -119,6 +119,24 @@ export async function resolveRoomDispatch(task: RoomTask, projectScopes: readonl
   if (targets.length === 1) return targets[0];
 }
 
+/**
+ * Sends every open, undispatched room task of this employee to its now-bound computer. A task already dispatched
+ * keeps its device: appendEvent refuses a second dispatch for the same room task.
+ */
+export async function dispatchWaitingRoomTasks(tenantId: string, employeeId: string): Promise<number> {
+  let sent = 0;
+  for (const task of roomState.current.dispatchableTasks(tenantId, employeeId)) {
+    const target = await resolveRoomDispatch(task, null);
+    if (!target) continue;
+    task.projectId = target.projectId;
+    await flushRoom();
+    if (await workersState.registry.appendEvent(task.tenantId, target.workerId, 'wake', {
+      roomTaskId: task.id, projectId: target.projectId, prompt: task.title,
+    }, 'super-agent', workersState.now(), task.id)) sent++;
+  }
+  return sent;
+}
+
 export async function queueRoomDispatch(task: RoomTask, target: { workerId: string; projectId: string }): Promise<void> {
   await workersState.registry.appendEvent(task.tenantId, target.workerId, 'wake', {
     roomTaskId: task.id,
@@ -265,6 +283,8 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     const outcome = await registry.bindRoom(user.tenantId, id, { ...pair, remove: remove === true });
     if (!outcome.ok) return reply.code(outcome.error === 'not_found' ? 404 : 409).send({ error: outcome.error });
     const updated = outcome.worker;
+    // Work asked for before this employee had a computer would otherwise wait forever: dispatch happens on post.
+    if (remove !== true) await dispatchWaitingRoomTasks(user.tenantId, employeeId);
     return { worker: toView(updated, workersState.now()) };
   });
 
