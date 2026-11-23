@@ -70,7 +70,11 @@ export function readDecision(text: string, roster: EmployeeRef[]): Understood | 
   return null;
 }
 
-export function gatewayBrain(gateway: Gateway, timeoutMs = 25_000): RoomBrain {
+/**
+ * Reasoning models (gpt-5-mini and the like) spend hidden reasoning tokens from the same output allowance, so the
+ * allowance is generous; billing settles on what was actually used. `onMiss` says why a reading was not usable.
+ */
+export function gatewayBrain(gateway: Gateway, timeoutMs = 40_000, onMiss: (why: string) => void = () => undefined): RoomBrain {
   return {
     async understand(input) {
       const ready = await gateway.check(input.tenantId, 'economy');
@@ -82,7 +86,7 @@ export function gatewayBrain(gateway: Gateway, timeoutMs = 25_000): RoomBrain {
         status: STATUS[employee.status],
       }));
       const call = gateway.chat(input.tenantId, 'economy', {
-        maxOutputTokens: 600,
+        maxOutputTokens: 3000,
         messages: [
           { role: 'system', content: SYSTEM },
           { role: 'user', content: JSON.stringify({ employees, conversation: input.history.slice(-12), message: input.body }).slice(0, 20_000) },
@@ -92,8 +96,11 @@ export function gatewayBrain(gateway: Gateway, timeoutMs = 25_000): RoomBrain {
       const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
       try {
         const response = await Promise.race([call, late]);
-        if (!response || response.toolCalls.length) return null;
-        return readDecision(response.text, input.roster);
+        if (!response) { onMiss(`no answer within ${timeoutMs} ms`); return null; }
+        if (response.toolCalls.length) { onMiss('answered with a tool call'); return null; }
+        const decision = readDecision(response.text, input.roster);
+        if (!decision) onMiss(`unusable answer (stop: ${response.stopReason}, ${response.text.length} chars)`);
+        return decision;
       } finally {
         clearTimeout(timer);
         call.catch(() => undefined);

@@ -25,7 +25,7 @@ if (role === 'web') {
   const runtime = await createRuntime(process.env); // throws BootstrapError naming missing settings → container exits
   const knowledge = createKnowledgeDeps(runtime);
   const longwork = createLongWorkDeps(runtime);
-  bindRoomBrain(gatewayBrain(runtime.llm));
+  bindRoomBrain(gatewayBrain(runtime.llm, undefined, (why) => console.warn(`room brain: ${why}; using fixed rules`)));
   let roomHydrated = !runtime.pool;
   let sopHydrated = !runtime.pool;
   let inboxHydrated = !runtime.pool;
