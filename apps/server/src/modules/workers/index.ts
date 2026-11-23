@@ -4,7 +4,7 @@ import { flushRoom, roomState } from '../room/index.js';
 import type { RoomTask } from '../room/room.js';
 import { runtimeState } from '../runtime/index.js';
 import { claimTask, deadLetterTask, heartbeatTask, releaseTask, succeedTask, type Queryable } from '../runtime/pg-queue.js';
-import { PgWorkerRegistry } from './pg-registry.js';
+import { PgWorkerRegistry, type WorkersDb } from './pg-registry.js';
 import { tenantKey, workerKey, workSignal } from './signal.js';
 import { MemoryApprovalStore, PgApprovalStore, registerApprovalAdminRoutes, registerApprovalLinkRoutes, type ApprovalDeps, type ApprovalStore } from './approvals.js';
 import {
@@ -74,7 +74,7 @@ function memoryRegistry(): MemoryWorkerRegistry {
   return new MemoryWorkerRegistry((event) => workSignal.notify(workerKey(event.workerId)));
 }
 
-export function bindWorkersDb(db: Queryable | null): void {
+export function bindWorkersDb(db: WorkersDb | null): void {
   workersState.db = db;
   workersState.registry = db ? new PgWorkerRegistry(db) : memoryRegistry();
   workersState.approvals = db ? new PgApprovalStore(db) : new MemoryApprovalStore();
@@ -230,8 +230,6 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     const device = await registry.get(user.tenantId, id);
     if (!device || device.kind !== 'link' || device.revokedAt !== null) return reply.code(404).send({ error: 'not_found' });
     const pair = { employeeId, projectId };
-    const existing = device.capabilities.roomAssignments ?? [];
-    const remaining = existing.filter(binding => binding.employeeId !== employeeId || binding.projectId !== projectId);
     if (remove !== true) {
       const roster = roomState.current.roster({ userId: user.userId, roles: ['owner'], projectScopes: [] });
       if (!roster.some(employee => employee.id === employeeId) || !device.capabilities.projects?.some(project => project.id === projectId)
@@ -242,15 +240,12 @@ export const workersModule: FastifyPluginAsync = async (app) => {
           WHERE k.tenant_id = $1 AND e.value->>'employeeId' = $2 LIMIT 1`, [user.tenantId, employeeId]);
         if (!confirmed.rows.length) return reply.code(409).send({ error: 'binding_unavailable' });
       }
-      const devices = await registry.list(user.tenantId);
-      if (devices.some(other => other.revokedAt === null && other.capabilities.roomAssignments?.some(binding =>
-        binding.employeeId === employeeId && (other.id !== id || binding.projectId !== projectId),
-      ))) return reply.code(409).send({ error: 'employee_already_bound' });
-      if (remaining.length >= 32) return reply.code(409).send({ error: 'binding_limit' });
-      remaining.push(pair);
     }
-    const updated = await registry.patchCapabilities(user.tenantId, id, { roomAssignments: remaining });
-    if (!updated) return reply.code(404).send({ error: 'not_found' });
+    // The uniqueness and limit checks and the write happen together, so concurrent binds cannot lose one another
+    // or bind one employee twice.
+    const outcome = await registry.bindRoom(user.tenantId, id, { ...pair, remove: remove === true });
+    if (!outcome.ok) return reply.code(outcome.error === 'not_found' ? 404 : 409).send({ error: outcome.error });
+    const updated = outcome.worker;
     return { worker: toView(updated, workersState.now()) };
   });
 

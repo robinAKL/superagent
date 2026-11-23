@@ -1,5 +1,10 @@
 import type { Queryable } from '../runtime/pg-queue.js';
-import { cleanCapabilities, type HeartbeatInput, type WorkerCapabilities, type WorkerEvent, type WorkerEventKind, type WorkerKind, type WorkerRecord, type WorkerRegistry } from './registry.js';
+import { cleanCapabilities, nextRoomAssignments, type HeartbeatInput, type RoomBindingChange, type RoomBindingOutcome, type WorkerCapabilities, type WorkerEvent, type WorkerEventKind, type WorkerKind, type WorkerRecord, type WorkerRegistry } from './registry.js';
+
+/** A query runner that can also run several statements on one connection inside BEGIN/COMMIT. */
+export interface WorkersDb extends Queryable {
+  transaction?<T>(work: (tx: Queryable) => Promise<T>): Promise<T>;
+}
 
 interface Row {
   id: string;
@@ -53,6 +58,24 @@ SET capabilities = capabilities || $3::jsonb
 WHERE id = $2::uuid
   AND tenant_id = $1::uuid
   AND revoked_at IS NULL
+RETURNING ${COLUMNS};
+`.trim();
+
+/** Serializes room-binding changes of one tenant until the transaction ends. */
+export const LOCK_ROOM_BINDINGS_SQL = `SELECT pg_advisory_xact_lock(hashtextextended('superagent.worker-room-bindings:' || $1::text, 0));`;
+
+/**
+ * Writes room assignments only if they are still what the caller read ($4, NULL when absent): a compare-and-set,
+ * so a concurrent change to this device is never overwritten even without the lock.
+ */
+export const SET_ROOM_ASSIGNMENTS_SQL = `
+UPDATE workers
+SET capabilities = jsonb_set(capabilities, '{roomAssignments}', $3::jsonb, true)
+WHERE id = $2::uuid
+  AND tenant_id = $1::uuid
+  AND kind = 'link'
+  AND revoked_at IS NULL
+  AND capabilities->'roomAssignments' IS NOT DISTINCT FROM $4::jsonb
 RETURNING ${COLUMNS};
 `.trim();
 
@@ -123,7 +146,7 @@ function fromRow(r: Row): WorkerRecord {
 }
 
 export class PgWorkerRegistry implements WorkerRegistry {
-  constructor(private readonly db: Queryable) {}
+  constructor(private readonly db: WorkersDb) {}
 
   async insert(w: WorkerRecord): Promise<void> {
     await this.db.query(INSERT_WORKER_SQL, [w.id, w.tenantId, w.name, w.kind, JSON.stringify(w.capabilities), w.tokenHash, w.createdBy, w.createdAt]);
@@ -158,6 +181,32 @@ export class PgWorkerRegistry implements WorkerRegistry {
   async patchCapabilities(tenantId: string, id: string, capabilities: WorkerCapabilities): Promise<WorkerRecord | null> {
     const { rows } = await this.db.query<Row>(PATCH_CAPABILITIES_SQL, [tenantId, id, JSON.stringify(cleanCapabilities(capabilities))]);
     return rows[0] ? fromRow(rows[0]) : null;
+  }
+
+  /**
+   * With a transaction, a per-tenant advisory lock makes read-check-write atomic across web processes, which also
+   * keeps one employee from being bound on two devices. Without one, the compare-and-set still prevents lost
+   * updates on a device; a lost race is re-read and re-checked.
+   */
+  async bindRoom(tenantId: string, id: string, change: RoomBindingChange): Promise<RoomBindingOutcome> {
+    const attempt = async (q: Queryable, locked: boolean): Promise<RoomBindingOutcome | null> => {
+      if (locked) await q.query(LOCK_ROOM_BINDINGS_SQL, [tenantId]);
+      const devices = (await q.query<Row>(LIST_WORKERS_SQL, [tenantId])).rows.map(fromRow);
+      const next = nextRoomAssignments(devices, id, change);
+      if ('error' in next) return { ok: false, error: next.error };
+      const before = devices.find(device => device.id === id)!.capabilities.roomAssignments;
+      const { rows } = await q.query<Row>(SET_ROOM_ASSIGNMENTS_SQL, [
+        tenantId, id, JSON.stringify(next.assignments), before === undefined ? null : JSON.stringify(before),
+      ]);
+      return rows[0] ? { ok: true, worker: fromRow(rows[0]) } : null;
+    };
+    for (let tries = 0; tries < 10; tries++) {
+      const outcome = this.db.transaction
+        ? await this.db.transaction<RoomBindingOutcome | null>(tx => attempt(tx, true))
+        : await attempt(this.db, false);
+      if (outcome) return outcome;
+    }
+    throw new Error('room bindings kept changing during the update');
   }
 
   async appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number, roomTaskId?: string): Promise<WorkerEvent | null> {
