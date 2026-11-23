@@ -26,7 +26,8 @@ const NAV: { group: NavGroupId; items: NavItem[] }[] = [
 ];
 
 /** Pages that left the menu keep their routes and light up the destination they now belong to. */
-const PARENT: Partial<Record<PageId, NavItemId>> = { tools: 'employees', brain: 'settings' };
+// The super agent page now holds workflows, which belong to the team (UX plan step 6); its company profile moved to settings.
+const PARENT: Partial<Record<PageId, NavItemId>> = { tools: 'employees', brain: 'employees' };
 const PAGES: readonly PageId[] = ['room', 'work', 'employees', 'knowledge', 'settings', 'tools', 'brain', 'connect'];
 
 type ShellKey = `group.${NavGroupId}` | `nav.${NavItemId}` | 'menu' | 'signOut' | 'language' | 'noRole';

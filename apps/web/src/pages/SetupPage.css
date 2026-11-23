@@ -1,4 +1,4 @@
-.setup-page { max-width: 54rem; }
+.setup-page { max-width: 68rem; }
 .setup-audit { display: grid; gap: var(--space-2xs); }
 .setup-page article h3 { margin: var(--space-sm) 0 var(--space-2xs); font-size: 15px; }
 .setup-card { display: grid; gap: var(--space-md); margin-bottom: var(--space-md); }
@@ -69,3 +69,18 @@
 @media (max-width: 680px) {
   .link-device-form { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* UX plan step 6: one settings page with a section menu on the left; the danger zone is last and set apart. */
+.setup-layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: var(--space-lg); align-items: start; }
+.setup-sections { position: sticky; top: calc(var(--header) + var(--space-md)); display: grid; gap: 2px; }
+.setup-sections .btn { justify-content: flex-start; width: 100%; }
+.setup-sections .btn.is-danger { color: var(--color-error); }
+.setup-body { display: grid; gap: var(--space-md); min-width: 0; }
+.setup-body > [id] { scroll-margin-top: calc(var(--header) + var(--space-md)); }
+#settings-danger { margin-top: var(--space-lg); }
+@media (max-width: 960px) {
+  .setup-layout { grid-template-columns: minmax(0, 1fr); }
+  .setup-sections { position: static; display: flex; overflow-x: auto; }
+  .setup-sections .btn { width: auto; }
+}
+.ux-company-layout.is-single { grid-template-columns: minmax(0, 1fr); }

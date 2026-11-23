@@ -10,7 +10,7 @@ import { useT } from '../i18n';
 type StepId = 'model' | 'company' | 'knowledge' | 'team' | 'computer' | 'result';
 const ORDER: StepId[] = ['model', 'company', 'knowledge', 'team', 'computer', 'result'];
 const HREF: Record<StepId, string> = {
-  model: '#settings', company: '#brain', knowledge: '#knowledge', team: '#employees', computer: '#settings?link=1', result: '#room',
+  model: '#settings?section=model', company: '#settings?section=company', knowledge: '#knowledge', team: '#employees', computer: '#settings?link=1', result: '#room',
 };
 
 const TEXT = {
