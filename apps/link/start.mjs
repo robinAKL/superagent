@@ -25,7 +25,7 @@ export async function ensurePaired(origin, opts = {}) {
   const started = await startPairing(origin, opts.fetchImpl, opts.detect);
   const url = started.verifyUrl ?? connectUrl(origin, started.userCode);
   (opts.openBrowser ?? openBrowser)(url);
-  const result = await pollUntilToken(origin, started.deviceCode, opts.fetchImpl, opts.sleep);
+  const result = await pollUntilToken(origin, started.deviceCode, opts.fetchImpl, opts.sleep, started.expiresAt, opts.now);
   if (result.status !== 'allowed' || !result.token) throw new Error(`pair_${result.status}`);
   return result.token;
 }

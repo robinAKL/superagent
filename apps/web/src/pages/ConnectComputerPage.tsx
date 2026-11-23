@@ -19,6 +19,10 @@ const TEXT = {
     taken: 'This code was already used.',
     notFound: 'No pairing request matches this code.',
     error: 'Could not complete pairing. Try again.',
+    signedOut: 'Your sign-in has expired. Reload this page and sign in again.',
+    forbidden: 'This account cannot connect computers to this workspace.',
+    retrying: 'The server is busy or restarting. Trying again…',
+    memberNext: 'Next, an administrator binds a project on this computer to a digital employee. After that, mention that employee in the Command room to hand it work.',
     code: 'Pairing code',
   },
   zh: {
@@ -37,6 +41,10 @@ const TEXT = {
     taken: '这个配对码已经用过了。',
     notFound: '找不到这个配对码。',
     error: '配对失败，请重试。',
+    signedOut: '登录已过期，请刷新页面重新登录。',
+    forbidden: '这个账号不能把电脑连接到此工作区。',
+    retrying: '服务器正忙或正在重启，正在重试…',
+    memberNext: '接下来由管理员把这台电脑上的项目绑定到数字员工，之后在指挥室 @ 这名员工即可交办任务。',
     code: '配对码',
   },
 } satisfies Dict<string>;
@@ -54,7 +62,16 @@ function pairCodeFromHash(): string {
   return new URLSearchParams(query).get('code') ?? '';
 }
 
-export function ConnectComputerPage() {
+/** Lookups retried while the server answers 5xx or the network drops, e.g. during a deployment. */
+const LOOKUP_RETRIES = 5;
+const RETRY_MS = 3_000;
+
+function failure(status: number): 'signedOut' | 'forbidden' | 'error' {
+  return status === 401 ? 'signedOut' : status === 403 ? 'forbidden' : 'error';
+}
+
+/** Any signed-in member can connect their own computer. canManage shows the admin's device settings link. */
+export function ConnectComputerPage({ canManage = true }: { canManage?: boolean }) {
   const t = useT(TEXT);
   const initial = useMemo(pairCodeFromHash, []);
   const [code, setCode] = useState(initial);
@@ -66,15 +83,26 @@ export function ConnectComputerPage() {
     const raw = code.trim();
     if (!raw) { setPair(null); setNotice(t('missing')); return; }
     let stop = false;
+    let timer: number | undefined;
     setNotice(t('loading'));
-    void api<PairView>('/api/v1/workers/pair/' + encodeURIComponent(raw)).then((res) => {
-      if (stop) return;
-      if (res.status === 404) { setPair(null); setNotice(t('notFound')); return; }
-      if (res.status !== 200) { setPair(null); setNotice(t('error')); return; }
-      setPair(res.body);
-      setNotice(null);
-    }).catch(() => { if (!stop) setNotice(t('error')); });
-    return () => { stop = true; };
+    const lookup = (attempt: number) => {
+      const retry = () => {
+        if (stop) return;
+        if (attempt >= LOOKUP_RETRIES) { setPair(null); setNotice(t('error')); return; }
+        setNotice(t('retrying'));
+        timer = window.setTimeout(() => lookup(attempt + 1), RETRY_MS);
+      };
+      void api<PairView>('/api/v1/workers/pair/' + encodeURIComponent(raw)).then((res) => {
+        if (stop) return;
+        if (res.status === 404) { setPair(null); setNotice(t('notFound')); return; }
+        if (res.status >= 500) { retry(); return; }
+        if (res.status !== 200) { setPair(null); setNotice(t(failure(res.status))); return; }
+        setPair(res.body);
+        setNotice(null);
+      }).catch(retry);
+    };
+    lookup(0);
+    return () => { stop = true; window.clearTimeout(timer); };
   }, [code, t]);
 
   async function decide(action: 'allow' | 'deny') {
@@ -85,7 +113,7 @@ export function ConnectComputerPage() {
       if (res.status === 410) setNotice(t('expired'));
       else if (res.status === 409) setNotice(t('taken'));
       else if (res.status === 404) setNotice(t('notFound'));
-      else if (res.status !== 200) setNotice(t('error'));
+      else if (res.status !== 200) setNotice(t(failure(res.status)));
       else {
         const next = (res.body.pair ?? res.body) as PairView;
         setPair({ ...pair, ...next, status: action === 'allow' ? 'allowed' : 'denied' });
@@ -117,7 +145,9 @@ export function ConnectComputerPage() {
         {notice ? <p className="helper" role="status">{notice}</p> : null}
         {pair?.status === 'allowed' ? <>
           <p className="helper">{t('next')}</p>
-          <a className="btn primary" href="#settings?link=1">{t('manageLink')}</a>
+          {canManage
+            ? <a className="btn primary" href="#settings?link=1">{t('manageLink')}</a>
+            : <p className="helper">{t('memberNext')}</p>}
         </> : null}
       </section>
     </>

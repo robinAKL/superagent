@@ -139,7 +139,8 @@ function useHashPage(): string {
 export function App({ user = { mode: 'dev' } }: { user?: SignedIn }) {
   const t = useT(TEXT);
   const page = useHashPage();
-  const nav = navFor(useRoles());
+  const roles = useRoles();
+  const nav = navFor(roles);
   const current = nav.flatMap((g) => g.items).find((i) => i.id === page) ?? nav[0]!.items[0]!;
   const [collapsed, toggleSidebar] = useCollapsedSidebar();
   return (
@@ -177,7 +178,7 @@ export function App({ user = { mode: 'dev' } }: { user?: SignedIn }) {
           ))}
         </nav>
         <main className="content">
-          {page === 'connect' ? <ConnectComputerPage /> : current.id === 'settings' ? <SetupPage /> : current.id === 'tools' ? <ToolsPage /> : current.id === 'knowledge' ? <KnowledgePage /> : current.id === 'brain' ? <SuperAgentPage /> : current.id === 'room' ? <CommandRoomPage /> : current.id === 'work' ? <WorkInboxPage /> : current.id === 'employees' ? <EmployeesPage /> : <Placeholder title={t(`nav.${current.id}`)} owner={current.owner} />}
+          {page === 'connect' ? <ConnectComputerPage canManage={roles === null || roles.some(role => role === 'owner' || role === 'admin')} /> : current.id === 'settings' ? <SetupPage /> : current.id === 'tools' ? <ToolsPage /> : current.id === 'knowledge' ? <KnowledgePage /> : current.id === 'brain' ? <SuperAgentPage /> : current.id === 'room' ? <CommandRoomPage /> : current.id === 'work' ? <WorkInboxPage /> : current.id === 'employees' ? <EmployeesPage /> : <Placeholder title={t(`nav.${current.id}`)} owner={current.owner} />}
         </main>
       </div>
     </>

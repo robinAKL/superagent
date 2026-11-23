@@ -127,9 +127,24 @@ export async function queueRoomDispatch(task: RoomTask, target: { workerId: stri
   }, 'super-agent', workersState.now(), task.id);
 }
 
-/** Admin side, mounted under the signed-in /api/v1/workers prefix (admin/owner only). */
+const isManager = (roles: readonly string[]) => roles.includes('owner') || roles.includes('admin');
+/** Self-service routes let any signed-in member act on their own computer; everything else stays admin/owner. */
+const SELF = { config: { selfService: true } } as const;
+
+/**
+ * Mounted under the signed-in /api/v1/workers prefix. Admin/owner by default. Employees install Link themselves,
+ * so pairing, listing, binding and revoking are self-service, limited to computers the member paired.
+ */
 export const workersModule: FastifyPluginAsync = async (app) => {
-  app.get('/pair/:userCode', async (req, reply) => {
+  app.addHook('preHandler', async (req, reply) => {
+    if (!req.user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
+    if (isManager(req.user.roles) || req.routeOptions.config.selfService === true) return;
+    return reply.code(403).send({ error: 'forbidden' });
+  });
+  const mayManage = (user: { userId: string; roles: readonly string[] }, device: WorkerRecord) =>
+    isManager(user.roles) || device.createdBy === user.userId;
+
+  app.get('/pair/:userCode', SELF, async (req, reply) => {
     const tenantId = req.user?.tenantId;
     if (!tenantId) return reply.code(401).send({ error: 'unauthenticated' });
     const { userCode } = req.params as { userCode: string };
@@ -138,7 +153,7 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return publicPairView(session, workersState.now());
   });
 
-  app.post('/pair/:userCode/allow', async (req, reply) => {
+  app.post('/pair/:userCode/allow', SELF, async (req, reply) => {
     const user = req.user;
     if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
     const { userCode } = req.params as { userCode: string };
@@ -151,7 +166,7 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return { pair: publicPairView(result, now), worker: worker ? toView(worker, now) : null };
   });
 
-  app.post('/pair/:userCode/deny', async (req, reply) => {
+  app.post('/pair/:userCode/deny', SELF, async (req, reply) => {
     if (!req.user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
     const { userCode } = req.params as { userCode: string };
     const result = await denyPair(workersState.pairs, userCode, workersState.now());
@@ -179,11 +194,12 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return reply.code(201).send({ worker: toView(worker, now), token });
   });
 
-  app.get('/', async (req, reply) => {
-    const tenantId = req.user?.tenantId;
-    if (!tenantId) return reply.code(401).send({ error: 'unauthenticated' });
+  app.get('/', SELF, async (req, reply) => {
+    const user = req.user;
+    if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
     const now = workersState.now();
-    return { workers: (await workersState.registry.list(tenantId)).map((w) => toView(w, now)) };
+    const workers = (await workersState.registry.list(user.tenantId)).filter(worker => mayManage(user, worker));
+    return { workers: workers.map((w) => toView(w, now)) };
   });
 
   /** Address an instruction to one worker. It is delivered on the worker's next poll, however long it was away. */
@@ -218,7 +234,7 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return { worker: toView(worker, workersState.now()) };
   });
 
-  app.post('/:id/room-binding', async (req, reply) => {
+  app.post('/:id/room-binding', SELF, async (req, reply) => {
     const user = req.user;
     if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
     const { id } = req.params as { id: string };
@@ -228,10 +244,13 @@ export const workersModule: FastifyPluginAsync = async (app) => {
       || typeof projectId !== 'string' || !projectId || projectId.length > 128) return reply.code(400).send({ error: 'invalid_binding' });
     const registry = workersState.registry;
     const device = await registry.get(user.tenantId, id);
-    if (!device || device.kind !== 'link' || device.revokedAt !== null) return reply.code(404).send({ error: 'not_found' });
+    if (!device || device.kind !== 'link' || device.revokedAt !== null || !mayManage(user, device)) return reply.code(404).send({ error: 'not_found' });
     const pair = { employeeId, projectId };
     if (remove !== true) {
-      const roster = roomState.current.roster({ userId: user.userId, roles: ['owner'], projectScopes: [] });
+      // A member binds only digital employees they own; an admin/owner may bind any of the team.
+      const roster = roomState.current.roster(isManager(user.roles)
+        ? { userId: user.userId, roles: ['owner'], projectScopes: [] }
+        : { userId: user.userId, roles: user.roles, projectScopes: user.projectScopes });
       if (!roster.some(employee => employee.id === employeeId) || !device.capabilities.projects?.some(project => project.id === projectId)
         || !workerMayRun(device, pair)) return reply.code(409).send({ error: 'binding_unavailable' });
       if (workersState.db) {
@@ -249,11 +268,14 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return { worker: toView(updated, workersState.now()) };
   });
 
-  app.post('/:id/revoke', async (req, reply) => {
-    const tenantId = req.user?.tenantId;
-    if (!tenantId) return reply.code(401).send({ error: 'unauthenticated' });
+  app.post('/:id/revoke', SELF, async (req, reply) => {
+    const user = req.user;
+    const tenantId = user?.tenantId;
+    if (!user || !tenantId) return reply.code(401).send({ error: 'unauthenticated' });
     const { id } = req.params as { id: string };
     if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
+    const device = await workersState.registry.get(tenantId, id);
+    if (!device || !mayManage(user, device)) return reply.code(404).send({ error: 'not_found' });
     if (!(await workersState.registry.revoke(tenantId, id, workersState.now()))) return reply.code(404).send({ error: 'not_found' });
     workSignal.notify(workerKey(id));
     return { id, status: 'revoked' };
@@ -263,6 +285,10 @@ export const workersModule: FastifyPluginAsync = async (app) => {
 };
 
 declare module 'fastify' {
+  interface FastifyContextConfig {
+    /** workersModule: open to any signed-in member, who may act only on computers they paired. */
+    selfService?: boolean;
+  }
   interface FastifyRequest {
     worker?: WorkerRecord;
   }

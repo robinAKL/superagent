@@ -5,6 +5,7 @@ import { buildApp } from '../../app.js';
 import { resetRuntime, runtimeState } from '../runtime/index.js';
 import { PAIR_TTL_MS } from './pairing.js';
 import { resetWorkers, workerLinkModule, workerPairModule, workersModule, workersState } from './index.js';
+import { createCommandRoom, roomState } from '../room/index.js';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
@@ -168,4 +169,62 @@ it('the full app exposes pairing without a user session', async () => {
   const allow = await full.inject({ method: 'POST', url: `/api/v1/workers/pair/${startRes.json().userCode}/allow` });
   expect([401, 403]).toContain(allow.statusCode);
   await full.close();
+});
+
+const EMPLOYEE = { 'x-test-user': `staff-1|employee|${TENANT}` };
+const OTHER_EMPLOYEE = { 'x-test-user': `staff-2|employee|${TENANT}` };
+
+async function pairAs(a: FastifyInstance, headers: Record<string, string>, hostname: string) {
+  const started = (await a.inject({ method: 'POST', url: '/api/v1/worker-link/pair/start', payload: { hostname, agents: ['codex'] } })).json();
+  const lookup = await a.inject({ method: 'GET', url: `/api/v1/workers/pair/${started.userCode}`, headers });
+  expect(lookup.statusCode).toBe(200);
+  const allow = await a.inject({ method: 'POST', url: `/api/v1/workers/pair/${started.userCode}/allow`, headers });
+  expect(allow.statusCode).toBe(200);
+  return allow.json().worker.id as string;
+}
+
+it('an employee pairs their own computer and sees and manages only computers they paired', async () => {
+  const a = await app();
+  const mine = await pairAs(a, EMPLOYEE, 'Staff-PC');
+  const colleague = await pairAs(a, OTHER_EMPLOYEE, 'Colleague-PC');
+  const adminPc = await pairAs(a, {}, 'Admin-PC');
+  expect((await workersState.registry.get(TENANT, mine))?.createdBy).toBe('staff-1');
+
+  const listed = (headers: Record<string, string>) => a.inject({ method: 'GET', url: '/api/v1/workers', headers })
+    .then(res => (res.json().workers as { id: string }[]).map(w => w.id).sort());
+  expect(await listed(EMPLOYEE)).toEqual([mine]);
+  expect(await listed({})).toEqual([mine, colleague, adminPc].sort());
+
+  // Admin-only routes stay admin-only.
+  expect((await a.inject({ method: 'PATCH', url: `/api/v1/workers/${mine}`, headers: EMPLOYEE, payload: { allowProjects: [] } })).statusCode).toBe(403);
+  expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${mine}/events`, headers: EMPLOYEE, payload: { kind: 'message' } })).statusCode).toBe(403);
+  expect((await a.inject({ method: 'GET', url: '/api/v1/workers/approvals', headers: EMPLOYEE })).statusCode).toBe(403);
+
+  // Another member's computer is invisible, including to revoke.
+  expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${colleague}/revoke`, headers: EMPLOYEE })).statusCode).toBe(404);
+  expect((await workersState.registry.get(TENANT, colleague))?.revokedAt).toBeNull();
+  expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${mine}/revoke`, headers: EMPLOYEE })).statusCode).toBe(200);
+});
+
+it('an employee binds a project on their own computer only to digital employees they own', async () => {
+  const a = await app();
+  roomState.current = createCommandRoom([
+    { id: 'emp-mine', name: 'Mine', ownerUserId: 'staff-1', status: 'active' },
+    { id: 'emp-team', name: 'Team', ownerUserId: 'admin-1', status: 'active' },
+  ]);
+  const mine = await pairAs(a, EMPLOYEE, 'Staff-PC');
+  const colleague = await pairAs(a, OTHER_EMPLOYEE, 'Colleague-PC');
+  for (const id of [mine, colleague]) {
+    await workersState.registry.patchCapabilities(TENANT, id, { projects: [{ id: 'proj-1', name: 'repo', agent: 'codex' }] });
+  }
+  const bind = (id: string, employeeId: string, headers: Record<string, string>) =>
+    a.inject({ method: 'POST', url: `/api/v1/workers/${id}/room-binding`, headers, payload: { employeeId, projectId: 'proj-1' } });
+
+  expect((await bind(mine, 'emp-team', EMPLOYEE)).statusCode).toBe(409);
+  expect((await bind(colleague, 'emp-mine', EMPLOYEE)).statusCode).toBe(404);
+  const ok = await bind(mine, 'emp-mine', EMPLOYEE);
+  expect(ok.statusCode).toBe(200);
+  expect(ok.json().worker.capabilities.roomAssignments).toEqual([{ employeeId: 'emp-mine', projectId: 'proj-1' }]);
+  // The admin can still bind a team employee on the member's computer.
+  expect((await bind(colleague, 'emp-team', {})).statusCode).toBe(200);
 });
