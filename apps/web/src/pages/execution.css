@@ -262,3 +262,6 @@
   .inbox-filter-controls select, .inbox-search { max-width: 100%; width: 100%; }
   .exec-inbox .exec-grid, .exec-inbox .exec-grid:has(.exec-drawer) { grid-template-columns: 1fr; }
 }
+
+/* Phone: header actions keep their labels on one line and wrap as whole buttons. */
+@media (max-width: 960px) { .room .room-head-actions { justify-content: flex-start; } .room .room-head-btn { white-space: nowrap; } }

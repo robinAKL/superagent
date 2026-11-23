@@ -137,3 +137,33 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .disclosure > summary { cursor: pointer; color: var(--color-muted); font-size: 14px; list-style-position: inside; padding: var(--space-xs) 0; }
 .disclosure > summary:hover { color: var(--color-ink); }
 .disclosure[open] > summary { color: var(--color-ink); }
+
+/* Top bar navigation (UX plan step 2): five destinations, two groups split by a rule; text links in one weight. */
+.topbar { position: sticky; top: 0; z-index: 20; background: var(--color-paper); }
+.topnav { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; margin-left: var(--space-md); }
+.topnav-group { display: flex; align-items: center; gap: var(--space-2xs); }
+.topnav-group + .topnav-group { padding-left: var(--space-sm); border-left: 1px solid var(--color-rule); }
+.topnav .nav-item { min-height: var(--control); padding: 0 var(--space-sm); border-radius: var(--radius-sm); white-space: nowrap; font-size: 14px; transition: color var(--dur-micro) ease-out, background-color var(--dur-micro) ease-out; }
+.topnav .nav-item:hover { color: var(--color-ink); background: var(--color-paper-2); }
+.topnav .nav-item[aria-current="page"] { color: var(--color-ink); background: var(--color-well); box-shadow: inset 0 -2px var(--color-accent); }
+/* The page fills the width under the bar; at very wide screens the gutters grow, the measure does not. */
+.content { width: 100%; max-width: 1480px; margin: 0 auto; padding: var(--space-lg); }
+@media (max-width: 960px) {
+  .topbar { flex-wrap: wrap; height: auto; row-gap: 0; column-gap: var(--space-sm); padding-block: var(--space-xs) 0; }
+  .topbar .product { padding-left: var(--space-sm); white-space: nowrap; }
+  .topnav { order: 3; flex-basis: 100%; margin: 0 calc(-1 * var(--space-lg)); padding: 0 var(--space-lg) var(--space-2xs); overflow-x: auto; }
+  .content { padding: var(--space-md); }
+}
+
+/* Getting started: the setup path in order, one row per step, the next one carries the action. */
+.getting-started { margin-bottom: var(--space-md); padding: var(--space-md) var(--space-lg); border: 1px solid var(--color-soft-rule); border-radius: var(--radius); background: var(--color-paper-2); }
+.getting-started-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.getting-started-head h2 { margin: 0; font-size: var(--text-title); }
+.getting-started-steps { list-style: none; margin: var(--space-sm) 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2xs) var(--space-lg); counter-reset: step; }
+@media (max-width: 960px) { .getting-started-steps { grid-template-columns: minmax(0, 1fr); } }
+.getting-started-steps li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); min-height: var(--control); padding: var(--space-2xs) 0; border-bottom: 1px solid var(--color-soft-rule); counter-increment: step; }
+.getting-started-name { color: var(--color-muted); font-size: 14px; }
+.getting-started-name::before { content: counter(step) "  "; font-variant-numeric: tabular-nums; color: var(--color-subtle); }
+.getting-started-steps li[aria-current="step"] .getting-started-name { color: var(--color-ink); font-weight: 600; }
+.getting-started-steps li[data-done] .getting-started-name { color: var(--color-subtle); }
+.getting-started-link { font-size: var(--text-caption); color: var(--color-muted); }

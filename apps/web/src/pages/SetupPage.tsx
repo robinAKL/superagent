@@ -22,7 +22,7 @@ interface TestResponse {
 
 const TEXT = {
   en: {
-    title: 'Settings', lead: 'Connect a model and set its monthly budget',
+    title: 'Settings', lead: 'Connect a model and set its monthly budget', companyLink: 'Company profile and boundaries',
     tabRun: 'Runtime settings', tabAudit: 'Audit log', tabArch: 'Architecture',
     auditLead: 'Append-only events. Secrets and source text are never shown.',
     auditEmpty: 'No model-configuration events on this page yet. Status above is the current runtime setting.',
@@ -72,7 +72,7 @@ const TEXT = {
     resetFailed: 'Could not reset the knowledge base. Check permissions and try again.',
   },
   zh: {
-    title: '管理设置', lead: '连接模型并设置月度预算',
+    title: '管理设置', lead: '连接模型并设置月度预算', companyLink: '企业信息与工作边界',
     tabRun: '运行设置', tabAudit: '审计记录', tabArch: '架构说明',
     auditLead: '只追加、不可改。密钥和原文不会出现在这里。',
     auditEmpty: '本页还没有列出模型配置事件。上方状态就是当前运行设置。',
@@ -309,7 +309,10 @@ export function SetupPage() {
   const toolFeedback = test?.tools === 'inconclusive' ? 'toolIncomplete' : test?.tools === 'failed' ? 'toolFailed' : undefined;
 
   return <div className="setup-page">
-    <header className="page-head"><h1>{t('title')}</h1><p>{t('lead')}</p></header>
+    <header className="page-head"><h1>{t('title')}</h1><p>{t('lead')}</p>
+      {/* The company profile and work boundaries moved out of the menu (UX plan step 2); they are part of setup. */}
+      <div className="page-head-actions"><a className="btn" href="#brain">{t('companyLink')}</a></div>
+    </header>
     <div className="page-tabs" role="tablist" aria-label={t('title')}>
       {([['run', 'tabRun'], ['audit', 'tabAudit'], ['arch', 'tabArch']] as const).map(([id, key]) =>
         <button key={id} role="tab" type="button" aria-selected={tab === id} onClick={() => {

@@ -7,8 +7,10 @@ test.describe('nothing chosen yet', () => {
   test('starts in English, switches to Chinese, and keeps the choice after a reload', async ({ page }) => {
     await page.goto('/#employees');
     const nav = page.getByRole('navigation', { name: 'Main menu' });
-    await expect(nav.locator('.nav-group')).toHaveText(['Daily work', 'Team & knowledge', 'Configuration']);
-    await expect(nav.locator('.nav-item')).toHaveText(['Command room', 'My work', 'Company knowledge', 'Digital employees', 'Employee tools', 'Super agent', 'Admin settings']);
+    // UX plan step 2: five destinations in two groups in the top bar.
+    await expect(nav.getByRole('group', { name: 'Daily work' })).toBeVisible();
+    await expect(nav.getByRole('group', { name: 'Team and setup' })).toBeVisible();
+    await expect(nav.locator('.nav-item')).toHaveText(['Command room', 'My work', 'Digital employees', 'Company knowledge', 'Admin settings']);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Digital employees');
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 
@@ -17,7 +19,7 @@ test.describe('nothing chosen yet', () => {
     await language.getByRole('button', { name: '中文' }).click();
 
     const navZh = page.getByRole('navigation', { name: '主菜单' });
-    await expect(navZh.locator('.nav-item')).toHaveText(['指挥室', '待我处理', '企业知识', '数字员工', '员工工具', '超级智能体', '管理设置']);
+    await expect(navZh.locator('.nav-item')).toHaveText(['指挥室', '待我处理', '数字员工', '企业知识', '管理设置']);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('数字员工');
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
     await expect(page.getByRole('group', { name: '语言' }).getByRole('button', { name: '中文' })).toHaveAttribute('aria-pressed', 'true');

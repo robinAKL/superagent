@@ -147,9 +147,9 @@ describe('execution pages reuse the v12 copy', () => {
   it('gives an employee-only sign-in the two daily pages and everyone else the full menu', () => {
     const ids = (roles: string[] | null) => navFor(roles).flatMap((group) => group.items.map((item) => item.id));
     expect(ids(['employee'])).toEqual(['room', 'work']);
-    expect(ids(['owner'])).toHaveLength(7);
-    expect(ids(['employee', 'reviewer'])).toHaveLength(7);
-    expect(ids(null)).toHaveLength(7);
+    expect(ids(['owner'])).toHaveLength(5);
+    expect(ids(['employee', 'reviewer'])).toHaveLength(5);
+    expect(ids(null)).toHaveLength(5);
   });
 
   it('replaces the offline sample with the server list, including an empty inbox', () => {

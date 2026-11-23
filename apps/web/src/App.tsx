@@ -1,7 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { SetupPage } from './pages/SetupPage';
-import { Icon } from './components/Icon';
-import { Placeholder } from './pages/Placeholder';
 import { ToolsPage } from './pages/ToolsPage';
 import { KnowledgePage } from './pages/KnowledgePage';
 import { signOut, type SignedIn } from './auth';
@@ -13,76 +11,52 @@ import { EmployeesPage } from './pages/EmployeesPage';
 import { ConnectComputerPage } from './pages/ConnectComputerPage';
 import { LangSwitch, useT, type Dict } from './i18n';
 
-type NavGroupId = 'daily' | 'team' | 'config';
-type NavItemId = 'room' | 'work' | 'knowledge' | 'employees' | 'tools' | 'brain' | 'settings';
-type NavItem = { id: NavItemId; owner: string };
+type NavGroupId = 'daily' | 'build';
+type NavItemId = 'room' | 'work' | 'employees' | 'knowledge' | 'settings';
+type PageId = NavItemId | 'tools' | 'brain' | 'connect';
+type NavItem = { id: NavItemId };
 
-/** Owner navigation: 7 entries, same as the accepted prototype (PRD §1.2). Labels live in TEXT below. */
+/**
+ * Five destinations in a top bar (UX plan step 2; Hallmark app screens: a sidebar is earned past about seven).
+ * Daily work for everyone; building the team for administrators. The server still decides what each role may call.
+ */
 const NAV: { group: NavGroupId; items: NavItem[] }[] = [
-  {
-    group: 'daily',
-    items: [
-      { id: 'room', owner: 'T-41' },
-      { id: 'work', owner: 'T-41' },
-    ],
-  },
-  {
-    group: 'team',
-    items: [
-      { id: 'knowledge', owner: 'T-40' },
-      { id: 'employees', owner: 'T-42' },
-      { id: 'tools', owner: 'T-42' },
-    ],
-  },
-  {
-    group: 'config',
-    items: [
-      { id: 'brain', owner: 'T-40' },
-      { id: 'settings', owner: 'T-39' },
-    ],
-  },
+  { group: 'daily', items: [{ id: 'room' }, { id: 'work' }] },
+  { group: 'build', items: [{ id: 'employees' }, { id: 'knowledge' }, { id: 'settings' }] },
 ];
 
-type ShellKey = `group.${NavGroupId}` | `nav.${NavItemId}` | 'menu' | 'signOut' | 'language' | 'workspace' | 'collapse' | 'expand' | 'noRole';
+/** Pages that left the menu keep their routes and light up the destination they now belong to. */
+const PARENT: Partial<Record<PageId, NavItemId>> = { tools: 'employees', brain: 'settings' };
+const PAGES: readonly PageId[] = ['room', 'work', 'employees', 'knowledge', 'settings', 'tools', 'brain', 'connect'];
+
+type ShellKey = `group.${NavGroupId}` | `nav.${NavItemId}` | 'menu' | 'signOut' | 'language' | 'noRole';
 
 const TEXT: Dict<ShellKey> = {
   en: {
     'group.daily': 'Daily work',
-    'group.team': 'Team & knowledge',
-    'group.config': 'Configuration',
+    'group.build': 'Team and setup',
     'nav.room': 'Command room',
     'nav.work': 'My work',
-    'nav.knowledge': 'Company knowledge',
     'nav.employees': 'Digital employees',
-    'nav.tools': 'Employee tools',
-    'nav.brain': 'Super agent',
+    'nav.knowledge': 'Company knowledge',
     'nav.settings': 'Admin settings',
     menu: 'Main menu',
     signOut: 'Sign out',
     noRole: 'Your account has no Super Agent role yet, so there is nothing you can open here. Ask an administrator to assign you a role (Owner, Admin, Employee or Reviewer) for this app, then sign out and back in.',
     language: 'Language',
-    workspace: 'Workspace',
-    collapse: 'Collapse menu',
-    expand: 'Expand menu',
   },
   zh: {
     'group.daily': '日常工作',
-    'group.team': '团队与知识',
-    'group.config': '配置',
+    'group.build': '团队与配置',
     'nav.room': '指挥室',
     'nav.work': '待我处理',
-    'nav.knowledge': '企业知识',
     'nav.employees': '数字员工',
-    'nav.tools': '员工工具',
-    'nav.brain': '超级智能体',
+    'nav.knowledge': '企业知识',
     'nav.settings': '管理设置',
     menu: '主菜单',
     signOut: '退出',
     noRole: '你的账号还没有 Super Agent 角色，所以这里暂时没有可用的内容。请联系管理员为你分配此应用的角色（所有者、管理员、员工或审核人），然后退出并重新登录。',
     language: '语言',
-    workspace: '企业工作区',
-    collapse: '收起菜单',
-    expand: '展开菜单',
   },
 };
 
@@ -93,6 +67,10 @@ const TEXT: Dict<ShellKey> = {
 export function navFor(roles: readonly string[] | null): typeof NAV {
   const staffOnly = roles !== null && roles.includes('employee') && !roles.some((role) => role === 'owner' || role === 'admin' || role === 'reviewer');
   return staffOnly ? NAV.filter((group) => group.group === 'daily') : NAV;
+}
+
+export function canManage(roles: readonly string[] | null): boolean {
+  return roles === null || roles.some(role => role === 'owner' || role === 'admin');
 }
 
 function useRoles(): string[] | null {
@@ -116,19 +94,11 @@ function useRoles(): string[] | null {
   return roles;
 }
 
-const SIDEBAR_KEY = 'superagent.sidebar';
-/** Desktop sidebar collapsed to an icon rail; remembered in this browser (storage may be blocked — then it just resets). */
-function useCollapsedSidebar(): [boolean, () => void] {
-  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(SIDEBAR_KEY) === 'collapsed'; } catch { return false; } });
-  const toggle = () => setCollapsed(value => {
-    try { localStorage.setItem(SIDEBAR_KEY, value ? 'expanded' : 'collapsed'); } catch { /* not remembered */ }
-    return !value;
-  });
-  return [collapsed, toggle];
-}
-
-function useHashPage(): string {
-  const read = () => window.location.hash.slice(1).split('?')[0] || 'room';
+function useHashPage(): PageId {
+  const read = (): PageId => {
+    const id = window.location.hash.slice(1).split('?')[0] || 'room';
+    return (PAGES as readonly string[]).includes(id) ? id as PageId : 'room';
+  };
   const [page, setPage] = useState(read);
   useEffect(() => {
     const onChange = () => setPage(read());
@@ -140,49 +110,52 @@ function useHashPage(): string {
 
 export function App({ user = { mode: 'dev' } }: { user?: SignedIn }) {
   const t = useT(TEXT);
-  const page = useHashPage();
+  const requested = useHashPage();
   const roles = useRoles();
   const nav = navFor(roles);
-  const current = nav.flatMap((g) => g.items).find((i) => i.id === page) ?? nav[0]!.items[0]!;
-  const [collapsed, toggleSidebar] = useCollapsedSidebar();
+  const allowed = new Set<PageId>(nav.flatMap(g => g.items.map(i => i.id)));
+  for (const [child, parent] of Object.entries(PARENT)) if (allowed.has(parent)) allowed.add(child as PageId);
+  allowed.add('connect');
+  // A page the menu does not offer this role falls back to the command room, as before.
+  const page: PageId = allowed.has(requested) ? requested : 'room';
+  const current = PARENT[page] ?? page;
+  const pages: Record<PageId, () => ReactNode> = {
+    room: () => <CommandRoomPage />,
+    work: () => <WorkInboxPage />,
+    employees: () => <EmployeesPage />,
+    knowledge: () => <KnowledgePage />,
+    settings: () => <SetupPage />,
+    tools: () => <ToolsPage />,
+    brain: () => <SuperAgentPage />,
+    connect: () => <ConnectComputerPage canManage={canManage(roles)} />,
+  };
   return (
     <>
       <header className="topbar">
         <span className="brand">INNOPRO</span>
         <span className="product">Super Agent</span>
+        <nav className="topnav" aria-label={t('menu')}>
+          {nav.map((g) => (
+            <div key={g.group} className="topnav-group" role="group" aria-label={t(`group.${g.group}`)}>
+              {g.items.map((i) => (
+                <a key={i.id} className="nav-item" href={`#${i.id}`} aria-current={i.id === current ? 'page' : undefined}>{t(`nav.${i.id}`)}</a>
+              ))}
+            </div>
+          ))}
+        </nav>
         <span className="topbar-end">
           <LangSwitch label={t('language')} />
           {user.mode === 'entra' ? (
             <span className="who">
               <span title={user.username}>{user.name ?? user.username}</span>
-              <button className="btn" type="button" onClick={() => void signOut()}>{t('signOut')}</button>
+              <button className="btn quiet" type="button" onClick={() => void signOut()}>{t('signOut')}</button>
             </span>
           ) : null}
         </span>
       </header>
-      <div className={`app${collapsed ? ' is-collapsed' : ''}`}>
-        <nav className="sidebar" aria-label={t('menu')}>
-          <div className="sidebar-head">
-            <span className="sidebar-title">{t('workspace')}</span>
-            <button type="button" className="sidebar-toggle" aria-pressed={collapsed} aria-label={t(collapsed ? 'expand' : 'collapse')} title={t(collapsed ? 'expand' : 'collapse')} onClick={toggleSidebar}>
-              <Icon name={collapsed ? 'expand' : 'collapse'} />
-            </button>
-          </div>
-          {nav.map((g) => (
-            <div key={g.group}>
-              <div className="nav-group">{t(`group.${g.group}`)}</div>
-              {g.items.map((i) => (
-                <a key={i.id} className="nav-item" href={`#${i.id}`} title={collapsed ? t(`nav.${i.id}`) : undefined} aria-current={i.id === current.id ? 'page' : undefined}>
-                  <Icon name={i.id} /><span className="nav-label">{t(`nav.${i.id}`)}</span>
-                </a>
-              ))}
-            </div>
-          ))}
-        </nav>
-        <main className="content">
-          {roles !== null && roles.length === 0 ? <section className="panel" role="alert"><p>{t('noRole')}</p></section> : page === 'connect' ? <ConnectComputerPage canManage={roles === null || roles.some(role => role === 'owner' || role === 'admin')} /> : current.id === 'settings' ? <SetupPage /> : current.id === 'tools' ? <ToolsPage /> : current.id === 'knowledge' ? <KnowledgePage /> : current.id === 'brain' ? <SuperAgentPage /> : current.id === 'room' ? <CommandRoomPage /> : current.id === 'work' ? <WorkInboxPage /> : current.id === 'employees' ? <EmployeesPage /> : <Placeholder title={t(`nav.${current.id}`)} owner={current.owner} />}
-        </main>
-      </div>
+      <main className="content">
+        {roles !== null && roles.length === 0 ? <section className="panel" role="alert"><p>{t('noRole')}</p></section> : pages[page]()}
+      </main>
     </>
   );
 }
