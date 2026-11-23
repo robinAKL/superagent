@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useT, type Dict } from '../i18n';
-import { agentLabel, allowsBinding, useLinkDevices, type LinkBinding, type LinkDevice } from './link-devices';
+import { agentLabel, allowsBinding, LINK_INSTALLER_URL, useLinkDevices, type LinkBinding, type LinkDevice } from './link-devices';
 
 const TEXT = {
   en: {
@@ -25,6 +25,7 @@ const TEXT = {
     bindingError: 'Could not save the binding. Check project availability and device permissions.',
     bindSaved: 'Employee bound.',
     loadingName: 'Loading…',
+    download: 'Download Link for Windows',
     allBound: 'Every digital employee is already bound. To put this computer to work, add people in Team or remove a binding elsewhere.', bindRemoved: 'Binding removed.',
   },
   zh: {
@@ -48,6 +49,7 @@ const TEXT = {
     bindingError: '保存绑定失败，请检查项目是否可用及设备权限。',
     bindSaved: '已绑定员工。', bindRemoved: '已移除绑定。',
     loadingName: '正在读取…',
+    download: '下载 Link（Windows）',
     allBound: '所有数字员工都已绑定。要让这台电脑干活，请在「数字员工」里增加人数，或先移除其他电脑上的绑定。',
   },
 } satisfies Dict<string>;
@@ -138,7 +140,7 @@ export function WorkerConnectPanel() {
       </header>
       {unavailable ? <p role="alert">{t('loadError')}</p>
         : !workers ? <p className="helper" role="status">{t('loading')}</p>
-          : workers.length === 0 ? <p className="helper">{t('empty')}</p> : workers.map((w) => (
+          : workers.length === 0 ? <div className="state-empty"><p>{t('empty')}</p><a className="btn" href={LINK_INSTALLER_URL}>{t('download')}</a></div> : workers.map((w) => (
         <article key={w.id} data-worker={w.id} className="link-device">
           <div className="link-device-head">
             <h3>{w.name}</h3>

@@ -20,7 +20,8 @@ test('command room defaults to English and switches system copy live', async ({ 
   // Agent confirmations appear only while an agent is waiting (prototype); other specs may leave some behind.
   await expect(room.getByRole('heading', { name: 'Conversation' })).toBeVisible();
   await expect(room.getByRole('heading', { name: 'Tasks' })).toBeVisible();
-  await expect(room.getByRole('link', { name: 'Configure Super Agent' })).toBeVisible();
+  // UX plan step 5: the header keeps the team and workflows; super agent setup lives under Admin settings.
+  await expect(room.getByRole('button', { name: 'Workflows' })).toBeVisible();
   await expect(room.getByText('No tasks yet')).toBeVisible();
   await expect(room.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
   const textbox = room.getByRole('textbox', { name: 'Message the command room' });

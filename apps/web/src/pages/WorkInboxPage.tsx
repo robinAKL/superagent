@@ -132,7 +132,7 @@ const CHROME = {
     summary: 'Approvals {approvals} · Tools awaiting publish {tools} · All {all}',
     summaryAria: 'Inbox summary',
     emptyTitle: 'Nothing needs your decision right now',
-    emptyBody: 'Approvals from running work and tools waiting to be published show up here. If this is empty, check in-progress tasks in the command room or install a capability on Employee tools.',
+    emptyBody: 'Approvals from running work and tools waiting to be published appear here.',
     openRoom: 'Open command room', openTools: 'Open employee tools',
   },
   zh: {
@@ -148,7 +148,7 @@ const CHROME = {
     summary: '审批 {approvals} · 工具待发布 {tools} · 全部 {all}',
     summaryAria: '待办汇总',
     emptyTitle: '现在没有需要你处理的事项',
-    emptyBody: '运行中的审批和待发布的工具会汇总在这里。没有事项时先看指挥室里进行中的任务，或到员工工具安装能力。',
+    emptyBody: '运行中的审批和待发布的工具会出现在这里。',
     openRoom: '打开指挥室', openTools: '打开员工工具',
   },
 };
@@ -257,19 +257,21 @@ export function WorkInboxPage() {
     await load();
   }
 
+  // Nothing at all to do: one sentence and one way forward. Filters, counts and toolbars appear once there is work.
+  const nothing = items !== null && items.length === 0 && !failed;
   const groupLabel = (id: Group) => t(id === 'action' ? 'group_action' : id === 'waiting' ? 'group_waiting' : 'group_internal');
   return (
-    <section className="exec-inbox" aria-label={t('pageAria')}>
+    <section className="exec-inbox" aria-label={t('pageAria')} data-nothing={nothing ? 'yes' : undefined}>
       <header className="page-head inbox-head">
         <div>
           <h1 id="page-title">{t('title')}</h1>
           <p>{t('subtitle')}</p>
         </div>
-        <button type="button" className="inbox-filter-toggle" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((v) => !v)}>
+        {nothing ? null : <button type="button" className="inbox-filter-toggle" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((v) => !v)}>
           {t('filtersToggle')}{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
-        </button>
+        </button>}
       </header>
-      <div className={`exec-toolbar inbox-toolbar ${filtersOpen ? 'is-open' : ''}`}>
+      {nothing ? null : <div className={`exec-toolbar inbox-toolbar ${filtersOpen ? 'is-open' : ''}`}>
         <div className="inbox-segmented" role="group" aria-label={t('status')}>
           <button type="button" aria-pressed={group === 'all'} onClick={() => setGroup('all')}>{t('grouped')}</button>
           {GROUPS.map((g) => (
@@ -305,19 +307,20 @@ export function WorkInboxPage() {
             <button type="button" className="inbox-clear-btn" onClick={clearFilters}>{t('clearFilters')}</button>
           ) : null}
         </div>
-      </div>
+      </div>}
       <div className="exec-grid">
         <div className="panel exec-pane">
           <div className="exec-scroll">
             {failed ? <p className="helper" role="alert">{t('failed')}</p> : null}
             {items === null && !failed ? <p className="helper">{t('loading')}</p> : null}
-            {items !== null ? <div className="work-summary" aria-label={t('summaryAria')}>
+            {items !== null && !nothing ? <div className="work-summary" aria-label={t('summaryAria')}>
               <p>{t('summary', { approvals: approvalCount(items), tools: toolsAwaitingPublish(toolStages), all: items.length })}</p>
             </div> : null}
             {items !== null && visible.length === 0 ? <div className="room-tasks-empty" role="status">
               <strong>{t('emptyTitle')}</strong>
               <p className="helper">{t('emptyBody')}</p>
-              <p><a href="#room">{t('openRoom')}</a> · <a href="#tools">{t('openTools')}</a></p>
+              {nothing ? <a className="btn" href="#room">{t('openRoom')}</a>
+                : activeFilterCount > 0 ? <button type="button" className="btn" onClick={clearFilters}>{t('clearFilters')}</button> : null}
             </div> : null}
             {GROUPS.map((section) => {
               const rows = visible.filter((item) => groupOf(item) === section.id);

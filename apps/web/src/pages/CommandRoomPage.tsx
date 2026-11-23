@@ -7,6 +7,7 @@ import { CommandWorkflowPanel } from './CommandWorkflowPanel';
 import { WorkerApprovals } from './WorkerApprovals';
 import { Icon } from '../components/Icon';
 import { RichText } from '../components/RichText';
+import { GettingStarted } from '../components/GettingStarted';
 
 /**
  * Command room (PRD §3.7), layout and copy from the accepted v12 prototype. Everything on the page comes from the
@@ -16,7 +17,6 @@ import { RichText } from '../components/RichText';
  */
 const ROOM_ID = 'room-1';
 const POLL_MS = 4000;
-const LINK_INSTALLER_URL = 'https://github.com/robinAKL/superagent/releases/download/link-latest/SuperAgentLink-Setup-x64.exe';
 
 export type MessageKind = 'message' | 'reply' | 'report' | 'review' | 'cancel' | 'hold' | 'resume' | 'contract';
 
@@ -28,6 +28,25 @@ export interface ApiMessage {
   taskIds: string[];
   kind?: MessageKind;
   clientMessageId?: string;
+}
+
+const TASK_PAGE = 10;
+
+/**
+ * A computer reports several steps per task (received, started, processing). The conversation keeps only the
+ * latest step of each task, and none once the task has its report: progress is a state, not a thread.
+ */
+export function collapseProgress<T extends Pick<ApiMessage, 'id' | 'kind' | 'taskIds' | 'clientMessageId'>>(messages: readonly T[]): T[] {
+  const reported = new Set(messages.filter((message) => message.kind === 'report').flatMap((message) => message.taskIds));
+  const latest = new Map<string, string>();
+  for (const message of messages) {
+    if (!fromComputer(message) || message.kind === 'report') continue;
+    for (const taskId of message.taskIds) latest.set(taskId, message.id);
+  }
+  return messages.filter((message) => {
+    if (!fromComputer(message) || message.kind === 'report') return true;
+    return message.taskIds.every((taskId) => !reported.has(taskId) && latest.get(taskId) === message.id);
+  });
 }
 
 /** Sent by the employee's Link computer (progress or report), not typed by a person. */
@@ -342,6 +361,7 @@ export function CommandRoomPage() {
     return () => window.removeEventListener('hashchange', open);
   }, []);
   const [taskTab, setTaskTab] = useState<'open' | 'review' | 'all'>('all');
+  const [showAllTasks, setShowAllTasks] = useState(false);
   const summaryRef = useRef<HTMLDivElement | null>(null);
 
   const cursor = useRef(0);
@@ -412,6 +432,15 @@ export function CommandRoomPage() {
     const el = scroller.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
+  // The pane can change size after the messages arrived (a checklist above it, a narrower window): stay at the
+  // latest line while the reader was there.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => { if (stick.current) el.scrollTop = el.scrollHeight; });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   function changeDraft(value: string) {
     setDraft(value);
@@ -616,15 +645,11 @@ export function CommandRoomPage() {
   const tabTasks = taskTab === 'open' ? tasks.filter((task) => OPEN_STATUS.has(task.status))
     : taskTab === 'review' ? tasks.filter((task) => reviewStatus.has(task.status)) : tasks;
   const counts = { open: tasks.filter((task) => OPEN_STATUS.has(task.status)).length, review: tasks.filter((task) => reviewStatus.has(task.status)).length };
+  const delivered = tasks.filter((task) => task.status === 'completed' || task.status === 'reviewed').slice(-5).reverse();
   const firstEmployee = employees.find((employee) => employee.status === 'active') ?? employees[0];
   function startWith(text: string) {
     changeDraft(text);
     window.setTimeout(() => { const el = input.current; if (el) { el.focus(); el.setSelectionRange(text.length, text.length); } }, 0);
-  }
-  function showSummary() {
-    setTaskTab('all');
-    summaryRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    summaryRef.current?.focus();
   }
 
   return (
@@ -637,16 +662,16 @@ export function CommandRoomPage() {
             : t('和超级智能体一起，把工作推进到交付。')}
         </p>
         <div className="page-head-actions room-head-actions">
-          <a className="room-head-btn" href={LINK_INSTALLER_URL}>{t('下载 Link（Windows x64）')}</a>
-          <button type="button" className="room-head-btn" aria-expanded={teamOpen} aria-controls="room-team" onClick={() => setTeamOpen((open) => !open)}>
+          {/* Two actions at most (UX plan step 5): the team at a glance, and starting a workflow. Link download,
+              the summary button and super agent setup moved to where they are needed. */}
+          <button type="button" className="btn quiet" aria-expanded={teamOpen} aria-controls="room-team" onClick={() => setTeamOpen((open) => !open)}>
             <Icon name="team" /><span>{t('团队')}</span>
           </button>
-          <button type="button" className="room-head-btn" onClick={showSummary}><Icon name="summary" /><span>{t('工作摘要')}</span></button>
-          {viewer?.owner ? <button type="button" className="room-head-btn" aria-expanded={flowsOpen} onClick={() => setFlowsOpen((open) => !open)}><Icon name="flow" /><span>{t('业务流程')}</span></button> : null}
-          {viewer?.owner ? <a className="exec-action room-head-btn" href="#brain"><Icon name="brain" /><span>{t('配置超级智能体')}</span></a> : null}
+          {viewer?.owner ? <button type="button" className="btn" aria-expanded={flowsOpen} onClick={() => setFlowsOpen((open) => !open)}><Icon name="flow" /><span>{t('业务流程')}</span></button> : null}
         </div>
       </div>
       {viewer?.owner ? <>
+        <GettingStarted />
         {flowsOpen ? <CommandWorkflowPanel defaultOpen /> : null}
         <WorkerApprovals key={viewer.userId} />
       </> : null}
@@ -688,7 +713,7 @@ export function CommandRoomPage() {
                   </div>
                 </div>
               ) : <p className="exec-empty">{offline ? t('暂时连不上指挥室，稍后会自动重试。') : t('正在读取指挥室…')}</p>
-            ) : messages.map((message) => (
+            ) : collapseProgress(messages).map((message) => (
               <article
                 key={message.id}
                 id={`room-msg-${message.id}`}
@@ -799,18 +824,22 @@ export function CommandRoomPage() {
                 <p className="exec-empty">{tasks.length === 0 ? t('当前没有由对话产生的任务。') : t('切换到「全部」查看其他任务。')}</p>
                 {tasks.length === 0 ? <p className="exec-empty">{t('明确交办的工作会形成任务。普通讨论可以直接继续。')}</p> : null}
               </div>
-            ) : tabTasks.map((task) => (
+            ) : (showAllTasks ? tabTasks : tabTasks.slice(0, TASK_PAGE)).map((task) => (
               <button type="button" className="exec-task" key={task.id} data-task={task.id} data-status={task.status} aria-current={openTaskId === task.id ? 'true' : undefined} onClick={() => openTaskDrawer(task.id)}>
                 <strong>{task.title}</strong>
                 <span>{taskLine(task, employees, lang)}</span>
               </button>
             ))}
           </div>
-          <div className="room-summary" data-outcome="summary" ref={summaryRef} tabIndex={-1} aria-label={t('工作摘要')}>
-            <h3>{t('工作摘要')}</h3>
-            {tasks.length === 0 ? <p>{t('暂无事项')}</p> : (
+          {tabTasks.length > TASK_PAGE ? <button type="button" className="btn quiet small room-more" onClick={() => setShowAllTasks((all) => !all)}>
+            {showAllTasks ? t('只看最近 10 条') : `${t('查看全部')}（${tabTasks.length}）`}
+          </button> : null}
+          {/* Not a second copy of the list: only what was delivered, latest first, each one jumps to its report. */}
+          <div className="room-summary" data-outcome="summary" ref={summaryRef} tabIndex={-1} aria-label={t('最近交付')}>
+            <h3>{t('最近交付')}</h3>
+            {delivered.length === 0 ? <p>{t('暂无事项')}</p> : (
               <ul>
-                {tasks.map((task) => (
+                {delivered.map((task) => (
                   <li key={task.id}>
                     <button
                       type="button"
