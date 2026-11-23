@@ -295,3 +295,12 @@
 .room-sheet .command-workflows > summary::-webkit-details-marker { display: none; }
 .room-sheet-close { position: absolute; top: var(--space-md); right: var(--space-md); }
 @media (max-width: 800px) { .room-sheet { padding: var(--space-md); } }
+/* The mention list opens upward and may reach above a short conversation pane; the pane has no frame, so let it show. */
+.room .exec-pane.room-chat { overflow: visible; }
+/* Pending agent confirmations sit at the top of the task column, compact. */
+.room .room-tasks .exec-approvals { flex: none; max-height: 50%; overflow-y: auto; margin: 0 0 var(--space-md); padding: var(--space-sm) var(--space-md); }
+.room .room-tasks .exec-approvals h2 { margin: 0 0 var(--space-xs); font-size: var(--text-title); }
+.room .room-tasks .exec-approval-input { max-height: 120px; overflow: auto; font-size: 12px; }
+.room .room-tasks .exec-approval-actions { justify-content: flex-start; }
+/* The conversation never shrinks below a usable height; if the top of the page grows, the page scrolls instead. */
+@media (min-width: 801px) { .exec-room .exec-grid { min-height: 440px; } }

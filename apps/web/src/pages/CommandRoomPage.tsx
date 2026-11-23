@@ -681,7 +681,6 @@ export function CommandRoomPage() {
             </aside>
           </div>
         ) : null}
-        <WorkerApprovals key={viewer.userId} />
       </> : null}
       <div className="exec-grid">
         <section className="panel exec-pane room-chat" aria-label={t('共享协作记录')}>
@@ -786,6 +785,8 @@ export function CommandRoomPage() {
           </form>
         </section>
         <aside className="panel exec-pane room-tasks" aria-label={t('任务列表')}>
+          {/* An agent waiting for a yes or no is work waiting on you: it sits with the tasks, not above the conversation. */}
+          {viewer?.owner ? <WorkerApprovals key={viewer.userId} /> : null}
           {teamOpen ? (
             <section id="room-team" className="room-team" aria-label={t('团队')}>
               <div className="room-section-head">
