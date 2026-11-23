@@ -15,7 +15,7 @@ import { Icon } from '../components/Icon';
  */
 const ROOM_ID = 'room-1';
 const POLL_MS = 4000;
-const LINK_INSTALLER_URL = 'https://github.com/robinAKL/superagent/releases/latest/download/SuperAgentLink-Setup-x64.exe';
+const LINK_INSTALLER_URL = 'https://github.com/robinAKL/superagent/releases/download/link-latest/SuperAgentLink-Setup-x64.exe';
 
 export type MessageKind = 'message' | 'reply' | 'report' | 'review' | 'cancel' | 'hold' | 'resume' | 'contract';
 
