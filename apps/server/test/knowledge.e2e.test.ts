@@ -31,7 +31,7 @@ d('knowledge UI over real HTTP handlers', () => {
       await page.getByRole('button', { name: '提交资料', exact: true }).click();
       await page.getByText('可搜索', { exact: true }).waitFor();
       const workspace = page.getByRole('navigation', { name: '知识工作区' });
-      await page.getByRole('button', { name: '有依据地查询', exact: true }).click();
+      // UX plan step 4: grounded questions are a search box at the top of the page, not a button to a panel.
       await page.getByLabel('查询企业资料').fill('付款');
       await page.getByRole('button', { name: '查询依据', exact: true }).click();
       await page.locator('.knowledge-evidence blockquote').first().waitFor();
