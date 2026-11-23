@@ -57,7 +57,7 @@
   border-radius: 10px;
   background: var(--color-paper-2);
   color: var(--color-ink);
-  box-shadow: 0 4px 10px #0002;
+  box-shadow: 0 4px 10px var(--color-shadow-soft);
   font: inherit;
   cursor: pointer;
 }
@@ -65,7 +65,7 @@
 .sop-node span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; line-height: 1.3; }
 .sop-node.kind-trigger { --step-ink: var(--color-accent); }
 .sop-node.kind-employee { --step-ink: var(--color-success); }
-.sop-node.kind-tool { --step-ink: #8fbadd; }
+.sop-node.kind-tool { --step-ink: var(--color-type-tool); }
 .sop-node.kind-human_review { --step-ink: var(--color-warning); }
 .sop-node.has-issue { border-color: var(--color-error); }
 .sop-node.selected, .sop-node:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }

@@ -23,7 +23,9 @@ const TEXT = {
     bound: 'Bound', unbound: 'No employee bound', advanced: 'Device permissions', projectUnavailable: 'Project unavailable',
     employeeUnavailable: 'Employee removed', alreadyBound: 'This employee already has a binding. Remove it before choosing another project.',
     bindingError: 'Could not save the binding. Check project availability and device permissions.',
-    bindSaved: 'Employee bound.', bindRemoved: 'Binding removed.',
+    bindSaved: 'Employee bound.',
+    loadingName: 'Loading…',
+    allBound: 'Every digital employee is already bound. To put this computer to work, add people in Team or remove a binding elsewhere.', bindRemoved: 'Binding removed.',
   },
   zh: {
     title: '已连接的电脑',
@@ -45,6 +47,8 @@ const TEXT = {
     employeeUnavailable: '员工已移除', alreadyBound: '这名员工已有绑定。请先移除旧绑定，再选择其他项目。',
     bindingError: '保存绑定失败，请检查项目是否可用及设备权限。',
     bindSaved: '已绑定员工。', bindRemoved: '已移除绑定。',
+    loadingName: '正在读取…',
+    allBound: '所有数字员工都已绑定。要让这台电脑干活，请在「数字员工」里增加人数，或先移除其他电脑上的绑定。',
   },
 } satisfies Dict<string>;
 
@@ -54,7 +58,8 @@ type T = (key: keyof typeof TEXT.en) => string;
 export function WorkerConnectPanel() {
   const t = useT(TEXT);
   const { devices: workers, unavailable, load } = useLinkDevices();
-  const [employees, setEmployees] = useState<EmployeeChoice[]>([]);
+  // null until the list arrives: a binding is never called "employee removed" before we know.
+  const [employees, setEmployees] = useState<EmployeeChoice[] | null>(null);
   const [noticeIsError, setNoticeIsError] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -65,8 +70,8 @@ export function WorkerConnectPanel() {
   useEffect(() => {
     const controller = new AbortController();
     void api<EmployeeChoice[]>('/api/v1/employees/', { signal: controller.signal }).then(response => {
-      if (response.status === 200 && !controller.signal.aborted) setEmployees(response.body);
-    }).catch(() => {});
+      if (!controller.signal.aborted) setEmployees(response.status === 200 && Array.isArray(response.body) ? response.body : []);
+    }).catch(() => { if (!controller.signal.aborted) setEmployees([]); });
     return () => controller.abort();
   }, []);
   useEffect(() => {
@@ -141,7 +146,7 @@ export function WorkerConnectPanel() {
           </div>
           {w.capabilities.agents?.length ? <p className="helper">{t('agents')} · {w.capabilities.agents.map(agentLabel).join(' · ')}</p> : null}
           {w.status !== 'revoked' ? <>
-            <DeviceBindings key={requestedEmployee} worker={w} employees={employees} boundEmployees={boundEmployees}
+            <DeviceBindings key={requestedEmployee} worker={w} employees={employees ?? []} employeesLoaded={employees !== null} boundEmployees={boundEmployees}
               defaultEmployee={requestedEmployee} busy={busy} t={t} onSave={saveBinding} />
             <details className="link-device-permissions">
               <summary>{t('advanced')}</summary>
@@ -155,8 +160,8 @@ export function WorkerConnectPanel() {
   );
 }
 
-function DeviceBindings({ worker, employees, boundEmployees, defaultEmployee, busy, t, onSave }: {
-  worker: LinkDevice; employees: EmployeeChoice[]; boundEmployees: Set<string>; defaultEmployee: string; busy: boolean; t: T;
+function DeviceBindings({ worker, employees, employeesLoaded, boundEmployees, defaultEmployee, busy, t, onSave }: {
+  worker: LinkDevice; employees: EmployeeChoice[]; employeesLoaded: boolean; boundEmployees: Set<string>; defaultEmployee: string; busy: boolean; t: T;
   onSave: (id: string, binding: LinkBinding, remove?: boolean) => Promise<void>;
 }) {
   const [chosenProject, setProject] = useState('');
@@ -173,12 +178,13 @@ function DeviceBindings({ worker, employees, boundEmployees, defaultEmployee, bu
       const project = projects.find(project => project.id === binding.projectId);
       const employee = employees.find(employee => employee.id === binding.employeeId);
       return <li key={JSON.stringify([binding.employeeId, binding.projectId])}>
-        <div><strong>{employee?.name ?? t('employeeUnavailable')}</strong> · {project?.name ?? t('projectUnavailable')}
+        <div><strong>{employee?.name ?? (employeesLoaded ? t('employeeUnavailable') : t('loadingName'))}</strong> · {project?.name ?? t('projectUnavailable')}
           {project ? ` · ${agentLabel(project.agent)}` : ''}<small>{t('bound')}</small></div>
         <button className="btn" type="button" disabled={busy} onClick={() => void onSave(worker.id, binding, true)}>{t('unbind')}</button>
       </li>;
     })}</ul> : <p className="helper">{t('unbound')}</p>}
-    {projects.length ? <form className="link-device-form" onSubmit={event => {
+    {projects.length && employeesLoaded && choices.length === 0 ? <p className="helper">{t('allBound')}</p> : null}
+    {projects.length && !(employeesLoaded && choices.length === 0) ? <form className="link-device-form" onSubmit={event => {
       event.preventDefault();
       if (projectId && employeeId) void onSave(worker.id, { projectId, employeeId });
     }}>

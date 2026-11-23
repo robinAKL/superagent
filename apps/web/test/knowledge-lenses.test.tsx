@@ -104,7 +104,8 @@ describe('employee wall', () => {
     expect(html).toContain('href="#employees?manage=emp-org-rec1"');
     expect(html).toContain('未连接');
     expect(html).toContain('在线');
-    expect(html).toContain('dev-owner');
+    // The owner moved to the manage drawer (UX plan: the team table is employee, status, computer, tools).
+    expect(html).not.toContain('dev-owner');
     expect(render('en', <EmployeeWall hasDraft={false} employees={[]} />)).toContain('href="#knowledge?view=analysis"');
   });
 });

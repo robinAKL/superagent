@@ -1,7 +1,9 @@
+/* Hallmark · checked: 2026-11-23 · genre: modern-minimal (inferred) · scope: app · tokens: styles/tokens.css
+ * built: the project · redesign: full (app screens, stepwise) · v2.0.0 */
 /* Entity-type palette: one hue per type, used by lanes, nodes, chips and list headings alike. */
 .onto, .onto-empty {
-  --onto-tool: #8fb4d9; --onto-employee: #c9a2e0; --onto-process: #7fc6b4;
-  --onto-object: #d6b574; --onto-rule: #e39a8a; --onto-source: #9aa3ad;
+  --onto-tool: var(--color-type-tool); --onto-employee: var(--color-type-employee); --onto-process: var(--color-type-process);
+  --onto-object: var(--color-type-object); --onto-rule: var(--color-type-rule); --onto-source: var(--color-type-source);
 }
 .onto-type-tool { --type: var(--onto-tool); }
 .onto-type-employee { --type: var(--onto-employee); }
@@ -28,7 +30,7 @@
 .onto-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .onto-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 10px; border: 1px solid var(--color-soft-rule);
   border-radius: 999px; background: var(--color-paper-2); color: var(--color-ink); font: inherit; font-size: 12.5px; cursor: pointer; max-width: 100%; text-align: start; }
-.onto-chip i, .onto-group h5 i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--type, var(--color-subtle)); }
+.onto-chip i, .onto-group h5 .onto-swatch { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--type, var(--color-subtle)); }
 .onto-chip span { color: var(--color-muted); font-size: 11.5px; }
 .onto-chip:hover { border-color: color-mix(in srgb, var(--type) 60%, transparent); }
 .onto-chip[aria-pressed="false"] { opacity: .45; }

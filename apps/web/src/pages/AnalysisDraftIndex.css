@@ -1,3 +1,5 @@
+/* Hallmark · checked: 2026-11-23 · genre: modern-minimal (inferred) · scope: app · tokens: styles/tokens.css
+ * built: the project · redesign: full (app screens, stepwise) · v2.0.0 */
 .analysis-draft-index { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); grid-template-rows: auto auto; column-gap: var(--space-md); row-gap: var(--space-sm); align-items: stretch; }
 .analysis-draft-filter { grid-column: 1; max-width: 280px; }
 .analysis-draft-filter select { width: 100%; }

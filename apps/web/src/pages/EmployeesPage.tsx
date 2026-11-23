@@ -36,7 +36,7 @@ export const TEXT = {
     title: 'Digital employees',
     subtitle: 'Review the organization draft from your company knowledge: who does what, with which tools, in which workflows.',
     wallSubtitle: 'Make duties, owners and tools clear, then hand work to the right employee.',
-    runWorkflow: 'Run a workflow', teamUpdated: 'Team updated to {n} employees.',
+    runWorkflow: 'Run a workflow', resizeTeam: 'Change team size (now {n})', teamUpdated: 'Team updated to {n} employees.',
     backToWall: 'All employees',
     loading: 'Loading the organization draft…',
     loadFailed: 'Could not load the organization draft.',
@@ -60,7 +60,7 @@ export const TEXT = {
     usesTools: 'Tools', joinsSops: 'Workflows', none: 'None yet',
     evidence: 'Sources ({n})',
     edit: 'Edit', save: 'Save', cancel: 'Cancel', remove: 'Delete', merge: 'Merge into…',
-    mergeInto: 'Merge “{name}” into', mergeConfirm: 'Merge',
+    mergeInto: 'Merge “{name}” into', mergeChoose: 'Choose a role…', mergeConfirm: 'Merge',
     mergeHint: 'The kept role takes over its tools and workflows.',
     removeConfirm: 'Delete “{name}”?', removeImpact: 'It is removed from: {list}. Future analyses will not add it back.', removeNoImpact: 'Future analyses will not add it back.',
     removeTool: 'Delete “{name}”? Roles that use it: {list}.',
@@ -95,7 +95,7 @@ export const TEXT = {
     title: '数字员工',
     subtitle: '审阅从企业知识生成的组织草案：谁负责什么、用哪些工具、参与哪些流程。',
     wallSubtitle: '明确职责、负责人和可用工具，再把工作交给合适的员工。',
-    runWorkflow: '运行流程', teamUpdated: '正式团队现有 {n} 名员工。',
+    runWorkflow: '运行流程', resizeTeam: '调整团队人数（当前 {n} 人）', teamUpdated: '正式团队现有 {n} 名员工。',
     backToWall: '全部员工',
     loading: '正在加载组织草案…',
     loadFailed: '组织草案加载失败。',
@@ -119,7 +119,7 @@ export const TEXT = {
     usesTools: '工具', joinsSops: '流程', none: '暂无',
     evidence: '依据（{n}）',
     edit: '编辑', save: '保存', cancel: '取消', remove: '删除', merge: '合并到…',
-    mergeInto: '把「{name}」合并到', mergeConfirm: '合并',
+    mergeInto: '把「{name}」合并到', mergeChoose: '选择岗位…', mergeConfirm: '合并',
     mergeHint: '保留的岗位会接手它的工具和流程。',
     removeConfirm: '删除「{name}」？', removeImpact: '会从这些地方移除：{list}。之后重新分析也不会再加回。', removeNoImpact: '之后重新分析也不会再加回。',
     removeTool: '删除「{name}」？正在使用它的岗位：{list}。',
@@ -243,7 +243,7 @@ export function RoleCard({ role, org, busy, t, onSave, onMerge, onRemove }: {
       {mode === 'merge' ? <div className="org-inline" role="group" aria-label={t('mergeInto', { name: role.name })}>
         <label className="field"><span>{t('mergeInto', { name: role.name })}</span>
           <select value={into} onChange={e => setInto(e.target.value)}>
-            <option value="" disabled>—</option>
+            <option value="" disabled>{t('mergeChoose')}</option>
             {others.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         </label>
@@ -392,15 +392,19 @@ export function EmployeesPage() {
         <h1>{t('title')}</h1>
         <p>{t('wallSubtitle')}</p>
       </div>
-      <div className="page-head-actions"><a className="btn primary" href="#room?workflows=1">{t('runWorkflow')}</a></div>
+      <div className="page-head-actions"><a className="btn" href="#room?workflows=1">{t('runWorkflow')}</a></div>
     </header>
     {loadError ? <div className="org-alert" role="alert">{loadError}</div> : null}
     {error ? <div className="org-alert" role="alert">{error}</div> : null}
     {notice ? <div className="org-notice" role="status">{notice}</div> : null}
-    {org?.canConfirm && !org.blocked ? <div className="panel team-size-panel">
-      <TeamSizePlanner key={`${team.length}:${org.teamPlan?.id ?? ''}`} current={team.length}
-        initial={org.teamPlan?.stale ? undefined : org.teamPlan?.target} busy={busy} planning={planning} onPlan={count => void planTeam(count)} />
-    </div> : null}
+    {/* Team size is changed now and then, not every visit: a disclosure, open only while a plan is pending. */}
+    {org?.canConfirm && !org.blocked ? <details className="disclosure team-size-disclosure" open={!!org.teamPlan && !org.teamPlan.stale || undefined}>
+      <summary>{t('resizeTeam', { n: team.length })}</summary>
+      <div className="panel team-size-panel">
+        <TeamSizePlanner key={`${team.length}:${org.teamPlan?.id ?? ''}`} current={team.length}
+          initial={org.teamPlan?.stale ? undefined : org.teamPlan?.target} busy={busy} planning={planning} onPlan={count => void planTeam(count)} />
+      </div>
+    </details> : null}
     <EmployeeWall employees={team} hasDraft={!!org && org.blocked !== 'no_employees'}
       onManage={employee => { window.location.hash = `employees?manage=${encodeURIComponent(employee.id)}`; }} />
     <EmployeeFeedback employees={team} />

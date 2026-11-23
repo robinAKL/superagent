@@ -471,6 +471,8 @@ test('one team size submission leaves one employee and that employee can be boun
   await page.goto('/#employees');
   await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(12);
 
+  // Team size lives in a disclosure on the team page (UX plan step 3): open it the way a person would.
+  await page.getByText(/^调整团队人数/).click();
   await page.locator('.team-size-stepper input').fill('1');
   await page.getByRole('button', { name: '调整为 1 人', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: '正式团队现有 1 名员工' })).toBeVisible();
@@ -502,7 +504,7 @@ test('one team size submission leaves one employee and that employee can be boun
     await card.getByRole('button', { name: '绑定员工', exact: true }).click();
     await expect(card.getByRole('button', { name: '移除绑定' })).toBeVisible();
     await page.goto('/#employees');
-    await expect(page.getByText('已绑定 · 可接任务')).toBeVisible();
+    await expect(page.locator(`[data-employee="${team[0]!.id}"]`).getByText('可接任务')).toBeVisible();
 
     const posted = await response<{ task: { id: string; projectId: string } }>(page.request.post('/api/v1/room/messages', { data: {
       roomId: 'room-1', clientMessageId: 'resize-and-bind-e2e', body: `@${team[0]!.name} Summarize the orders in this folder.`,
