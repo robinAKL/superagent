@@ -6,7 +6,9 @@ import { resetRuntime, runtimeState } from '../runtime/index.js';
 import { PAIR_TTL_MS } from './pairing.js';
 import { registerWorker } from './registry.js';
 import { resetWorkers, workerLinkModule, workerPairModule, workersModule, workersState } from './index.js';
-import { createCommandRoom, roomState } from '../room/index.js';
+import { createCommandRoom, registryEmployees, roomState } from '../room/index.js';
+import { EmployeeService } from '../employees/employees.js';
+import { employeesState } from '../employees/index.js';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
@@ -254,4 +256,25 @@ it('binding a project dispatches work that was asked for before the employee had
   // Binding again (or another project) does not send the same task twice.
   await a.inject({ method: 'POST', url: `/api/v1/workers/${worker.id}/room-binding`, payload: { employeeId: 'emp-ops', projectId: 'proj-1' } });
   expect((await poll()).json().events.filter((e: { seq: number }) => e.seq > events[0].seq)).toEqual([]);
+});
+
+it('a heartbeat from a bound computer shows its employee as reachable in the command room', async () => {
+  const a = await app();
+  const previous = employeesState.current;
+  employeesState.current = new EmployeeService();
+  try {
+    employeesState.current.ensure({ id: 'emp-ops', name: 'Ops', duty: 'x', prompt: 'p', owner: 'admin-1', source: 'recommended' });
+    expect(registryEmployees()[0]?.status).toBe('unconnected');
+    const { token } = await registerWorker(workersState.registry, {
+      tenantId: TENANT, name: 'Ops-PC', kind: 'link', createdBy: 'admin-1',
+      capabilities: { roomAssignments: [{ employeeId: 'emp-ops', projectId: 'proj-1' }] },
+    }, clock);
+    const beat = await a.inject({ method: 'POST', url: '/api/v1/worker-link/heartbeat', headers: { authorization: 'Bearer ' + token }, payload: {} });
+    expect(beat.statusCode).toBe(200);
+    expect(registryEmployees()[0]?.status).toBe('active');
+    clock += 61_000; // no heartbeat for longer than the offline window
+    expect(registryEmployees()[0]?.status).toBe('unconnected');
+  } finally {
+    employeesState.current = previous;
+  }
 });

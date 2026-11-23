@@ -6,6 +6,7 @@ import { roomMessage, roomText } from './command-room-copy';
 import { CommandWorkflowPanel } from './CommandWorkflowPanel';
 import { WorkerApprovals } from './WorkerApprovals';
 import { Icon } from '../components/Icon';
+import { RichText } from '../components/RichText';
 
 /**
  * Command room (PRD §3.7), layout and copy from the accepted v12 prototype. Everything on the page comes from the
@@ -26,6 +27,32 @@ export interface ApiMessage {
   body: string;
   taskIds: string[];
   kind?: MessageKind;
+  clientMessageId?: string;
+}
+
+/** Sent by the employee's Link computer (progress or report), not typed by a person. */
+export function fromComputer(message: Pick<ApiMessage, 'clientMessageId'>): boolean {
+  return message.clientMessageId?.startsWith('worker-') ?? false;
+}
+
+/** Link's fixed status lines (apps/link), shown in the reader's language. */
+const LINK_TEXT_ZH: Record<string, string> = {
+  'Link received the task.': '电脑已领取任务。',
+  'Agent started.': '已开始执行。',
+  'Agent is processing the task.': '正在处理任务…',
+  'Agent returned a response.': '已得到结果，正在整理。',
+  'claude-code requires sign-in.': '电脑上的 Claude Code 需要重新登录，已在那台电脑上打开登录。登录后会自动重试。',
+  'codex requires sign-in.': '电脑上的 Codex 需要重新登录，已在那台电脑上打开登录。登录后会自动重试。',
+  'Project directory or local agent is unavailable.': '电脑上找不到项目文件夹或本地 Agent。',
+  'Agent CLI could not be started.': '本地 Agent 没能启动。',
+};
+
+export function computerText(body: string, lang: Lang): string {
+  if (lang !== 'zh') return body;
+  const exact = LINK_TEXT_ZH[body.trim()];
+  if (exact) return exact;
+  const failed = /^Agent CLI did not return a completed result\.\s*(.*)$/s.exec(body.trim());
+  return failed ? '本地 Agent 没有给出结果。' + (failed[1] ? ' ' + failed[1] : '') : body;
 }
 
 export interface ApiTask {
@@ -251,13 +278,13 @@ export function messageKindLabel(message: ApiMessage, tasks: readonly ApiTask[],
   if (message.kind === 'hold') return roomText('等待连接', lang);
   if (message.kind === 'resume') return roomText('恢复', lang);
   if (message.kind === 'contract') return roomText('验收契约', lang);
-  if (message.kind === 'reply') return roomText(message.taskIds.length > 0 ? '任务' : '回复', lang);
+  if (message.kind === 'reply') return roomText(fromComputer(message) ? '进度' : message.taskIds.length > 0 ? '任务' : '回复', lang);
   return roomText(tasks.some((task) => task.messageId === message.id) ? '派活' : '消息', lang);
 }
 
 export function actorLabel(message: ApiMessage, viewer: RoomViewer | null, tasks: readonly ApiTask[], employees: readonly RosterEmployee[], lang: Lang = 'zh'): string {
   if (message.authorUserId === 'super-agent') return roomText('超级智能体', lang);
-  if (message.kind === 'report') {
+  if (message.kind === 'report' || fromComputer(message)) {
     const task = tasks.find((item) => message.taskIds.includes(item.id));
     return employeeName(employees, task?.employeeId, lang);
   }
@@ -667,14 +694,19 @@ export function CommandRoomPage() {
                 id={`room-msg-${message.id}`}
                 data-message={message.id}
                 data-kind={message.kind ?? 'message'}
-                data-mine={message.authorUserId === viewerId ? 'yes' : undefined}
+                data-mine={message.authorUserId === viewerId && !fromComputer(message) && message.kind !== 'report' ? 'yes' : undefined}
+                data-computer={fromComputer(message) && message.kind !== 'report' ? 'yes' : undefined}
                 className={`exec-message${focusMessageId === message.id ? ' exec-message-focus' : ''}`}
               >
                 <header>
                   <strong>{actorLabel(message, viewer, tasks, employees, lang)}</strong>
                   <span>{messageKindLabel(message, tasks, lang)}</span>
                 </header>
-                <p>{message.authorUserId === 'super-agent' ? roomMessage(message.body, lang) : message.body}</p>
+                {message.authorUserId === 'super-agent'
+                  ? <p>{roomMessage(message.body, lang)}</p>
+                  : message.kind === 'report' || fromComputer(message)
+                    ? <RichText text={message.kind === 'report' ? message.body : computerText(message.body, lang)} />
+                    : <p>{message.body}</p>}
                 {message.taskIds.filter((id) => tasks.some((task) => task.id === id)).slice(-1).map((id) => (
                   <button type="button" className="exec-link" key={id} data-open-task={id} onClick={() => openTaskDrawer(id)}>{t('查看任务')}</button>
                 ))}
@@ -869,7 +901,7 @@ export function CommandRoomPage() {
                     <ul>
                       {reports.map((report) => (
                         <li key={report.id}>
-                          {report.body}
+                          <RichText text={report.body} />
                           <button type="button" className="exec-link" onClick={() => jumpTo(report.id)}>{t('在对话里看')}</button>
                         </li>
                       ))}

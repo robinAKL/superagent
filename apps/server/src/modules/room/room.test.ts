@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'vitest';
-import { CommandRoom, type EmployeeRef, type Viewer } from './room.js';
+import { CommandRoom, roomHooks, type EmployeeRef, type Viewer } from './room.js';
 
 const employees: EmployeeRef[] = [
   { id: 'emp-sales', name: '销售员工', ownerUserId: 'user-sales', status: 'active' },
@@ -186,4 +186,38 @@ it('a mention followed only by punctuation is not a task', () => {
     const result = service.post({ roomId: 'room-1', tenantId: 't', projectId: 'p1', authorUserId: 'user-owner', body: body!, clientMessageId: id! });
     assert.equal(result.task, null, body);
   }
+});
+
+it("a Link computer's updates move the task: working is in progress, its fixed failure texts say it stopped", () => {
+  const service = room();
+  const { task } = service.post({ roomId: 'room-1', tenantId: 't', projectId: 'p1', authorUserId: 'user-owner', body: '@运营员工 核对库存', clientMessageId: 'c-link' });
+  assert.equal(task?.status, 'waiting');
+  const update = (body: string, id: string) => service.updateFromWorker(task!.id, 't', body, id, false, () => true);
+  update('Link received the task.', 'w1');
+  assert.equal(task!.status, 'running');
+  assert.equal(task!.waitingReason, null);
+  update('Agent CLI did not return a completed result. Rate limit reached', 'w2');
+  assert.equal(task!.status, 'waiting');
+  assert.equal(task!.waitingReason, '执行失败');
+  update('claude-code requires sign-in.', 'w3');
+  assert.equal(task!.waitingReason, '等待本地登录');
+  // Signed in again: Link picks the task up once more.
+  update('Link received the task.', 'w4');
+  assert.equal(task!.status, 'running');
+});
+
+it('a running task is not held as disconnected while its computer may still be online', () => {
+  const service = room();
+  const { task } = service.post({ roomId: 'room-1', tenantId: 't', projectId: 'p1', authorUserId: 'user-owner', body: '@运营员工 核对库存', clientMessageId: 'c-hold' });
+  service.updateFromWorker(task!.id, 't', 'Agent started.', 'w1', false, () => true);
+  assert.equal(task!.status, 'running');
+  roomHooks.linkMayBeOnline = () => true;
+  try {
+    assert.equal(service.holdDisconnected().length, 0);
+    assert.equal(task!.status, 'running');
+  } finally {
+    roomHooks.linkMayBeOnline = () => false;
+  }
+  assert.equal(service.holdDisconnected().length, 1);
+  assert.equal(task!.waitingReason, '等待连接');
 });

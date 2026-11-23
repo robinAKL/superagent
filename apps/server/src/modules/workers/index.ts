@@ -5,6 +5,7 @@ import type { RoomTask } from '../room/room.js';
 import { runtimeState } from '../runtime/index.js';
 import { claimTask, deadLetterTask, heartbeatTask, releaseTask, succeedTask, type Queryable } from '../runtime/pg-queue.js';
 import { PgWorkerRegistry, type WorkersDb } from './pg-registry.js';
+import { markLinkPresence, resetLinkPresence } from './presence.js';
 import { tenantKey, workerKey, workSignal } from './signal.js';
 import { MemoryApprovalStore, PgApprovalStore, registerApprovalAdminRoutes, registerApprovalLinkRoutes, type ApprovalDeps, type ApprovalStore } from './approvals.js';
 import {
@@ -91,6 +92,7 @@ export function resetWorkers(): void {
   workersState.pollStepMs = POLL_STEP_MS;
   workersState.notifiedScanMs = NOTIFIED_SCAN_MS;
   workSignal.listening = false;
+  resetLinkPresence(Date.now());
 }
 
 /** Approval routes read state through these, so tests can swap the clock and store like the rest of the module. */
@@ -284,7 +286,11 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     if (!outcome.ok) return reply.code(outcome.error === 'not_found' ? 404 : 409).send({ error: outcome.error });
     const updated = outcome.worker;
     // Work asked for before this employee had a computer would otherwise wait forever: dispatch happens on post.
-    if (remove !== true) await dispatchWaitingRoomTasks(user.tenantId, employeeId);
+    if (remove !== true) {
+      // A computer that is online right now makes the employee reachable at once, not at its next heartbeat.
+      if (workerStatus(updated, workersState.now()) !== 'offline') markLinkPresence([employeeId], workersState.now());
+      await dispatchWaitingRoomTasks(user.tenantId, employeeId);
+    }
     return { worker: toView(updated, workersState.now()) };
   });
 
@@ -400,6 +406,8 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     }
     if (!(await workersState.registry.heartbeat(worker.id, now, input))) return reply.code(401).send({ error: 'bad_worker_token' });
     const fresh = await workersState.registry.get(worker.tenantId, worker.id);
+    // The employees bound to this computer are reachable now (shown as online in the command room).
+    if (fresh && fresh.revokedAt === null) markLinkPresence((fresh.capabilities.roomAssignments ?? []).map(binding => binding.employeeId), now);
     return { status: fresh ? workerStatus(fresh, now) : 'revoked', at: now, capabilities: fresh?.capabilities ?? worker.capabilities };
   });
 
