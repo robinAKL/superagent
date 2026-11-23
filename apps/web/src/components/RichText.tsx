@@ -33,6 +33,20 @@ function blocks(text: string): ReactNode[] {
       out.push(<pre key={out.length}><code>{code.join('\n')}</code></pre>);
       continue;
     }
+    // A table: a row of cells, then a |---| separator row, then body rows.
+    if (/^\s*\|.*\|\s*$/.test(line) && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1] ?? '')) {
+      flushParagraph(); flushList();
+      const cells = (row: string) => row.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim());
+      const head = cells(line);
+      const body: string[][] = [];
+      for (i += 2; i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i]!); i++) body.push(cells(lines[i]!));
+      i--;
+      out.push(<div className="rich-table" key={out.length}><table>
+        <thead><tr>{head.map((cell, c) => <th key={c}>{inline(cell)}</th>)}</tr></thead>
+        <tbody>{body.map((row, r) => <tr key={r}>{row.map((cell, c) => <td key={c}>{inline(cell)}</td>)}</tr>)}</tbody>
+      </table></div>);
+      continue;
+    }
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
       flushParagraph(); flushList();

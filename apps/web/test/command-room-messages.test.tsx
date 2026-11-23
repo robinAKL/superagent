@@ -45,6 +45,15 @@ describe('RichText', () => {
     expect(html).not.toContain('##');
   });
 
+  it('renders a Markdown table', () => {
+    const html = renderToStaticMarkup(<RichText text={'能力如下：\n\n| 类别 | 内容 |\n|---|---|\n| 记忆 | 持久化记忆 |\n| 技能 | **代码审查** |\n\n结束'} />);
+    expect(html).toContain('<thead><tr><th>类别</th><th>内容</th></tr></thead>');
+    expect(html).toContain('<td>记忆</td><td>持久化记忆</td>');
+    expect(html).toContain('<td><strong>代码审查</strong></td>');
+    expect(html).not.toContain('|---|');
+    expect(html).toContain('<p>结束</p>');
+  });
+
   it('never turns text into markup', () => {
     const html = renderToStaticMarkup(<RichText text={'<img src=x onerror=alert(1)> **<b>x</b>**'} />);
     expect(html).not.toContain('<img');

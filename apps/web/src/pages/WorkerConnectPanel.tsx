@@ -162,6 +162,12 @@ export function WorkerConnectPanel() {
   );
 }
 
+/** One computer's bindings with the panel's own copy; exported for tests. */
+export function DeviceBindingsForTest(props: Omit<Parameters<typeof DeviceBindings>[0], 't'>) {
+  const t = useT(TEXT);
+  return <DeviceBindings {...props} t={t} />;
+}
+
 function DeviceBindings({ worker, employees, employeesLoaded, boundEmployees, defaultEmployee, busy, t, onSave }: {
   worker: LinkDevice; employees: EmployeeChoice[]; employeesLoaded: boolean; boundEmployees: Set<string>; defaultEmployee: string; busy: boolean; t: T;
   onSave: (id: string, binding: LinkBinding, remove?: boolean) => Promise<void>;
@@ -199,7 +205,7 @@ function DeviceBindings({ worker, employees, employeesLoaded, boundEmployees, de
         {choices.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
       </select></label>
       <button className="btn primary" disabled={busy || !employeeId || !projectId}>{t('bind')}</button>
-    </form> : <p className="helper">{t('noProjects')}</p>}
+    </form> : projects.length ? null : <p className="helper">{t('noProjects')}</p>}
   </>;
 }
 
