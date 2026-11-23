@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './execution.css';
 import { authHeaders } from '../api';
 import { useLang, type Lang } from '../i18n';
@@ -372,6 +372,13 @@ export function CommandRoomPage() {
   const scroller = useRef<HTMLDivElement | null>(null);
   const stick = useRef(true);
   const input = useRef<HTMLTextAreaElement | null>(null);
+  // The composer starts at two lines and grows with the draft up to a third of the screen.
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight / 3))}px`;
+  });
   const caretAfterMention = useRef<string | null>(null);
 
   const viewer = roster?.viewer ?? null;
@@ -637,7 +644,6 @@ export function CommandRoomPage() {
   const original = openTask?.followupTo ? tasks.find((task) => task.id === openTask.followupTo) ?? null : null;
   const reports = openTask ? taskReports(openTask, messages) : [];
   const may = openTask ? taskActions(openTask, viewer) : null;
-  const employeeView = viewer !== null && !viewer.owner;
   const [lang] = useLang();
   const t = (copy: string) => roomText(copy, lang);
 
@@ -654,38 +660,32 @@ export function CommandRoomPage() {
 
   return (
     <section className="exec-room room" aria-label={t('Agent Room 指挥室')} data-view={viewer ? (viewer.owner ? 'owner' : 'employee') : 'loading'}>
+      {/* One line of header: the conversation gets the height. Workflows open as a sheet over the page. */}
       <div className="page-head room-head">
         <h1>{t('指挥室')}</h1>
-        <p>
-          {employeeView
-            ? t('跟进自己负责的数字员工：交给它的任务、它的回报和追问都在这里。')
-            : t('和超级智能体一起，把工作推进到交付。')}
-        </p>
         <div className="page-head-actions room-head-actions">
-          {/* Two actions at most (UX plan step 5): the team at a glance, and starting a workflow. Link download,
-              the summary button and super agent setup moved to where they are needed. */}
           <button type="button" className="btn quiet" aria-expanded={teamOpen} aria-controls="room-team" onClick={() => setTeamOpen((open) => !open)}>
             <Icon name="team" /><span>{t('团队')}</span>
           </button>
-          {viewer?.owner ? <button type="button" className="btn" aria-expanded={flowsOpen} onClick={() => setFlowsOpen((open) => !open)}><Icon name="flow" /><span>{t('业务流程')}</span></button> : null}
+          {viewer?.owner ? <button type="button" className="btn" aria-expanded={flowsOpen} aria-controls="room-flows" onClick={() => setFlowsOpen((open) => !open)}><Icon name="flow" /><span>{t('业务流程')}</span></button> : null}
         </div>
       </div>
       {viewer?.owner ? <>
         <GettingStarted />
-        {flowsOpen ? <CommandWorkflowPanel defaultOpen /> : null}
+        {flowsOpen ? (
+          <div className="room-sheet-backdrop" onClick={(event) => { if (event.target === event.currentTarget) setFlowsOpen(false); }}>
+            <aside id="room-flows" className="room-sheet" role="dialog" aria-modal="true" aria-label={t('业务流程')}
+              onKeyDown={(event) => { if (event.key === 'Escape') setFlowsOpen(false); }}>
+              <button type="button" autoFocus className="room-icon-btn room-sheet-close" aria-label={t('关闭')} onClick={() => setFlowsOpen(false)}><Icon name="close" size={16} /></button>
+              <CommandWorkflowPanel defaultOpen />
+            </aside>
+          </div>
+        ) : null}
         <WorkerApprovals key={viewer.userId} />
       </> : null}
       <div className="exec-grid">
         <section className="panel exec-pane room-chat" aria-label={t('共享协作记录')}>
-          <header className="room-chat-head">
-            <span className="room-avatar" aria-hidden="true"><Icon name="brain" size={20} /></span>
-            <div className="room-chat-id">
-              <h2 className="sr-only">{t('共享协作记录')}</h2>
-              <strong>{t('超级智能体')}</strong>
-              <span>{t('统一协调，按企业规则工作')}</span>
-            </div>
-            <span className="room-chip">{t('展示任务理由与结果摘要，不展示隐藏思维链')}</span>
-          </header>
+          <h2 className="sr-only">{t('共享协作记录')}</h2>
           <div
             className="exec-scroll exec-stream"
             ref={scroller}
@@ -807,7 +807,6 @@ export function CommandRoomPage() {
           ) : null}
           <div className="exec-pane-head room-tasks-head">
             <h2>{t('任务')} <span className="room-count">{tasks.length}</span></h2>
-            <span>{t('进展、待办与交付，都在这里。')}</span>
           </div>
           <div className="room-tabs" role="tablist" aria-label={t('任务')}>
             {(['open', 'review', 'all'] as const).map((tab) => (

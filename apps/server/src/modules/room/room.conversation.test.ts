@@ -45,7 +45,7 @@ it('a new room has no tasks, and small talk, questions and discussion only get a
   expect(say(service, owner, '你好').reply?.body).toContain('你好');
   expect(say(service, owner, '现在有哪些数字员工在线？').reply?.body).toBe('当前有 2 名数字员工在线：销售员工、财务员工。');
   expect(say(service, sales, '有哪些员工在线').reply?.body).toBe('当前有 1 名数字员工在线：销售员工。'); // only their own
-  expect(say(service, owner, '我们希望把售后做得更好').reply?.body).toContain('最终要得到什么结果');
+  expect(say(service, owner, '我们希望把售后做得更好').reply?.body).toContain('我还没读懂要交给谁');
   expect(say(service, owner, '@销售员工').reply?.body).toContain('还不是明确的工作请求');
   expect(service.listTasks(owner)).toEqual([]);
 });

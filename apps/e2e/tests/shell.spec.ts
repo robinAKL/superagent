@@ -20,17 +20,23 @@ test('owner navigation has 5 entries in 2 groups in the top bar, routed by hash 
 
 const PAGES = ['room', 'work', 'knowledge', 'employees', 'tools', 'brain', 'settings'];
 
-test('every page has the same head: title, subtitle under it, actions top-right (prototype v12)', async ({ page, isMobile }) => {
+test('every page has the same head: title, subtitle under it (not the room), actions top-right', async ({ page, isMobile }) => {
   test.skip(isMobile, 'desktop rule; phones stack the actions under the title');
   for (const hash of PAGES) {
     await page.goto(`/#${hash}`);
     const head = page.locator('main .page-head').first();
     await expect(head, `#${hash}`).toBeVisible();
     const h1 = await head.locator('h1').boundingBox();
-    const sub = await head.locator('p').first().boundingBox();
-    expect(h1 && sub, `#${hash}`).toBeTruthy();
-    expect(Math.abs(sub!.x - h1!.x), `#${hash} subtitle aligned under the title`).toBeLessThanOrEqual(1);
-    expect(sub!.y, `#${hash} subtitle below the title`).toBeGreaterThanOrEqual(h1!.y + h1!.height - 1);
+    expect(h1, `#${hash}`).toBeTruthy();
+    if (hash === 'room') {
+      // The command room keeps its head to one line so the conversation gets the height: no subtitle.
+      await expect(head.locator('p')).toHaveCount(0);
+    } else {
+      const sub = await head.locator('p').first().boundingBox();
+      expect(sub, `#${hash}`).toBeTruthy();
+      expect(Math.abs(sub!.x - h1!.x), `#${hash} subtitle aligned under the title`).toBeLessThanOrEqual(1);
+      expect(sub!.y, `#${hash} subtitle below the title`).toBeGreaterThanOrEqual(h1!.y + h1!.height - 1);
+    }
     expect(await head.locator('h1').evaluate(el => getComputedStyle(el).fontSize), `#${hash}`).toBe('28px');
     const actions = head.locator('.page-head-actions');
     if (await actions.count()) {

@@ -163,7 +163,7 @@
 .room-composer { margin: 0; padding: 0 var(--space-lg) var(--space-md); position: relative; }
 .room-composer-box { border: 1px solid var(--color-rule); border-radius: 14px; background: var(--color-paper); padding: var(--space-sm) var(--space-sm) var(--space-xs) var(--space-md); position: relative; }
 .room-composer-box:focus-within { border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-rule)); }
-.room .room-composer textarea { border: 0; background: transparent; padding: var(--space-2xs) 0; min-height: 112px; resize: vertical; outline: none; font: inherit; font-size: 15px; }
+.room .room-composer textarea { border: 0; background: transparent; padding: var(--space-2xs) 0; min-height: 52px; resize: none; overflow-y: auto; outline: none; font: inherit; font-size: 15px; }
 .room-composer-bar { justify-content: space-between; }
 .room-composer-bar > span { flex: 1; font-size: 12.5px; color: var(--color-subtle); }
 .room-icon-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; min-height: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 8px;
@@ -281,3 +281,17 @@
 .rich-text table { border-collapse: collapse; font-size: 13px; }
 .rich-text th, .rich-text td { text-align: left; padding: var(--space-2xs) var(--space-sm) var(--space-2xs) 0; border-bottom: 1px solid var(--color-soft-rule); vertical-align: top; }
 .rich-text th { color: var(--color-subtle); font-weight: 600; white-space: nowrap; }
+
+/* The room head is one line: title left, two actions right. */
+.room .room-head { flex-wrap: nowrap; align-items: center; }
+.room .room-head h1 { margin: 0; }
+.room .room-head-actions { margin-left: auto; }
+/* Workflows open as a sheet over the page, so the conversation keeps its height. */
+.room-sheet-backdrop { position: fixed; inset: 0; z-index: 40; background: var(--color-backdrop); display: flex; justify-content: flex-end; }
+.room-sheet { position: relative; width: min(640px, 100vw); height: 100%; overflow-y: auto; background: var(--color-paper-2);
+  border-left: 1px solid var(--color-rule); box-shadow: -12px 0 32px var(--color-shadow); padding: var(--space-lg); }
+.room-sheet .command-workflows { border: 0; background: transparent; padding: 0; }
+.room-sheet .command-workflows > summary { list-style: none; font-size: var(--text-section); font-weight: 600; padding-right: 48px; pointer-events: none; }
+.room-sheet .command-workflows > summary::-webkit-details-marker { display: none; }
+.room-sheet-close { position: absolute; top: var(--space-md); right: var(--space-md); }
+@media (max-width: 800px) { .room-sheet { padding: var(--space-md); } }

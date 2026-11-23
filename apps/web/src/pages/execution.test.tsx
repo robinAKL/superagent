@@ -23,12 +23,11 @@ const OWNER = { userId: 'user-owner', roles: ['owner'], owner: true };
 const SALES = { userId: 'user-sales', roles: ['employee'], owner: false };
 
 describe('execution pages reuse the v12 copy', () => {
-  it('keeps the command room title and subtitle on one head, and shows no invented conversation or task', () => {
+  it('keeps the command room head to one line, and shows no invented conversation or task', () => {
     const html = renderToStaticMarkup(<LangProvider initial="zh"><CommandRoomPage /></LangProvider>);
     expect(html).toContain('<h1>指挥室</h1>');
-    expect(html).toContain('和超级智能体一起，把工作推进到交付。');
+    expect(html).not.toContain('和超级智能体一起'); // no subtitle: the conversation gets the height
     expect(html).toContain('共享协作记录');
-    expect(html).toContain('不展示隐藏思维链');
     expect(html).toContain('Enter 发送，Shift+Enter 换行');
     expect(html).toContain('还没有待处理任务');
     expect(html).toContain('当前没有由对话产生的任务。');
