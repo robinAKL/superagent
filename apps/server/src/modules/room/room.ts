@@ -111,7 +111,25 @@ export interface PostInput {
 const OPEN: ReadonlySet<TaskStatus> = new Set<TaskStatus>(['assigned', 'running', 'waiting']);
 const COMPLETED: ReadonlySet<TaskStatus> = new Set<TaskStatus>(['completed', 'reviewed']);
 const WAITING_CONNECTION = '等待连接';
+const WAITING_FAILED = '执行失败';
+const WAITING_SIGN_IN = '等待本地登录';
 const ACTIVE = (employee: EmployeeRef | undefined) => employee?.status === 'active';
+
+/** Set by the running app: a bound Link computer may still be working for this employee (see workers/presence). */
+export const roomHooks: { linkMayBeOnline: (employeeId: string) => boolean } = { linkMayBeOnline: () => false };
+
+/**
+ * Link reports a task that stopped without a result with fixed texts (apps/link). They move the task out of
+ * "running" so the room shows it failed or is waiting for the computer's sign-in, instead of "in progress".
+ */
+export function workerUpdateState(body: string): 'progress' | 'failed' | 'needs_sign_in' {
+  const text = body.trim();
+  if (/^(codex|claude-code) requires sign-in\.$/.test(text)) return 'needs_sign_in';
+  if (text.startsWith('Agent CLI did not return a completed result.') || text === 'Agent CLI could not be started.'
+    || text === 'Project directory or local agent is unavailable.' || text === 'Codex App Server could not be started.'
+    || text === 'Codex App Server disconnected.' || text === 'Codex App Server ended without a final response.') return 'failed';
+  return 'progress';
+}
 
 function isOwner(viewer: Pick<Viewer, 'roles'>): boolean {
   return viewer.roles.includes('owner') || viewer.roles.includes('admin');
@@ -341,6 +359,10 @@ export class CommandRoom {
     const previous = this.byClientId.get(key);
     if (previous) return previous;
     if (!OPEN.has(task.status)) throw new Error('task_closed');
+    // The computer is working on it (again): in progress. Its fixed failure texts say it stopped.
+    const state = workerUpdateState(body);
+    task.status = state === 'progress' ? 'running' : 'waiting';
+    task.waitingReason = state === 'progress' ? null : state === 'failed' ? WAITING_FAILED : WAITING_SIGN_IN;
     return this.push({
       roomId: task.roomId,
       tenantId,
@@ -535,6 +557,7 @@ export class CommandRoom {
       if (task.status !== 'assigned' && task.status !== 'running') continue;
       const employee = employees.find((item) => item.id === task.employeeId);
       if (ACTIVE(employee)) continue;
+      if (employee && employee.status !== 'paused' && roomHooks.linkMayBeOnline(employee.id)) continue;
       task.status = 'waiting';
       task.waitingReason = WAITING_CONNECTION;
       held.push(this.push({

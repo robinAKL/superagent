@@ -2,8 +2,11 @@ import fs from 'node:fs';
 import type { FastifyPluginAsync } from 'fastify';
 import { loadRoomRows, saveRoomRows, type Queryable } from './pg-room.js';
 import { employeesState } from '../employees/index.js';
-import { queueRoomDispatch, resolveRoomDispatch } from '../workers/index.js';
-import { CommandRoom, type EmployeeRef, type EmployeeSource, type RoomSnapshot, type Viewer } from './room.js';
+import { queueRoomDispatch, resolveRoomDispatch, workersState } from '../workers/index.js';
+import { linkMayBeOnline, linkOnline } from '../workers/presence.js';
+import { CommandRoom, roomHooks, type EmployeeRef, type EmployeeSource, type RoomSnapshot, type Viewer } from './room.js';
+
+roomHooks.linkMayBeOnline = (employeeId) => linkMayBeOnline(employeeId, workersState.now());
 
 const ROLES = new Set<Viewer['roles'][number]>(['admin', 'owner', 'employee', 'reviewer']);
 
@@ -18,10 +21,11 @@ export function registryEmployees(): EmployeeRef[] {
     name: employee.name,
     ownerUserId: employee.owner,
     duty: employee.duty,
-    status: employee.status === 'online' || employee.status === 'busy'
-      ? 'active'
-      : employee.status === 'paused'
-        ? 'paused'
+    // A bound Link computer that is online makes the employee reachable even though the registry never hears from it.
+    status: employee.status === 'paused'
+      ? 'paused'
+      : employee.status === 'online' || employee.status === 'busy' || linkOnline(employee.id, workersState.now())
+        ? 'active'
         : employee.status === 'unconnected' ? 'unconnected' : 'offline',
     promptVersion: registry.currentPrompt(employee.id).version,
     modelTier: employee.modelTier,

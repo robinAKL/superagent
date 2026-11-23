@@ -131,6 +131,18 @@
 .room .exec-message[data-kind="report"] { border-left: 3px solid var(--color-success); }
 .room .exec-message header { flex-direction: row; align-items: baseline; gap: var(--space-xs); }
 .room .exec-message p { line-height: 1.6; overflow-wrap: anywhere; }
+
+/* Reports and computer updates (RichText): light Markdown */
+.rich-text { margin-top: var(--space-2xs); line-height: 1.6; overflow-wrap: anywhere; }
+.rich-text > :first-child { margin-top: 0; }
+.rich-text p, .rich-text ul, .rich-text ol, .rich-text pre { margin: var(--space-2xs) 0 0; }
+.rich-text h3, .rich-text h4, .rich-text h5, .rich-text h6 { margin: var(--space-sm) 0 0; font-size: 15px; line-height: 1.4; }
+.rich-text ul, .rich-text ol { padding-left: 1.4em; }
+.rich-text li + li { margin-top: 2px; }
+.rich-text code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.92em; background: var(--color-well); border-radius: 4px; padding: 0 4px; }
+.rich-text pre { background: var(--color-well); border: 1px solid var(--color-rule); border-radius: var(--radius-sm); padding: var(--space-xs) var(--space-sm); overflow-x: auto; white-space: pre-wrap; }
+.rich-text pre code { background: none; padding: 0; }
+.room .exec-message[data-computer="yes"] { border-left: 3px solid var(--color-accent); }
 .room .exec-link { margin-top: var(--space-2xs); border: 0; background: none; color: var(--color-accent); padding: 0; font: inherit; font-size: 13px; cursor: pointer; }
 
 /* Empty conversation: greeting and quick starts */
