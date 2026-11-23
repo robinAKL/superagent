@@ -88,6 +88,8 @@ async function main() {
       }, token, {
         onStatus,
         onTask: (active) => console.log(active ? 'LINK_TASK:start' : 'LINK_TASK:end'),
+        // The desktop tray reacts by opening that CLI's sign-in for the person at the computer.
+        onAuth: (agent) => console.log(`LINK_AUTH:${agent}`),
       }).start(shutdown.signal);
     } catch (error) {
       if (error.status !== 401) throw error;

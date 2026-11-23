@@ -123,6 +123,11 @@ namespace SuperAgentLinkTray
         private LinkStatus _status = LinkStatus.Unpaired;
         private int _restartAttempt;
         private Icon _currentIcon;
+        // An agent CLI whose sign-in expired: the tray opens its login and restarts Link so the task retries.
+        private readonly ToolStripMenuItem _signInItem;
+        private string _authAgent;
+        private bool _reauthRunning;
+        private bool _restartAfterTask;
 
         public TrayApp()
         {
@@ -151,9 +156,11 @@ namespace SuperAgentLinkTray
             var repairItem = new ToolStripMenuItem("Re-pair / 重新配对", null, OnRepair);
             var logsItem = new ToolStripMenuItem("View Logs / 查看日志", null, OnViewLogs);
             var exitItem = new ToolStripMenuItem("Exit / 退出", null, OnExit);
+            _signInItem = new ToolStripMenuItem("Sign in again / 重新登录", null, (s, e) => BeginReauth(_authAgent)) { Visible = false };
 
             var menu = new ContextMenuStrip();
             menu.Items.Add(_statusItem);
+            menu.Items.Add(_signInItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(openRoomItem);
             menu.Items.Add(configureItem);
@@ -416,6 +423,125 @@ namespace SuperAgentLinkTray
             else if (line == "LINK_TASK:end")
             {
                 SetTaskSleepInhibition(false);
+                if (_restartAfterTask)
+                {
+                    _restartAfterTask = false;
+                    StartLinkProcess(pairMode: false);
+                }
+            }
+            else if (line.StartsWith("LINK_AUTH:", StringComparison.Ordinal))
+            {
+                BeginReauth(line.Substring("LINK_AUTH:".Length).Trim());
+            }
+        }
+
+        private static string AgentLabel(string agent)
+        {
+            return agent == "codex" ? "Codex" : agent == "claude-code" ? "Claude Code" : agent;
+        }
+
+        /** The CLI's own sign-in command, the same one Set up local agent uses. */
+        private static string LoginArguments(string agent)
+        {
+            return agent == "codex" ? "login" : agent == "claude-code" ? "auth login" : null;
+        }
+
+        /** The executable a configured project uses for this agent; paths stay on this computer. */
+        private string AgentExecutable(string agent)
+        {
+            try
+            {
+                var path = Path.Combine(_dataDir, "link-runtime.json");
+                if (!File.Exists(path)) return null;
+                var config = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
+                object raw;
+                var projects = config != null && config.TryGetValue("projects", out raw) ? raw as Dictionary<string, object> : null;
+                if (projects == null) return null;
+                foreach (var entry in projects.Values)
+                {
+                    var project = entry as Dictionary<string, object>;
+                    object configuredAgent, executable;
+                    if (project != null && project.TryGetValue("agent", out configuredAgent) && agent.Equals(configuredAgent)
+                        && project.TryGetValue("executable", out executable) && executable is string)
+                        return (string)executable;
+                }
+            }
+            catch (Exception ex) { Log("Could not read link-runtime.json: " + ex.Message); }
+            return null;
+        }
+
+        private void Notify(string title, string text, ToolTipIcon icon)
+        {
+            try { _tray.ShowBalloonTip(10000, title, text, icon); } catch { }
+        }
+
+        /**
+         * A task failed because the agent CLI is signed out (e.g. an expired Claude Code session). Open that CLI's own
+         * sign-in for the person at the computer; when it succeeds, restart Link, which re-queues the waiting task.
+         */
+        private async void BeginReauth(string agent)
+        {
+            var args = LoginArguments(agent);
+            if (_reauthRunning || _exiting || args == null) return;
+            var label = AgentLabel(agent);
+            _authAgent = agent;
+            _signInItem.Text = "Sign in to " + label + " again / 重新登录 " + label;
+            _signInItem.Visible = true;
+            var executable = AgentExecutable(agent);
+            if (string.IsNullOrEmpty(executable) || !File.Exists(executable))
+            {
+                Notify(label + " 需要重新登录", "没有找到 " + label + " 命令行。请在托盘菜单选择「配置本地 Agent」。", ToolTipIcon.Warning);
+                return;
+            }
+            _reauthRunning = true;
+            try
+            {
+                Notify(label + " 登录已过期", "已为你打开 " + label + " 登录。请在弹出的窗口或浏览器里完成登录，之后任务会自动重试。", ToolTipIcon.Warning);
+                Log("Opening " + label + " sign-in after an authentication failure.");
+                var start = new ProcessStartInfo { UseShellExecute = true };
+                if (executable.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
+                {
+                    start.FileName = _nodeExe;
+                    start.Arguments = "\"" + executable + "\" " + args;
+                }
+                else
+                {
+                    start.FileName = executable;
+                    start.Arguments = args;
+                }
+                int code;
+                using (var login = Process.Start(start))
+                {
+                    if (login == null) throw new InvalidOperationException("the sign-in did not start");
+                    var finished = await Task.Run(() => login.WaitForExit(15 * 60 * 1000));
+                    if (!finished)
+                    {
+                        try { login.Kill(); } catch { }
+                        code = -1;
+                    }
+                    else code = login.ExitCode;
+                }
+                if (code != 0)
+                {
+                    Log(label + " sign-in ended with code " + code + ".");
+                    Notify(label + " 登录未完成", "在托盘菜单点「重新登录 " + label + "」再试一次。", ToolTipIcon.Warning);
+                    return;
+                }
+                Log(label + " sign-in finished; restarting Link to retry waiting tasks.");
+                _signInItem.Visible = false;
+                Notify(label + " 已重新登录", "正在重试等待中的任务。", ToolTipIcon.Info);
+                // Do not cut off another task that is running right now; restart when it ends.
+                if (_taskActive) _restartAfterTask = true;
+                else if (!_exiting) StartLinkProcess(pairMode: false);
+            }
+            catch (Exception ex)
+            {
+                Log("Could not open " + label + " sign-in: " + ex.Message);
+                Notify(label + " 需要重新登录", "无法自动打开登录。请在托盘菜单点「重新登录 " + label + "」。", ToolTipIcon.Warning);
+            }
+            finally
+            {
+                _reauthRunning = false;
             }
         }
 

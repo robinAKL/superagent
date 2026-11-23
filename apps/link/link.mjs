@@ -22,13 +22,14 @@ export class WorkerLink {
   #sleep;
   #onStatus;
   #onTask;
+  #onAuth;
   #renameState;
   #stateWrite = Promise.resolve();
   #storageFailure;
 
   constructor(config, token, {
     fetcher = fetch, launch = launchAgent, launchWithApprovals = launchCodexWithApprovals,
-    sleep = delay, onStatus = () => {}, onTask = () => {}, renameState = rename,
+    sleep = delay, onStatus = () => {}, onTask = () => {}, onAuth = () => {}, renameState = rename,
   } = {}) {
     const endpoint = new URL(config.endpoint);
     if ((endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(endpoint.hostname)))
@@ -46,6 +47,7 @@ export class WorkerLink {
     this.#sleep = sleep;
     this.#onStatus = onStatus;
     this.#onTask = onTask;
+    this.#onAuth = onAuth;
     this.#renameState = renameState;
     try { this.#state = JSON.parse(readFileSync(config.stateFile, 'utf8')); }
     catch (error) {
@@ -171,6 +173,9 @@ export class WorkerLink {
     const outcome = job.outcome;
     if (outcome.result) await this.#update(job, 'report', outcome.result);
     else if (outcome.authentication) {
+      // Tell the tray first: it opens the CLI's own sign-in and restarts Link, which re-queues this task.
+      const agent = this.#projects.get(job.projectId)?.agent;
+      if (agent) this.#onAuth(agent);
       await this.#api('/heartbeat', { busy: false, waitingAuthReason: outcome.authentication }, AbortSignal.timeout(10_000));
       await this.#update(job, 'progress', outcome.authentication);
     } else await this.#update(job, 'progress', outcome.failure);
