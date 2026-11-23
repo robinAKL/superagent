@@ -67,6 +67,14 @@ it('sends the roster and the message, and gives up when the model is slow', asyn
   });
   expect(await fast.understand({ tenantId: 't', body: '查订单', roster: employees, history: [] })).toEqual({ employeeId: 'emp-ops', work: '查询订单' });
   expect(sent).toContain('用 CRM 查询订单和客户');
-  const slow = gatewayBrain({ check: async () => ({ ok: true, model: 'm' }), chat: () => new Promise(() => undefined) }, 20);
+  const misses: string[] = [];
+  const slow = gatewayBrain({ check: async () => ({ ok: true, model: 'm' }), chat: () => new Promise(() => undefined) }, 20, (why) => misses.push(why));
   expect(await slow.understand({ tenantId: 't', body: '查订单', roster: employees, history: [] })).toBeNull();
+  // A reasoning model that spent its allowance thinking returns no text: said, not silent.
+  const empty = gatewayBrain({
+    check: async () => ({ ok: true, model: 'm' }),
+    chat: async () => ({ text: '', toolCalls: [], usage: { inputTokens: 1, outputTokens: 3000 }, stopReason: 'length', model: 'm', reservedMicroUsd: 0, costMicroUsd: 0 }),
+  }, 1000, (why) => misses.push(why));
+  expect(await empty.understand({ tenantId: 't', body: '你能做什么', roster: employees, history: [] })).toBeNull();
+  expect(misses).toEqual(['no answer within 20 ms', 'unusable answer (stop: length, 0 chars)']);
 });
