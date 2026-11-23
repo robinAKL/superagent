@@ -129,16 +129,18 @@ test('ontology renders objects, a relation and their evidence on the real page (
   await page.goto('/#brain?tab=ontology');
   const ontology = page.getByRole('region', { name: '本体关系图', exact: true });
   const canvas = ontology.getByRole('img', { name: /个实体 ·/ });
-  await expect(canvas.locator('.onto-node')).toHaveCount(4); // 2 objects + employee + source document
+  await expect(canvas.locator('.onto-node')).toHaveCount(3); // 2 objects + employee; since #155 sources are citations, not nodes
   await expect(canvas.getByLabel('应付专员, 数字员工')).toBeVisible();
   await expect(canvas.locator('.onto-link-line').first()).toHaveAttribute('marker-end', /onto-arrow/);
   const inspector = ontology.locator('.onto-panel');
   await inspector.getByRole('button', { name: /供应商发票/ }).click();
-  await expect(inspector).toContainText('采购制度.md#L3');
+  await expect(inspector).toContainText('采购制度.md'); // evidence grouped per document since #155; the quote pins the line
   await expect(inspector).toContainText('供应商发票须附采购单号');
-  await expect(inspector.locator('.onto-rel-table')).toBeVisible();
-  await inspector.getByRole('button', { name: '须匹配', exact: true }).click();
-  await expect(inspector).toContainText('采购制度.md#L12');
+  // Since #155 relations are grouped by label in the node panel; the relation's own evidence opens from its edge.
+  await expect(inspector.locator('.onto-rels')).toContainText('须匹配 →');
+  await canvas.locator('.onto-link').filter({ hasText: '须匹配' }).locator('.onto-link-label').click();
+  await expect(inspector.locator('.onto-rel-title')).toContainText('须匹配');
+  await expect(inspector).toContainText('采购制度.md');
   await expect(inspector).toContainText('付款前发票须与采购单金额一致');
 
   await page.setViewportSize({ width: 390, height: 844 });

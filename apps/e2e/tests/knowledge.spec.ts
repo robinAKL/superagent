@@ -1,7 +1,7 @@
 /** Real browser + Fastify/service/gateway E2E. Only external source/model/DB drivers are explicitly synthetic. */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Page, APIResponse } from '@playwright/test';
+import type { Page, APIResponse, Locator } from '@playwright/test';
 import { test, expect } from './fixtures.js';
 const t33Shot = (name: string) => path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../deliverables/v12-compare-t33', name);
 // Kept local so Playwright discovery does not load the server's Azure/PG dependency graph.
@@ -113,7 +113,14 @@ async function analyse(page: Page) {
   await openWorkspace(page, '分类与候选');
   expect((await getOverview(page)).analyses.at(-1)?.status).toBe('completed');
 }
-const card = (page: Page, name: string) => page.locator('.knowledge-recommendation').filter({ has: page.locator(`input[value=${JSON.stringify(name)}]`) });
+// Since #155 the draft card opens in a read view: the name is its heading, and inputs only appear after 编辑.
+const card = (page: Page, name: string) => page.locator('.knowledge-recommendation').filter({ has: page.getByRole('heading', { level: 3, name, exact: true }) });
+/** Evidence is grouped per source document in <details>; open every group (a single group starts open). */
+async function openEvidence(target: Locator) {
+  const groups = target.locator('.knowledge-evidence-groups details');
+  await expect(groups.first()).toBeAttached();
+  for (const group of await groups.all()) if (!(await group.evaluate(el => (el as HTMLDetailsElement).open))) await group.locator(':scope > summary').click();
+}
 async function openDraft(page: Page, name: string) {
   await openWorkspace(page, '分类与候选');
   await page.getByRole('list', { name: '草案列表' }).getByRole('button').filter({ has: page.getByText(name, { exact: true }) }).click();
@@ -121,9 +128,10 @@ async function openDraft(page: Page, name: string) {
 }
 async function lockRole(page: Page, name: string, replacement = '人工保留职责') {
   const target = await openDraft(page, name);
+  await target.getByRole('button', { name: '编辑', exact: true }).click();
   await target.locator('textarea').fill('这是人工核对后保留的说明。');
   await target.getByLabel('名称', { exact: true }).fill(replacement);
-  await card(page, replacement).getByRole('button', { name: '保存并人工锁定', exact: true }).click();
+  await target.getByRole('button', { name: '保存并人工锁定', exact: true }).click();
   await expect(card(page, replacement).getByText('人工锁定', { exact: true })).toBeVisible();
   return replacement;
 }
@@ -178,9 +186,9 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await expect(page.getByText('因缺少有效对象草案，已跳过 1 条关系。')).toBeVisible();
   const draft = card(page, '退货专员');
   await expect(draft.getByText('仅自己可见的 MCP 分析草案')).toBeVisible();
-  await draft.locator('summary').click();
+  await openEvidence(draft);
   await expect(draft.getByLabel('来源依据').getByText('退货手册 MCP / handbook://procedures/returns')).toBeVisible();
-  await expect(draft.locator('blockquote')).toHaveText('角色：退货专员；责任：核对收货记录后登记退款。');
+  await expect(draft.locator('.knowledge-evidence-groups li li p')).toHaveText('角色：退货专员；责任：核对收货记录后登记退款。');
 
   await page.route('**/api/v1/sop', route => route.fulfill({ status: 503, json: {} }));
   // Analysis ends in one primary action: review the organization draft. Private MCP drafts appear there, marked as such,
@@ -188,7 +196,8 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await page.getByRole('link', { name: '审阅组织草案', exact: true }).click();
   const role = page.getByRole('article', { name: '退货专员' });
   await expect(role.getByText('来自你的 MCP 来源', { exact: true })).toBeVisible();
-  await page.getByRole('link', { name: '3 发布流程', exact: true }).click();
+  // #157 removed the employees-page step strip; go where its "3 发布流程" step linked.
+  await page.goto('/#brain?org=1');
   await page.getByRole('link', { name: '审阅候选流程', exact: true }).click();
   await page.getByRole('link', { name: '所有分析草案', exact: true }).click();
   const privateDrafts = page.getByRole('region', { name: '分析结果' });
@@ -205,14 +214,16 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await expect(privateDrafts.getByRole('heading', { name: '退货关联收货记录' })).toHaveCount(0);
   await privateDrafts.getByText('查看来源依据', { exact: true }).last().click();
   await expect(privateDrafts.getByText('退货手册 MCP / handbook://procedures/returns', { exact: true }).last()).toBeVisible();
-  await page.getByRole('tab', { name: '企业流程', exact: true }).click();
+  await page.getByRole('tab', { name: '流程管理', exact: true }).click();
   await expect(page.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
   await expect(page.getByRole('group', { name: '流程图', exact: true })).toBeVisible();
   await page.getByRole('link', { name: '查看我的 MCP 流程草案', exact: true }).click();
   await expect(privateDrafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
   await page.goto('/#brain?tab=ontology');
   const ontology = page.getByRole('region', { name: '本体关系图', exact: true });
-  await expect(ontology).toContainText('全部来源');
+  // One graph since #155: personal MCP drafts sit with company knowledge, tagged 仅自己 instead of behind a scope tab.
+  await expect(ontology.locator('.onto-node.is-private').first()).toBeVisible();
+  await expect(ontology).toContainText('仅自己');
   await expect(ontology.getByRole('img', { name: /个实体 ·/ })).toBeVisible();
   await ontology.locator('.onto-panel').getByRole('button', { name: /退货记录/ }).click();
   await expect(ontology.locator('.onto-panel')).toContainText('退货手册 MCP');
@@ -286,7 +297,7 @@ test('[qa-enablement#6] Four roles follow distinct evidence-bearing responsibili
   await localFile(page); await analyse(page); const roles = (await getOverview(page)).recommendations.filter(rec => rec.kind === 'employee'); expect(roles.map(role => role.name).sort()).toEqual(['业务主管', '仓储专员', '财务专员', '采购专员'].sort()); expect(new Set(roles.map(role => role.description)).size).toBe(4); for (const role of roles) await expect(await openDraft(page, role.name)).toBeVisible();
 });
 test('[qa-enablement#7] Every inferred role cites a source line', async ({ page }) => {
-  await localFile(page); await analyse(page); for (const role of (await getOverview(page)).recommendations.filter(rec => rec.kind === 'employee')) { expect(role.evidence.length).toBeGreaterThan(0); const target = await openDraft(page, role.name); await target.locator('summary').click(); await expect(target.locator('.knowledge-evidence')).toContainText('#L'); for (const evidence of role.evidence) expect(ROLE_FILE.slice(evidence.start, evidence.end)).toBe(evidence.quote); }
+  await localFile(page); await analyse(page); for (const role of (await getOverview(page)).recommendations.filter(rec => rec.kind === 'employee')) { expect(role.evidence.length).toBeGreaterThan(0); const target = await openDraft(page, role.name); await openEvidence(target); for (const evidence of role.evidence) { expect(evidence.locator).toContain('#L'); await expect(target.locator('.knowledge-evidence-groups')).toContainText(`字符 ${evidence.start}–${evidence.end}`); expect(ROLE_FILE.slice(evidence.start, evidence.end)).toBe(evidence.quote); } }
 });
 test('[qa-enablement#8] Tools proposed alongside roles before business execution', async ({ page }) => {
   await localFile(page); const before = await response<unknown>(page.request.get('/api/v1/tools/')); await analyse(page); const tools = (await getOverview(page)).recommendations.filter(rec => rec.kind === 'tool'); expect(tools).toHaveLength(1); expect(tools[0]!.evidence.length).toBeGreaterThan(0); await expect(await openDraft(page, tools[0]!.name)).toContainText('工具草案'); expect(await response(page.request.get('/api/v1/tools/'))).toEqual(before);
@@ -624,9 +635,10 @@ test.describe('T-24 ontology default scope with companyName and personal MCP dra
     await seedAndOpen(page);
     const ontology = page.locator('section.onto');
     await expect(ontology).toBeVisible();
-    await expect(ontology.getByRole('tab', { name: /全部来源/ })).toHaveAttribute('aria-selected', 'true');
-    await expect(ontology.locator('.onto-node')).toHaveCount(4);
-    await expect(ontology.locator('.onto-link-line')).toHaveCount(3);
+    // #155 unified company and personal MCP drafts into one graph: there are no scope tabs any more.
+    await expect(ontology.getByRole('tab')).toHaveCount(0);
+    await expect(ontology.locator('.onto-node')).toHaveCount(2); // sources are citations since #155, not nodes
+    await expect(ontology.locator('.onto-link-line')).toHaveCount(1);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.screenshot({ path: t33Shot('t33-ontology-1440-zh.png'), fullPage: true });
     await page.setViewportSize({ width: 375, height: 812 });
@@ -639,9 +651,9 @@ test.describe('T-24 ontology default scope with companyName and personal MCP dra
       await seedAndOpen(page);
       const ontology = page.locator('section.onto');
       await expect(ontology).toBeVisible();
-      await expect(ontology.getByRole('tab', { name: /All sources/ })).toHaveAttribute('aria-selected', 'true');
-      await expect(ontology.locator('.onto-node')).toHaveCount(4);
-      await expect(ontology.locator('.onto-link-line')).toHaveCount(3);
+      await expect(ontology.getByRole('tab')).toHaveCount(0);
+      await expect(ontology.locator('.onto-node')).toHaveCount(2); // sources are citations since #155, not nodes
+      await expect(ontology.locator('.onto-link-line')).toHaveCount(1);
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.screenshot({ path: t33Shot('t33-ontology-1440-en.png'), fullPage: true });
       await page.setViewportSize({ width: 375, height: 812 });

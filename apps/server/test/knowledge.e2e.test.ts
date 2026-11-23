@@ -42,6 +42,9 @@ d('knowledge UI over real HTTP handlers', () => {
       await page.getByRole('button', { name: '开始分析', exact: true }).click(); expect((await submitted).status()).toBe(202);
       await tickKnowledge(deps, 'ui-test');
       await page.reload(); await page.getByText('员工草案', { exact: true }).waitFor();
+      // The draft card opens in a read view (#155): the name is the heading, inputs appear after 编辑.
+      expect(await page.locator('.knowledge-recommendation h3').textContent()).toBe('资料核对助理');
+      await page.locator('.knowledge-recommendation').getByRole('button', { name: '编辑', exact: true }).click();
       expect(await page.locator('.knowledge-recommendation input').inputValue()).toBe('资料核对助理');
       await page.locator('.knowledge-recommendation input').fill('人工保留名称');
       await page.getByRole('button', { name: '保存并人工锁定', exact: true }).click();
