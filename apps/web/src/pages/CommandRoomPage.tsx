@@ -38,7 +38,6 @@ export interface ApiMessage {
   clientMessageId?: string;
 }
 
-const TASK_PAGE = 10;
 
 /**
  * A computer reports several steps per task (received, started, processing). The conversation keeps only the
@@ -249,8 +248,33 @@ const AGENT_STATE_LABEL: Record<AgentState, string> = {
   thinking: '思考中', working: '干活中', queued: '排队中', idle: '空闲', offline: '掉线', paused: '已暂停', unconnected: '未连接电脑',
 };
 
-function AgentRow({ id, name, role, state, extra, speaking, onPick, icon }: {
-  id: string; name: string; role: string; state: AgentState; extra?: string; speaking: boolean; onPick?: () => void; icon: ReactNode;
+/** A short, stable task number people can say out loud: task_24 → T-24. */
+export function taskCode(id: string): string {
+  const match = /(\d+)$/.exec(id);
+  return match ? `T-${match[1]}` : id;
+}
+
+/** How long ago something started, in the reader's language: 刚刚, 4 分钟, 2 小时. */
+export function elapsedLabel(since: string | undefined, now: number, lang: Lang = 'zh'): string {
+  const started = since ? Date.parse(since) : NaN;
+  if (Number.isNaN(started)) return '';
+  const minutes = Math.max(0, Math.floor((now - started) / 60_000));
+  if (minutes < 1) return lang === 'zh' ? '刚刚' : 'just now';
+  if (minutes < 60) return lang === 'zh' ? `${minutes} 分钟` : `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return lang === 'zh' ? `${hours} 小时` : `${hours} h`;
+  return lang === 'zh' ? `${Math.floor(hours / 24)} 天` : `${Math.floor(hours / 24)} d`;
+}
+
+/** Two letters for an avatar: SA for Super Agent, initials of a name otherwise. */
+export function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1 && /^[A-Za-z]/.test(words[0]!)) return (words[0]![0]! + words[1]![0]!).toUpperCase();
+  return name.trim().slice(0, /^[A-Za-z]/.test(name.trim()) ? 2 : 1).toUpperCase();
+}
+
+function AgentRow({ id, name, role, state, extra, detail, tag, speaking, onPick, icon }: {
+  id: string; name: string; role: string; state: AgentState; extra?: string; detail?: string; tag?: string; speaking: boolean; onPick?: () => void; icon: ReactNode;
 }) {
   const [lang] = useLang();
   const t = (copy: string) => roomText(copy, lang);
@@ -258,12 +282,12 @@ function AgentRow({ id, name, role, state, extra, speaking, onPick, icon }: {
   const body = <>
     <span className={`room-agent-avatar is-${state}`} aria-hidden="true">{icon}</span>
     <span className="room-agent-text">
-      <strong>{name}</strong>
+      <span className="room-agent-name"><strong>{name}</strong>{tag ? <span className="room-tag is-accent">{tag}</span> : null}</span>
       <small>{role}</small>
     </span>
     <span className={`room-agent-state is-${state}`}>
       {busy ? <span className="room-dots" aria-hidden="true"><i /><i /><i /></span> : <i className="room-agent-dot" aria-hidden="true" />}
-      {t(AGENT_STATE_LABEL[state])}{extra ? <em>{extra}</em> : null}
+      {t(AGENT_STATE_LABEL[state])}{extra ? <em>{extra}</em> : null}{detail ? <em>· {detail}</em> : null}
     </span>
   </>;
   return <li className={`room-agent${speaking ? ' is-speaking' : ''}`} data-agent={id} data-state={state}>
@@ -418,8 +442,17 @@ export function CommandRoomPage() {
     window.addEventListener('hashchange', open);
     return () => window.removeEventListener('hashchange', open);
   }, []);
-  const [taskTab, setTaskTab] = useState<'open' | 'review' | 'all'>('all');
   const [showAllTasks, setShowAllTasks] = useState(false);
+  /** Which part of the conversation to show, and a text search over it. */
+  const [streamFilter, setStreamFilter] = useState<'all' | 'tasks' | 'reports' | 'progress' | 'mine'>('all');
+  const [streamQuery, setStreamQuery] = useState('');
+  const [showCancelled, setShowCancelled] = useState(false);
+  /** A minute clock for "working for 4 分钟". */
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(tick);
+  }, []);
   const summaryRef = useRef<HTMLDivElement | null>(null);
 
   const cursor = useRef(0);
@@ -732,12 +765,52 @@ export function CommandRoomPage() {
   const t = (copy: string) => roomText(copy, lang);
 
   const reviewStatus = new Set(['reported', 'outcome_unknown']);
-  const tabTasks = taskTab === 'open' ? tasks.filter((task) => OPEN_STATUS.has(task.status))
-    : taskTab === 'review' ? tasks.filter((task) => reviewStatus.has(task.status)) : tasks;
-  const counts = { open: tasks.filter((task) => OPEN_STATUS.has(task.status)).length, review: tasks.filter((task) => reviewStatus.has(task.status)).length };
-  const delivered = tasks.filter((task) => task.status === 'completed' || task.status === 'reviewed').slice(-5).reverse();
   const firstEmployee = employees.find((employee) => employee.status === 'active') ?? employees[0];
   const states = agentStates(employees, tasks, outbox !== null || awaiting !== null);
+  // Who holds the floor: Super Agent while it reads a message, else the employee whose computer is working.
+  const runningTask = tasks.find((task) => task.status === 'running') ?? null;
+  const floor = outbox || awaiting
+    ? { id: 'super-agent', name: t('超级智能体'), what: t('正在思考'), since: '', icon: <Icon name="brain" size={16} /> }
+    : runningTask
+      ? {
+          id: runningTask.employeeId ?? runningTask.id,
+          name: employeeName(employees, runningTask.employeeId, lang),
+          what: `${t('处理')} ${taskCode(runningTask.id)}`,
+          since: elapsedLabel(runningTask.promptSnapshot?.takenAt, now, lang),
+          icon: <span>{initials(employeeName(employees, runningTask.employeeId, lang))}</span>,
+        }
+      : null;
+
+  // The conversation, narrowed by the chips above it and the search box.
+  const streamAll = collapseProgress(messages);
+  const isMine = (message: ApiMessage) => message.authorUserId === viewerId && !fromComputer(message) && message.kind !== 'report';
+  const STREAM_FILTERS = {
+    all: () => true,
+    tasks: (message: ApiMessage) => message.authorUserId === 'super-agent' && message.taskIds.some((id) => tasks.some((task) => task.id === id)),
+    reports: (message: ApiMessage) => message.kind === 'report',
+    progress: (message: ApiMessage) => fromComputer(message) && message.kind !== 'report',
+    mine: isMine,
+  } as const;
+  const streamCounts = {
+    tasks: streamAll.filter(STREAM_FILTERS.tasks).length,
+    reports: streamAll.filter(STREAM_FILTERS.reports).length,
+    progress: streamAll.filter(STREAM_FILTERS.progress).length,
+    mine: streamAll.filter(STREAM_FILTERS.mine).length,
+  };
+  const needle = streamQuery.trim().toLowerCase();
+  const streamShown = streamAll.filter(STREAM_FILTERS[streamFilter]).filter((message) => !needle || message.body.toLowerCase().includes(needle));
+  const narrowed = streamFilter !== 'all' || needle !== '';
+
+  // The task column: progress, then groups by what each task needs.
+  const liveTasks = tasks.filter((task) => task.status !== 'cancelled');
+  const doneTasks = tasks.filter((task) => task.status === 'completed' || task.status === 'reviewed');
+  const reviewTasks = tasks.filter((task) => reviewStatus.has(task.status));
+  const openTasks = tasks.filter((task) => OPEN_STATUS.has(task.status))
+    .sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running'));
+  const cancelledTasks = tasks.filter((task) => task.status === 'cancelled');
+  // Short lists show whole; a long one folds to the latest three until asked.
+  const doneShown = showAllTasks || doneTasks.length <= 5 ? [...doneTasks].reverse() : doneTasks.slice(-3).reverse();
+  const cancelledOpen = showCancelled || cancelledTasks.length <= 3;
 
   /**
    * Who is speaking right now: my message on its way, Super Agent reading it, and each digital employee whose
@@ -787,7 +860,13 @@ export function CommandRoomPage() {
       <div className="page-head room-head">
         <h1>{t('指挥室')}</h1>
         <div className="page-head-actions room-head-actions">
+          <span className="room-faces" aria-label={`${t('成员')} ${employees.length + 1}`}>
+            <span className="room-face is-agent" aria-hidden="true">SA</span>
+            {/* Decorative: the initial is drawn by CSS from data-initials, so a name never reads as page text. */}
+            {employees.slice(0, 4).map((employee) => <span key={employee.id} className="room-face" aria-hidden="true" data-initials={initials(employee.name)} />)}
+          </span>
           {viewer?.owner ? <button type="button" className="btn" aria-expanded={flowsOpen} aria-controls="room-flows" onClick={() => setFlowsOpen((open) => !open)}><Icon name="flow" /><span>{t('业务流程')}</span></button> : null}
+          {viewer ? <button type="button" className="btn primary" onClick={() => { startWith('@'); setMentionOpen(true); }}>{t('+ 新任务')}</button> : null}
         </div>
       </div>
       {viewer?.owner ? <>
@@ -804,22 +883,55 @@ export function CommandRoomPage() {
       </> : null}
       <div className="exec-grid">
         <aside id="room-agents" className="room-agents" aria-label={t('成员')}>
+          {floor ? (
+            <section className="room-floor" aria-label={t('正在处理')} data-floor={floor.id}>
+              <div className="room-floor-head"><span>{t('正在处理')}</span><span>{floor.since}</span></div>
+              <div className="room-floor-who">
+                <span className="room-agent-avatar is-working" aria-hidden="true">{floor.icon}</span>
+                <span><strong>{floor.name}</strong><small>{floor.what} <span className="room-dots" aria-hidden="true"><i /><i /><i /></span></small></span>
+              </div>
+            </section>
+          ) : null}
           <h2 className="room-agents-title">{t('成员')} <span className="room-count">{employees.length + 1}</span></h2>
           <ul>
-            <AgentRow id="super-agent" name={t('超级智能体')} role={t('协调与分派')} state={states.superAgent}
+            <AgentRow id="super-agent" name={t('超级智能体')} role={t('协调与分派')} state={states.superAgent} tag={t('主持')}
               speaking={speaking === 'super-agent'} icon={<Icon name="brain" size={18} />} />
             {employees.map((employee) => {
               const live = states.employees[employee.id] ?? { state: 'idle' as const, open: 0 };
+              const running = tasks.find((task) => task.employeeId === employee.id && task.status === 'running');
+              const detail = running ? [taskCode(running.id), elapsedLabel(running.promptSnapshot?.takenAt, now, lang)].filter(Boolean).join(' · ') : undefined;
               return <AgentRow key={employee.id} id={employee.id} name={employee.name} role={employee.duty || t('数字员工')}
-                state={live.state} extra={live.open > 1 ? ` ${live.open}` : undefined} speaking={speaking === employee.id}
-                icon={<span>{employee.name.slice(0, 1).toUpperCase()}</span>}
+                state={live.state} extra={live.open > 1 && !running ? ` ${live.open}` : undefined} detail={detail} speaking={speaking === employee.id}
+                icon={<span>{initials(employee.name)}</span>}
                 onPick={viewer ? () => startWith(`@${employee.name} `) : undefined} />;
             })}
           </ul>
           {employees.length === 0 && roster ? <p className="exec-empty">{t('还没有可以指派的数字员工。')}</p> : null}
+          {viewer?.owner ? (
+            <nav className="room-agents-foot" aria-label={t('房间')}>
+              <a href="#settings?section=computers">{t('连接电脑（Link）')}</a>
+              <a href="#employees">{t('管理数字员工')}</a>
+            </nav>
+          ) : null}
         </aside>
         <section className="panel exec-pane room-chat" aria-label={t('共享协作记录')}>
           <h2 className="sr-only">{t('共享协作记录')}</h2>
+          {messages.length > 0 ? (
+            <div className="room-filters" role="toolbar" aria-label={t('筛选对话')}>
+              {([['all', '全部'], ['tasks', '任务'], ['reports', '交付'], ['progress', '进度'], ['mine', '我发的']] as const).map(([key, label]) => (
+                key !== 'all' && streamCounts[key] === 0 ? null : (
+                  <button key={key} type="button" className="room-chip" aria-pressed={streamFilter === key} data-filter={key} onClick={() => setStreamFilter(key)}>
+                    {t(label)}{key !== 'all' ? <span>{streamCounts[key]}</span> : null}
+                  </button>
+                )
+              ))}
+              <label className="room-search">
+                <span className="sr-only">{t('搜索对话')}</span>
+                <Icon name="search" size={14} />
+                <input type="search" value={streamQuery} placeholder={t('搜索对话')} onChange={(event) => setStreamQuery(event.target.value)} />
+              </label>
+            </div>
+          ) : null}
           <div
             className="exec-scroll exec-stream"
             ref={scroller}
@@ -847,30 +959,47 @@ export function CommandRoomPage() {
                   </div>
                 </div>
               ) : <p className="exec-empty">{offline ? t('暂时连不上指挥室，稍后会自动重试。') : t('正在读取指挥室…')}</p>
-            ) : collapseProgress(messages).map((message) => (
+            ) : (narrowed && streamShown.length === 0 ? [<p key="none" className="exec-empty room-stream-none">{t('没有符合条件的消息。')}</p>] : streamShown.map((message) => {
+              const mine = isMine(message);
+              const who = actorLabel(message, viewer, tasks, employees, lang);
+              const linked = mine ? undefined : message.taskIds.map((id) => tasks.find((task) => task.id === id)).filter((task): task is ApiTask => Boolean(task)).slice(-1)[0];
+              return (
               <article
                 key={message.id}
                 id={`room-msg-${message.id}`}
                 data-message={message.id}
                 data-kind={message.kind ?? 'message'}
-                data-mine={message.authorUserId === viewerId && !fromComputer(message) && message.kind !== 'report' ? 'yes' : undefined}
+                data-mine={mine ? 'yes' : undefined}
                 data-computer={fromComputer(message) && message.kind !== 'report' ? 'yes' : undefined}
                 className={`exec-message${focusMessageId === message.id ? ' exec-message-focus' : ''}`}
               >
-                <header>
-                  <strong>{actorLabel(message, viewer, tasks, employees, lang)}</strong>
-                  <span>{messageKindLabel(message, tasks, lang)}</span>
-                </header>
-                {message.authorUserId === 'super-agent'
-                  ? <RichText text={roomMessage(message.body, lang)} />
-                  : message.kind === 'report' || fromComputer(message)
-                    ? <RichText text={message.kind === 'report' ? message.body : computerText(message.body, lang)} />
-                    : <p>{message.body}</p>}
-                {message.taskIds.filter((id) => tasks.some((task) => task.id === id)).slice(-1).map((id) => (
-                  <button type="button" className="exec-link" key={id} data-open-task={id} onClick={() => openTaskDrawer(id)}>{t('查看任务')}</button>
-                ))}
+                {mine ? null : (
+                  <span className={`room-msg-avatar${message.authorUserId === 'super-agent' ? ' is-agent' : ''}`} aria-hidden="true">
+                    {message.authorUserId === 'super-agent' ? 'SA' : initials(who)}
+                  </span>
+                )}
+                <div className="room-msg-body">
+                  <header>
+                    <strong>{who}</strong>
+                    <span className={`room-tag kind-${message.kind ?? 'message'}`}>{messageKindLabel(message, tasks, lang)}</span>
+                  </header>
+                  {message.authorUserId === 'super-agent'
+                    ? <RichText text={roomMessage(message.body, lang)} />
+                    : message.kind === 'report' || fromComputer(message)
+                      ? <RichText text={message.kind === 'report' ? message.body : computerText(message.body, lang)} />
+                      : <p>{message.body}</p>}
+                  {linked ? (
+                    <div className="room-task-ref" data-status={linked.status}>
+                      <span className="room-task-ref-meta"><i aria-hidden="true" />{taskCode(linked.id)} · {taskStatusLabel(linked, lang)}</span>
+                      <span className="room-task-ref-title">{linked.title}</span>
+                      <span className="room-task-ref-who">{employeeName(employees, linked.employeeId, lang)}</span>
+                      <button type="button" className="exec-link" data-open-task={linked.id} onClick={() => openTaskDrawer(linked.id)}>{t('查看任务')}</button>
+                    </div>
+                  ) : null}
+                </div>
               </article>
-            )).concat(liveBubbles())}
+              );
+            })).concat(liveBubbles())}
           </div>
           <form className="exec-composer room-composer" onSubmit={(event) => { event.preventDefault(); void sendDraft(); }}>
             <label htmlFor="room-draft" className="sr-only">{t('发给指挥室')}</label>
@@ -911,9 +1040,9 @@ export function CommandRoomPage() {
                 </div>
               ) : null}
               <div className="exec-composer-actions room-composer-bar">
-                <button type="button" className="room-icon-btn" aria-label={t('@ 提及')} title={t('@ 提及')} aria-haspopup="listbox" aria-expanded={mentionOpen} disabled={!viewer} onClick={() => setMentionOpen((open) => !open)}><Icon name="at" size={20} /></button>
+                <button type="button" className="room-chip room-chip-action" aria-haspopup="listbox" aria-expanded={mentionOpen} disabled={!viewer} onClick={() => setMentionOpen((open) => !open)}>{t('@ 提及')}</button>
                 <span>{t('Enter 发送，Shift+Enter 换行')}</span>
-                <button type="submit" className="room-send" aria-label={t('发送')} title={t('发送')} disabled={sending || !viewer}><Icon name="send" size={18} /></button>
+                <button type="submit" className="room-send" disabled={sending || !viewer}><Icon name="send" size={16} />{t('发送')}</button>
               </div>
             </div>
             <p className="exec-notice" role="status" aria-label={t('指挥室提示')}>{t(notice)}</p>
@@ -925,51 +1054,68 @@ export function CommandRoomPage() {
           <div className="exec-pane-head room-tasks-head">
             <h2>{t('任务')} <span className="room-count">{tasks.length}</span></h2>
           </div>
-          <div className="room-tabs" role="tablist" aria-label={t('任务')}>
-            {(['open', 'review', 'all'] as const).map((tab) => (
-              <button key={tab} type="button" role="tab" aria-selected={taskTab === tab} onClick={() => setTaskTab(tab)}>
-                {t(tab === 'open' ? '进行中' : tab === 'review' ? '待复核' : '全部')}{tab !== 'all' && counts[tab] ? <span className="room-count">{counts[tab]}</span> : null}
-              </button>
-            ))}
-          </div>
-          <div className="exec-scroll room-task-list">
-            {tabTasks.length === 0 ? (
-              <div className="room-tasks-empty">
-                <Icon name="check" size={22} />
-                <strong>{tasks.length === 0 ? t('还没有待处理任务') : t('这一栏暂时没有任务')}</strong>
-                <p className="exec-empty">{tasks.length === 0 ? t('当前没有由对话产生的任务。') : t('切换到「全部」查看其他任务。')}</p>
-                {tasks.length === 0 ? <p className="exec-empty">{t('明确交办的工作会形成任务。普通讨论可以直接继续。')}</p> : null}
-              </div>
-            ) : (showAllTasks ? tabTasks : tabTasks.slice(0, TASK_PAGE)).map((task) => (
-              <button type="button" className="exec-task" key={task.id} data-task={task.id} data-status={task.status} aria-current={openTaskId === task.id ? 'true' : undefined} onClick={() => openTaskDrawer(task.id)}>
-                <strong>{task.title}</strong>
-                <span>{taskLine(task, employees, lang)}</span>
-              </button>
-            ))}
-          </div>
-          {tabTasks.length > TASK_PAGE ? <button type="button" className="btn quiet small room-more" onClick={() => setShowAllTasks((all) => !all)}>
-            {showAllTasks ? t('只看最近 10 条') : `${t('查看全部')}（${tabTasks.length}）`}
-          </button> : null}
-          {/* Not a second copy of the list: only what was delivered, latest first, each one jumps to its report. */}
-          <div className="room-summary" data-outcome="summary" ref={summaryRef} tabIndex={-1} aria-label={t('最近交付')}>
-            <h3>{t('最近交付')}</h3>
-            {delivered.length === 0 ? <p>{t('暂无事项')}</p> : (
-              <ul>
-                {delivered.map((task) => (
-                  <li key={task.id}>
-                    <button
-                      type="button"
-                      className="outcome-message-card"
-                      data-outcome="summary-message"
-                      onClick={() => { if (task.messageId) jumpTo(task.messageId); setOpenTaskId(task.id); }}
-                    >
-                      {task.title}
+          {tasks.length === 0 ? (
+            <div className="room-tasks-empty">
+              <Icon name="check" size={22} />
+              <strong>{t('还没有待处理任务')}</strong>
+              <p className="exec-empty">{t('当前没有由对话产生的任务。')}</p>
+              <p className="exec-empty">{t('明确交办的工作会形成任务。普通讨论可以直接继续。')}</p>
+            </div>
+          ) : (
+            <div className="exec-scroll room-task-list">
+              <section className="room-progress" aria-label={t('完成进度')}>
+                <div><strong>{doneTasks.length} / {liveTasks.length}</strong> {t('已完成')}</div>
+                <div className="room-progress-bar" aria-hidden="true"><i style={{ width: `${liveTasks.length ? Math.round((doneTasks.length / liveTasks.length) * 100) : 0}%` }} /></div>
+              </section>
+              {([['review', '待复核', reviewTasks], ['open', '进行中', openTasks]] as const).map(([key, label, list]) => list.length === 0 ? null : (
+                <section key={key} className={`room-task-group is-${key}`} aria-label={t(label)}>
+                  <h3>{t(label)} <span>{list.length}</span></h3>
+                  {list.map((task) => (
+                    <button type="button" className="exec-task" key={task.id} data-task={task.id} data-status={task.status} aria-current={openTaskId === task.id ? 'true' : undefined} onClick={() => openTaskDrawer(task.id)}>
+                      <span className="room-task-code">{taskCode(task.id)} · @{employeeName(employees, task.employeeId, lang)}</span>
+                      <strong>{task.title}</strong>
+                      <span className={`room-task-state${task.status === 'waiting' ? ' is-waiting' : ''}`}>{taskLine(task, employees, lang)}</span>
                     </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+                  ))}
+                </section>
+              ))}
+              {/* Delivered work, latest first: each one jumps to its report. Doubles as the room's 最近交付. */}
+              <section className="room-task-group is-done room-summary" data-outcome="summary" ref={summaryRef} tabIndex={-1} aria-label={t('最近交付')}>
+                <h3>{t('已完成')} <span>{doneTasks.length}</span></h3>
+                {doneTasks.length === 0 ? <p className="exec-empty">{t('暂无事项')}</p> : (
+                  <ul>
+                    {doneShown.map((task) => (
+                      <li key={task.id}>
+                        <button type="button" className="outcome-message-card" data-outcome="summary-message" data-task={task.id} data-status={task.status}
+                          aria-current={openTaskId === task.id ? 'true' : undefined}
+                          onClick={() => { if (task.messageId) jumpTo(task.messageId); setOpenTaskId(task.id); }}>
+                          <Icon name="check" size={14} /><span className="sr-only">{taskStatusLabel(task, lang)}</span><span>{taskCode(task.id)}</span> {task.title}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {doneTasks.length > 5 ? <button type="button" className="exec-link room-more" onClick={() => setShowAllTasks((all) => !all)}>
+                  {showAllTasks ? t('收起') : `${t('全部')} ${doneTasks.length} ${t('项')}`}
+                </button> : null}
+              </section>
+              {cancelledTasks.length ? (
+                <section className="room-task-group is-cancelled" aria-label={t('已取消')}>
+                  {cancelledTasks.length > 3 ? (
+                    <button type="button" className="exec-link" aria-expanded={showCancelled} onClick={() => setShowCancelled((open) => !open)}>
+                      {t('已取消')} {cancelledTasks.length}
+                    </button>
+                  ) : <h3>{t('已取消')} <span>{cancelledTasks.length}</span></h3>}
+                  {cancelledOpen ? cancelledTasks.map((task) => (
+                    <button type="button" className="exec-task" key={task.id} data-task={task.id} data-status={task.status} onClick={() => openTaskDrawer(task.id)}>
+                      <span className="room-task-code">{taskCode(task.id)}</span>
+                      <strong>{task.title}</strong>
+                    </button>
+                  )) : null}
+                </section>
+              ) : null}
+            </div>
+          )}
         </aside>
         {openTask && may ? (
           <aside className="panel exec-drawer" aria-label={t('任务详情')} data-task-detail={openTask.id}>

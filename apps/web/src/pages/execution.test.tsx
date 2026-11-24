@@ -31,7 +31,7 @@ describe('execution pages reuse the v12 copy', () => {
     expect(html).toContain('Enter 发送，Shift+Enter 换行');
     expect(html).toContain('还没有待处理任务');
     expect(html).toContain('当前没有由对话产生的任务。');
-    expect(html).toContain('暂无事项');
+    expect(html).not.toContain('data-outcome="summary-message"'); // nothing delivered, nothing listed
     expect(html).not.toContain('销售员工'); // nothing is written into the page; people and work come from the server
     expect(html).not.toContain('询价草稿');
     expect(html).not.toContain('模拟同事回报');
@@ -41,7 +41,7 @@ describe('execution pages reuse the v12 copy', () => {
   it('renders the command room interface in English by default', () => {
     const html = renderToStaticMarkup(<CommandRoomPage />);
     expect(html).toContain('Command room');
-    expect(html).toContain('No tasks yet');
+    expect(html).toContain('No open tasks');
     expect(html).not.toMatch(/\p{Script=Han}/u);
   });
 
