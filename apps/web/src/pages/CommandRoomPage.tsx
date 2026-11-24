@@ -893,7 +893,7 @@ export function CommandRoomPage() {
         </div>
       </div>
       {viewer?.owner ? <>
-        <GettingStarted />
+        <GettingStarted compact />
         {flowsOpen ? (
           <div className="room-sheet-backdrop" onClick={(event) => { if (event.target === event.currentTarget) setFlowsOpen(false); }}>
             <aside id="room-flows" className="room-sheet" role="dialog" aria-modal="true" aria-label={t('业务流程')}
