@@ -28,6 +28,11 @@ test.describe('T-30 Link device pairing', () => {
 
     await page.goto('/#settings');
     await expect(page.getByRole('heading', { name: '已连接的电脑' })).toBeVisible();
+    // With a computer already paired, the always-latest download stays on the page.
+    const download = page.getByRole('link', { name: '下载最新版 Link（Windows）' });
+    await expect(download).toHaveAttribute('href', '/download/link');
+    await download.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(SHOTS, 't30-link-download-375-zh.png') });
     const card = page.locator('article').filter({ hasText: 'Robin-PC' });
     await card.locator('summary').filter({ hasText: '设备权限' }).click();
     await card.getByLabel('允许的员工（留空=全部）').fill('emp-a');

@@ -16,6 +16,15 @@ describe('app scaffold', () => {
     await app.close();
   });
 
+  it('/download/link always sends a signed-out visitor to the newest Link installer', async () => {
+    const app = await buildApp();
+    const res = await app.inject('/download/link');
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe('https://github.com/robinAKL/superagent/releases/download/link-latest/SuperAgentLink-Setup-x64.exe');
+    expect(res.headers['cache-control']).toBe('no-store');
+    await app.close();
+  });
+
   it('publishes browser sign-in config without secrets (dev and entra)', async () => {
     const dev = await buildApp();
     expect((await dev.inject('/auth/config')).json()).toEqual({ mode: 'dev' });

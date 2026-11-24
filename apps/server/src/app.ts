@@ -36,6 +36,10 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   });
 
   app.get('/healthz', async () => ({ ok: true }));
+  // One address that always downloads the newest Link for Windows: the release workflow keeps link-latest current.
+  app.get('/download/link', async (_req, reply) => reply
+    .header('cache-control', 'no-store')
+    .redirect('https://github.com/robinAKL/superagent/releases/download/link-latest/SuperAgentLink-Setup-x64.exe', 302));
   if (opts.knowledgeDeps?.liveMcp) {
     // The SPA completes the exchange using the signed-in user's Super Agent credentials.
     app.get<{ Params: { binding?: string }; Querystring: Record<string, unknown> }>(MCP_CALLBACK + '/:binding?', (req, reply) => {
