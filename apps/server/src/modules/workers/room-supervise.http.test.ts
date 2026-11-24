@@ -84,6 +84,28 @@ it('"进行中的任务怎么还没完成" is answered from the board, after Sup
   bindRoomBrain(null);
 });
 
+it('"好了吗" is answered from the board, not by the model', async () => {
+  resetWorkers();
+  bindRoomStore(null);
+  let asked = 0;
+  bindRoomBrain({ understand: async () => { asked += 1; return { answer: '要我检查 Link 吗？' }; } });
+  const employee: EmployeeRef = { id: employeeId, name: 'Analyst', ownerUserId: 'analyst-user', status: 'active' };
+  roomState.current = createCommandRoom(() => [employee]);
+  await registerWorker(workersState.registry, {
+    tenantId, name: 'Link', kind: 'link', createdBy: 'owner', capabilities: { roomAssignments: [{ projectId, employeeId }] },
+  }, Date.now());
+  const app = Fastify();
+  app.addHook('preHandler', async (request) => { request.user = { tenantId, userId: 'owner', roles: ['owner'], projectScopes: [] }; });
+  await app.register(roomModule, { prefix: '/room' });
+  const send = async (body: string, id: string) => (await app.inject({ method: 'POST', url: '/room/messages', payload: { roomId: 'room-1', body, clientMessageId: id } })).json();
+  await send('@Analyst 列出项目文件', 'c1');
+  for (const [i, question] of ['好了吗', '都完成了吗？', '怎么样了'].entries()) {
+    expect((await send(question, `q${i}`)).reply.body).toContain('看板上还有 1 个未完成');
+  }
+  expect(asked).toBe(0);
+  bindRoomBrain(null);
+});
+
 it('a resumed task made under an old binding goes to the employee’s current binding', async () => {
   resetWorkers();
   bindRoomStore(null);
@@ -123,7 +145,12 @@ it('"全部重试" sends every open task again at once and says what happened, t
   const answer = await send('全部重试', 'c2');
   expect(answer.task).toBeNull();
   expect(answer.reply.body).toContain('好的，开始重试 1 个任务');
-  expect(answer.reply.body).toContain('按你的要求');
+  expect(answer.reply.body).toContain('已重新派给 @Analyst');
+  // The room reads: the person's request, then one answer. No separate "重新派给" lines before or after it.
+  const messages = (await app.inject({ method: 'GET', url: '/room/messages?roomId=room-1' })).json().messages as { body: string; kind: string; authorUserId: string }[];
+  const at = messages.findIndex((message) => message.body === '全部重试');
+  expect(messages.slice(at).map((message) => message.authorUserId)).toEqual(['owner', 'super-agent']);
+  expect(messages.filter((message) => message.kind === 'resume')).toEqual([]);
   const wakes = (await app.inject({ method: 'POST', url: '/link/poll', headers: { authorization: 'Bearer ' + token }, payload: { waitMs: 0 } })).json().events
     .map((event: { payload: Record<string, unknown> }) => event.payload);
   expect(wakes).toEqual([
