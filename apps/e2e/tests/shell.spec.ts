@@ -37,7 +37,7 @@ test('every page has the same head: title, subtitle under it (not the room), act
       expect(Math.abs(sub!.x - h1!.x), `#${hash} subtitle aligned under the title`).toBeLessThanOrEqual(1);
       expect(sub!.y, `#${hash} subtitle below the title`).toBeGreaterThanOrEqual(h1!.y + h1!.height - 1);
     }
-    expect(await head.locator('h1').evaluate(el => getComputedStyle(el).fontSize), `#${hash}`).toBe('28px');
+    expect(await head.locator('h1').evaluate(el => getComputedStyle(el).fontSize), `#${hash}`).toBe('22px'); // the v2 type scale: 22px page titles, 14px body
     const actions = head.locator('.page-head-actions');
     if (await actions.count()) {
       const box = (await actions.boundingBox())!;
