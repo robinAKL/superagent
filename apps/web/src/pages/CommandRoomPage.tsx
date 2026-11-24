@@ -859,6 +859,23 @@ export function CommandRoomPage() {
       {/* One line of header: the conversation gets the height. Workflows open as a sheet over the page. */}
       <div className="page-head room-head">
         <h1>{t('指挥室')}</h1>
+        {/* The conversation's filters sit on the title row, so the conversation keeps that height. */}
+        {messages.length > 0 ? (
+          <div className="room-filters" role="toolbar" aria-label={t('筛选对话')}>
+            {([['all', '全部'], ['tasks', '任务'], ['reports', '交付'], ['progress', '进度'], ['mine', '我发的']] as const).map(([key, label]) => (
+              key !== 'all' && streamCounts[key] === 0 ? null : (
+                <button key={key} type="button" className="room-chip" aria-pressed={streamFilter === key} data-filter={key} onClick={() => setStreamFilter(key)}>
+                  {t(label)}{key !== 'all' ? <span>{streamCounts[key]}</span> : null}
+                </button>
+              )
+            ))}
+            <label className="room-search">
+              <span className="sr-only">{t('搜索对话')}</span>
+              <Icon name="search" size={14} />
+              <input type="search" value={streamQuery} placeholder={t('搜索对话')} onChange={(event) => setStreamQuery(event.target.value)} />
+            </label>
+          </div>
+        ) : null}
         <div className="page-head-actions room-head-actions">
           <span className="room-faces" aria-label={`${t('成员')} ${employees.length + 1}`}>
             <span className="room-face is-agent" aria-hidden="true">SA</span>
@@ -916,22 +933,6 @@ export function CommandRoomPage() {
         </aside>
         <section className="panel exec-pane room-chat" aria-label={t('共享协作记录')}>
           <h2 className="sr-only">{t('共享协作记录')}</h2>
-          {messages.length > 0 ? (
-            <div className="room-filters" role="toolbar" aria-label={t('筛选对话')}>
-              {([['all', '全部'], ['tasks', '任务'], ['reports', '交付'], ['progress', '进度'], ['mine', '我发的']] as const).map(([key, label]) => (
-                key !== 'all' && streamCounts[key] === 0 ? null : (
-                  <button key={key} type="button" className="room-chip" aria-pressed={streamFilter === key} data-filter={key} onClick={() => setStreamFilter(key)}>
-                    {t(label)}{key !== 'all' ? <span>{streamCounts[key]}</span> : null}
-                  </button>
-                )
-              ))}
-              <label className="room-search">
-                <span className="sr-only">{t('搜索对话')}</span>
-                <Icon name="search" size={14} />
-                <input type="search" value={streamQuery} placeholder={t('搜索对话')} onChange={(event) => setStreamQuery(event.target.value)} />
-              </label>
-            </div>
-          ) : null}
           <div
             className="exec-scroll exec-stream"
             ref={scroller}
