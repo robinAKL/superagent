@@ -64,6 +64,9 @@ it('"进行中的任务怎么还没完成" is answered from the board, after Sup
   bindRoomBrain({ understand: async () => { asked += 1; return { answer: '要我把哪一项推进？' }; } });
   const employee: EmployeeRef = { id: employeeId, name: 'Analyst', ownerUserId: 'analyst-user', status: 'offline' };
   roomState.current = createCommandRoom(() => [employee]);
+  await registerWorker(workersState.registry, {
+    tenantId, name: 'Link', kind: 'link', createdBy: 'owner', capabilities: { roomAssignments: [{ projectId, employeeId }] },
+  }, Date.now());
   const app = Fastify();
   app.addHook('preHandler', async (request) => { request.user = { tenantId, userId: 'owner', roles: ['owner'], projectScopes: [] }; });
   await app.register(roomModule, { prefix: '/room' });
@@ -100,4 +103,31 @@ it('a resumed task made under an old binding goes to the employee’s current bi
   await superviseRoom();
   const events = (await app.inject({ method: 'POST', url: '/link/poll', headers: { authorization: 'Bearer ' + token }, payload: { waitMs: 0 } })).json().events;
   expect(events.map((event: { payload: Record<string, unknown> }) => event.payload)).toEqual([{ roomTaskId: task.id, projectId: 'project-new', prompt: '列出项目文件', attempt: 1 }]);
+});
+
+it('"全部重试" sends every open task again at once and says what happened, task by task', async () => {
+  resetWorkers();
+  bindRoomStore(null);
+  bindRoomBrain(null);
+  const employee: EmployeeRef = { id: employeeId, name: 'Analyst', ownerUserId: 'analyst-user', status: 'active' };
+  roomState.current = createCommandRoom(() => [employee]);
+  const { token } = await registerWorker(workersState.registry, {
+    tenantId, name: 'Link', kind: 'link', createdBy: 'owner', capabilities: { roomAssignments: [{ projectId, employeeId }] },
+  }, Date.now());
+  const app = Fastify();
+  app.addHook('preHandler', async (request) => { request.user = { tenantId, userId: 'owner', roles: ['owner'], projectScopes: [] }; });
+  await app.register(roomModule, { prefix: '/room' });
+  await app.register(workerLinkModule, { prefix: '/link' });
+  const send = async (body: string, id: string) => (await app.inject({ method: 'POST', url: '/room/messages', payload: { roomId: 'room-1', body, clientMessageId: id } })).json();
+  const made = (await send('@Analyst 列出项目文件', 'c1')).task;
+  const answer = await send('全部重试', 'c2');
+  expect(answer.task).toBeNull();
+  expect(answer.reply.body).toContain('好的，开始重试 1 个任务');
+  expect(answer.reply.body).toContain('按你的要求');
+  const wakes = (await app.inject({ method: 'POST', url: '/link/poll', headers: { authorization: 'Bearer ' + token }, payload: { waitMs: 0 } })).json().events
+    .map((event: { payload: Record<string, unknown> }) => event.payload);
+  expect(wakes).toEqual([
+    { roomTaskId: made.id, projectId, prompt: '列出项目文件', attempt: 0 },
+    { roomTaskId: made.id, projectId, prompt: '列出项目文件', attempt: 1 },
+  ]);
 });

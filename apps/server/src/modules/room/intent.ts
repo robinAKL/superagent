@@ -43,6 +43,15 @@ export function asksBoard(body: string): boolean {
   return text.length <= 80 && BOARD.test(text) && askedTaskNumber(text) === null;
 }
 
+/** "重试 T-5 T-12" → [5, 12]; "全部重试" / "都重新派一下" → 'all'; anything else → null. */
+export function asksRetry(body: string): number[] | 'all' | null {
+  const text = body.trim();
+  if (text.length > 80 || !/(重试|再试|重新(派|派发|执行|做|跑)|retry)/iu.test(text)) return null;
+  const numbers = [...text.matchAll(/(?:^|[^A-Za-z0-9])[Tt]-?\s*(\d{1,6})(?!\d)/gu)].map((match) => Number(match[1]));
+  if (numbers.length) return [...new Set(numbers)];
+  return /(全部|所有|都|这些|这几个|卡住的|没完成的|未完成的|all)/iu.test(text) ? 'all' : null;
+}
+
 export function isGreeting(body: string): boolean {
   return GREETING.test(body.trim());
 }

@@ -482,3 +482,12 @@ it('"测试，请忽略", thanks and "收到" get a short fixed reply: the model
   await send('测试一下 CRM 里 SS-1 的状态', 's-real');
   await expect.poll(() => asked).toBe(1);
 });
+
+it('asksRetry reads which tasks a person wants retried', async () => {
+  const { asksRetry } = await import('./intent.js');
+  expect(asksRetry('重试 T-5 和 t12')).toEqual([5, 12]);
+  expect(asksRetry('全部重试')).toBe('all');
+  expect(asksRetry('卡住的都重新派一下')).toBe('all');
+  expect(asksRetry('T-5是什么任务？')).toBeNull();
+  expect(asksRetry('重试')).toBeNull();
+});

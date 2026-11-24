@@ -89,13 +89,18 @@ export interface RoomTask {
 }
 
 /** Super Agent's notes on an open task: since when it has been in its current state, retries and reminders. */
+/** A task Super Agent wants sent to its computer again, with what it will tell the room once it was sent. */
+export interface RetryRequest { task: RoomTask; body: string }
+
 export interface TaskWatch {
   /** status + waiting reason it was last seen in; a change restarts the clock. */
   state: string;
   /** ISO time the task entered that state, or last showed progress. */
   since: string;
-  /** Times Super Agent sent it to the computer again. */
+  /** Times Super Agent sent it to the computer again since a person last asked to retry (caps automatic retries). */
   attempts: number;
+  /** Every time the task was sent again, never reset: Link runs a wake whose number is higher than the last it ran. */
+  sends?: number;
   /** Reminders posted in the current state. */
   nudges: number;
   lastNudgeAt: string | null;
@@ -672,12 +677,12 @@ export class CommandRoom {
    *   gets a short reminder in the room, at most MAX_NUDGES per state, NUDGE_EVERY apart.
    * Returns the messages it posted and the tasks the caller must send to their computer again.
    */
-  supervise(): { messages: RoomMessage[]; retry: RoomTask[] } {
+  supervise(): { messages: RoomMessage[]; retry: RetryRequest[] } {
     const now = this.now();
     const at = now.toISOString();
     const employees = this.employees();
     const messages: RoomMessage[] = [];
-    const retry: RoomTask[] = [];
+    const retry: RetryRequest[] = [];
     for (const task of this.tasks) {
       if (!OPEN.has(task.status)) continue;
       const state = `${task.status}:${task.waitingReason ?? ''}`;
@@ -696,17 +701,8 @@ export class CommandRoom {
           clientMessageId: `watch:${task.id}:${this.seq + 1}`, mentions: employee ? [employee.id] : [], taskIds: [task.id], kind,
         }));
       };
-      const again = (body: string) => {
-        task.status = 'assigned';
-        task.waitingReason = null;
-        watch.attempts += 1;
-        watch.state = 'assigned:';
-        watch.since = at;
-        watch.nudges = 0;
-        watch.lastNudgeAt = null;
-        say(body, 'resume');
-        retry.push(task);
-      };
+      // Said and counted only once a computer has the task again: see retried().
+      const again = (body: string) => { retry.push({ task, body }); };
       const remind = (firstAfter: number, body: string) => {
         if (age < firstAfter || watch.nudges >= MAX_NUDGES) return;
         if (watch.lastNudgeAt && now.getTime() - new Date(watch.lastNudgeAt).getTime() < NUDGE_EVERY) return;
@@ -738,6 +734,59 @@ export class CommandRoom {
       }
     }
     return { messages, retry };
+  }
+
+  /**
+   * The outcome of sending a task again. Sent: it is assigned again, the attempt counts, and the room is told.
+   * Not sent (no single computer is bound for this employee): nothing counts, the task keeps its state, and the room
+   * hears why, as a reminder (so at most every two hours).
+   */
+  retried(request: RetryRequest, sent: boolean): RoomMessage | null {
+    const { task, body } = request;
+    const at = this.now().toISOString();
+    const employee = this.employees().find((item) => item.id === task.employeeId);
+    const watch = task.watch ?? { state: '', since: at, attempts: 0, nudges: 0, lastNudgeAt: null };
+    task.watch = watch;
+    const post = (text: string, kind: MessageKind) => this.push({
+      roomId: task.roomId, tenantId: task.tenantId, authorUserId: 'super-agent', body: text,
+      clientMessageId: `watch:${task.id}:${this.seq + 1}`, mentions: employee ? [employee.id] : [], taskIds: [task.id], kind,
+    });
+    if (sent) {
+      task.status = 'assigned';
+      task.waitingReason = null;
+      watch.attempts += 1;
+      watch.sends = (watch.sends ?? 0) + 1;
+      watch.state = 'assigned:';
+      watch.since = at;
+      watch.nudges = 0;
+      watch.lastNudgeAt = null;
+      return post(body, 'resume');
+    }
+    if (watch.lastNudgeAt && this.now().getTime() - new Date(watch.lastNudgeAt).getTime() < NUDGE_EVERY) return null;
+    watch.nudges += 1;
+    watch.lastNudgeAt = at;
+    return post(`${taskCode(task)}「${task.title}」现在没有电脑能接：@${employee?.name ?? '数字员工'} 没有绑定到唯一的一台电脑和项目。请到「管理设置 → 已连接的电脑」检查绑定，绑好后我会自动派出。`, 'nudge');
+  }
+
+  /**
+   * "重试 T-5" / "全部重试": a person asks Super Agent to start these open tasks over. Their retry count is reset and each
+   * is sent again (the caller sends them and reports through retried()). Returns the tasks it will send, and the
+   * numbers it could not use (unknown, not visible, or already finished).
+   */
+  retryRequested(viewer: Viewer, roomId: string, numbers: number[] | 'all'): { retry: RetryRequest[]; skipped: string[] } {
+    const visible = this.listTasks(viewer, roomId);
+    const wanted = numbers === 'all'
+      ? visible.filter((task) => OPEN.has(task.status))
+      : numbers.map((n) => visible.find((task) => task.id === `task_${n}`)).filter((task): task is RoomTask => Boolean(task));
+    const skipped = numbers === 'all' ? [] : numbers.filter((n) => !wanted.some((task) => task.id === `task_${n}` && OPEN.has(task.status))).map((n) => `T-${n}`);
+    const retry: RetryRequest[] = [];
+    for (const task of wanted) {
+      if (!OPEN.has(task.status) || task.approval !== 'none' || task.hold) continue;
+      if (!isOwner(viewer) && task.createdByUserId !== viewer.userId) continue;
+      if (task.watch) task.watch.attempts = 0;
+      retry.push({ task, body: `按你的要求，我把 ${taskCode(task)}「${task.title}」重新派给 @${this.employees().find((item) => item.id === task.employeeId)?.name ?? '数字员工'}（同一个任务，没有新建）。` });
+    }
+    return { retry, skipped };
   }
 
   /** The board as Super Agent reads it to a person: every open task, how long it has been so, and what happens next. */
