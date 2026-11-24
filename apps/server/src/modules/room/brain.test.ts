@@ -116,3 +116,21 @@ it('tells the model to hand work to an employee when the person asks for one, ev
   expect(system).toContain('你让数字员工去查');
   expect(system).toContain('unless the');
 });
+
+it('knows the room\'s tasks by number, so "T-5是什么任务" is answered from the list, not guessed', async () => {
+  let sent = '';
+  let system = '';
+  const brain = gatewayBrain({
+    check: async () => ({ ok: true, model: 'm' }),
+    chat: async (_t, _tier, req) => {
+      system = req.messages[0]!.content as string;
+      sent = req.messages[1]!.content as string;
+      return { text: '{"action":"reply","reply":"T-5 是：检查本地 worker 是否在线，并把结果告诉我。现在等待连接。"}', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'end', model: 'm', reservedMicroUsd: 0, costMicroUsd: 0 };
+    },
+  });
+  const tasks = [{ code: 'T-5', title: '检查本地 worker 是否在线，并把结果告诉我。', status: 'waiting (等待连接)', employee: 'Wholesale Operations' }];
+  const decision = await brain.understand({ tenantId: 't', body: 'T-5是什么任务？', roster: employees, tasks, history: [] });
+  expect(decision).toEqual({ answer: 'T-5 是：检查本地 worker 是否在线，并把结果告诉我。现在等待连接。' });
+  expect(JSON.parse(sent).tasks).toEqual(tasks);
+  expect(system).toContain('from that list only');
+});

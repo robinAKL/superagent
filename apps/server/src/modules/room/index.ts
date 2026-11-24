@@ -221,7 +221,14 @@ export const roomModule: FastifyPluginAsync = async (app) => {
       let understood: import('./brain.js').Understood | null = null;
       try {
         const sources = req.user && roomLookups ? await roomLookups.sources(req.user).catch(() => []) : [];
-        const decision = await roomBrain!.understand({ tenantId, body: text, roster: room.roster(viewer), sources, history });
+        const roster = room.roster(viewer);
+        const tasks = room.listTasks(viewer, body.roomId).map((task) => ({
+          code: `T-${/(\d+)$/.exec(task.id)?.[1] ?? task.id}`,
+          title: task.title.slice(0, 200),
+          status: task.waitingReason ? `${task.status} (${task.waitingReason})` : task.status,
+          employee: roster.find((employee) => employee.id === task.employeeId)?.name ?? '',
+        }));
+        const decision = await roomBrain!.understand({ tenantId, body: text, roster, sources, tasks, history });
         if (decision && 'ask' in decision) {
           // Super Agent looks it up itself through the person's own connection, then answers in the room.
           const source = sources.find((item) => item.id === decision.ask.sourceId);
