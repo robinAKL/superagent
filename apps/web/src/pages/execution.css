@@ -525,3 +525,7 @@
   .exec-room { height: auto; }
   .exec-room .exec-grid { flex: none; height: 400px; }
 }
+
+/* Scrolling areas contain what is positioned inside them: a screen-reader-only label (absolute) in a long task list
+   otherwise escapes the list's clipping and stretches the whole page. */
+.room .exec-scroll, .room .room-task-list, .room .exec-drawer, .room .room-agents, .room .outcome-message-card { position: relative; }
