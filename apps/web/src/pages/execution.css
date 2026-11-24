@@ -457,3 +457,19 @@
 .exec-inbox .exec-task[aria-current="true"] { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 6%, var(--color-paper-2)); }
 .exec-inbox .exec-task strong { font-size: 14px; }
 .inbox-item-top { display: flex; gap: 6px; }
+
+/* ---- Room v2, as drawn: lines between the room bar and the columns, and between the three columns ---- */
+.room .room-head { padding-bottom: var(--space-md); border-bottom: 1px solid var(--color-soft-rule); }
+@media (min-width: 1201px) {
+  .room .exec-grid, .room .exec-grid:has(.exec-drawer) { gap: 0; }
+  .room .room-agents { padding: var(--space-md) var(--space-md) var(--space-md) 0; border-right: 1px solid var(--color-soft-rule); }
+  .room .room-chat.panel { padding: var(--space-md) var(--space-lg) 0; }
+  .room .room-tasks.panel { padding: var(--space-md) 0 var(--space-md) var(--space-md); border: 0; border-left: 1px solid var(--color-soft-rule); border-radius: 0; }
+  .room .exec-drawer { margin-left: var(--space-md); }
+}
+/* The message box: gold-tinted edge on a raised surface. */
+.room-composer-box { border-color: color-mix(in srgb, var(--color-accent) 32%, var(--color-rule)); background: var(--color-paper-2); }
+/* Task cards: a full thin border; gold only for the one running or open, amber edge while waiting. No side bars. */
+.room .exec-task, .room .exec-task[data-status="waiting"] { border: 1px solid var(--color-rule); }
+.room .exec-task[data-status="waiting"] { border-color: color-mix(in srgb, var(--color-warning) 35%, var(--color-rule)); }
+.room .exec-task[data-status="running"], .room .exec-task[aria-current="true"] { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 6%, var(--color-paper-2)); }
