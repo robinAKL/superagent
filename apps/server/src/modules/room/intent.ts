@@ -33,6 +33,16 @@ export function smallTalkReply(body: string): string | null {
   return null;
 }
 
+/**
+ * "进行中的任务怎么还没完成", "还有哪些任务没做完", "看板", "进度怎么样": a question about the board as a whole
+ * (a question about one numbered task is askedTaskNumber's).
+ */
+const BOARD = /(看板|进度|进展|进行中|未完成|没完成|没有完成|没做完|还没好|卡住|卡在|还有(哪些|什么|几个)?任务|任务(都|还)?(怎么样|如何|完成了吗|做完了吗)|在做什么|在忙什么)/u;
+export function asksBoard(body: string): boolean {
+  const text = body.trim();
+  return text.length <= 80 && BOARD.test(text) && askedTaskNumber(text) === null;
+}
+
 export function isGreeting(body: string): boolean {
   return GREETING.test(body.trim());
 }

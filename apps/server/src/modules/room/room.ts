@@ -39,7 +39,7 @@ export interface RoomMessage {
   kind: MessageKind;
 }
 
-export type MessageKind = 'message' | 'reply' | 'report' | 'review' | 'cancel' | 'hold' | 'resume' | 'contract';
+export type MessageKind = 'message' | 'reply' | 'report' | 'review' | 'cancel' | 'hold' | 'resume' | 'contract' | 'nudge';
 
 /** What counts as done for a task. Each revision is a new version; acceptance is always against the current one. */
 export interface TaskContract {
@@ -84,6 +84,21 @@ export interface RoomTask {
   contract: TaskContract | null;
   /** The execution run that carries this task's external action, linked by the runtime or the person who asked. */
   runId: string | null;
+  /** What Super Agent, as the room's project manager, tracks about this task (see supervise()). */
+  watch?: TaskWatch | null;
+}
+
+/** Super Agent's notes on an open task: since when it has been in its current state, retries and reminders. */
+export interface TaskWatch {
+  /** status + waiting reason it was last seen in; a change restarts the clock. */
+  state: string;
+  /** ISO time the task entered that state, or last showed progress. */
+  since: string;
+  /** Times Super Agent sent it to the computer again. */
+  attempts: number;
+  /** Reminders posted in the current state. */
+  nudges: number;
+  lastNudgeAt: string | null;
 }
 
 export interface RoomSnapshot {
@@ -170,7 +185,34 @@ function withDefaults(task: RoomTask): RoomTask {
     hold: task.hold?.toolId ? { reason: task.hold.reason, responsible: task.hold.responsible, toolId: task.hold.toolId } : null,
     contract: task.contract ? { ...task.contract } : null,
     runId: task.runId ?? null,
+    watch: task.watch ? { ...task.watch } : null,
   };
+}
+
+const MINUTE = 60_000;
+/** Super Agent retries a task on the computer at most this many times before handing the decision to a person. */
+const MAX_ATTEMPTS = 2;
+/** Reminders per state, and the gap between them. */
+const MAX_NUDGES = 3;
+const NUDGE_EVERY = 120 * MINUTE;
+
+/** "task_153" → "T-153". */
+export function taskCode(task: Pick<RoomTask, 'id'>): string {
+  return `T-${/(\d+)$/.exec(task.id)?.[1] ?? task.id}`;
+}
+
+const STATE_TEXT: Record<string, string> = {
+  assigned: '已派出，等电脑领取', running: '进行中', waiting: '等待', reported: '已回报，待复核', outcome_unknown: '结果待确认',
+  completed: '已完成', reviewed: '已复核', cancelled: '已取消',
+};
+
+/** "进行中" / "等待（等待连接）", for the board and the people reading it. */
+export function stateText(task: Pick<RoomTask, 'status' | 'waitingReason'>): string {
+  return `${STATE_TEXT[task.status] ?? task.status}${task.waitingReason ? `（${task.waitingReason}）` : ''}`;
+}
+
+function minutesSince(iso: string, now: Date): number {
+  return Math.max(0, Math.floor((now.getTime() - new Date(iso).getTime()) / MINUTE));
 }
 
 /**
@@ -407,6 +449,8 @@ export class CommandRoom {
     if (!OPEN.has(task.status)) throw new Error('task_closed');
     // The computer is working on it (again): in progress. Its fixed failure texts say it stopped.
     const state = workerUpdateState(body);
+    // Progress from the computer restarts Super Agent's clock on this task.
+    if (task.watch) { task.watch.since = this.now().toISOString(); task.watch.nudges = 0; }
     task.status = state === 'progress' ? 'running' : 'waiting';
     task.waitingReason = state === 'progress' ? null : state === 'failed' ? WAITING_FAILED : WAITING_SIGN_IN;
     return this.push({
@@ -621,6 +665,130 @@ export class CommandRoom {
   }
 
   /**
+   * Super Agent as the room's project manager: it watches every open task on the board and keeps work moving.
+   * - A task waiting for its computer resumes by itself once that computer is back (the same task, never a new one).
+   * - A failed run, or one no computer picked up, is sent again, at most MAX_ATTEMPTS times.
+   * - Anything that needs a person (a decision, a sign-in, a supplement, an approval) or a run that has gone quiet
+   *   gets a short reminder in the room, at most MAX_NUDGES per state, NUDGE_EVERY apart.
+   * Returns the messages it posted and the tasks the caller must send to their computer again.
+   */
+  supervise(): { messages: RoomMessage[]; retry: RoomTask[] } {
+    const now = this.now();
+    const at = now.toISOString();
+    const employees = this.employees();
+    const messages: RoomMessage[] = [];
+    const retry: RoomTask[] = [];
+    for (const task of this.tasks) {
+      if (!OPEN.has(task.status)) continue;
+      const state = `${task.status}:${task.waitingReason ?? ''}`;
+      if (!task.watch || task.watch.state !== state) {
+        task.watch = { state, since: at, attempts: task.watch?.attempts ?? 0, nudges: 0, lastNudgeAt: null };
+      }
+      const watch = task.watch;
+      const employee = employees.find((item) => item.id === task.employeeId);
+      const name = employee?.name ?? '数字员工';
+      const online = Boolean(employee && (ACTIVE(employee) || (employee.status !== 'paused' && roomHooks.linkMayBeOnline(employee.id))));
+      const age = minutesSince(watch.since, now);
+      const code = taskCode(task);
+      const say = (body: string, kind: MessageKind) => {
+        messages.push(this.push({
+          roomId: task.roomId, tenantId: task.tenantId, authorUserId: 'super-agent', body,
+          clientMessageId: `watch:${task.id}:${this.seq + 1}`, mentions: employee ? [employee.id] : [], taskIds: [task.id], kind,
+        }));
+      };
+      const again = (body: string) => {
+        task.status = 'assigned';
+        task.waitingReason = null;
+        watch.attempts += 1;
+        watch.state = 'assigned:';
+        watch.since = at;
+        watch.nudges = 0;
+        watch.lastNudgeAt = null;
+        say(body, 'resume');
+        retry.push(task);
+      };
+      const remind = (firstAfter: number, body: string) => {
+        if (age < firstAfter || watch.nudges >= MAX_NUDGES) return;
+        if (watch.lastNudgeAt && now.getTime() - new Date(watch.lastNudgeAt).getTime() < NUDGE_EVERY) return;
+        watch.nudges += 1;
+        watch.lastNudgeAt = at;
+        say(body, 'nudge');
+      };
+      if (task.approval !== 'none' || task.hold) {
+        if (task.hold) remind(30, `${code}「${task.title}」在等企业负责人授权工具 ${task.hold.toolId}，授权后我会让 @${name} 继续。`);
+        continue;
+      }
+      if (task.status === 'waiting' && task.waitingReason === WAITING_CONNECTION) {
+        if (online) again(`@${name} 的电脑已在线，我把 ${code}「${task.title}」重新派给它继续做（同一个任务，没有新建）。`);
+        else remind(30, `${code}「${task.title}」在等 @${name} 的电脑上线，已经 ${age} 分钟。请打开那台电脑上的 Link，上线后我会自动继续。`);
+      } else if (task.status === 'waiting' && task.waitingReason === WAITING_FAILED) {
+        if (online && watch.attempts < MAX_ATTEMPTS && age >= 1) again(`${code}「${task.title}」上次执行失败，我已让 @${name} 自动重试（第 ${watch.attempts + 1} 次）。`);
+        else if (watch.attempts >= MAX_ATTEMPTS) remind(0, `${code}「${task.title}」已自动重试 ${watch.attempts} 次仍然失败，需要你决定：补充说明后重试、改派给别人，或取消。`);
+      } else if (task.status === 'waiting' && task.waitingReason === WAITING_SIGN_IN) {
+        remind(5, `${code}「${task.title}」在等 @${name} 的电脑完成本地登录（Claude Code / Codex）。登录后我会自动继续。`);
+      } else if (task.status === 'waiting' && task.waitingReason === '等待补充') {
+        remind(10, `${code}「${task.title}」还在等你补充信息，补充后 @${name} 会继续。`);
+      } else if (task.status === 'waiting' && task.waitingReason === '等待模型') {
+        remind(10, `${code}「${task.title}」在等模型恢复。请到「管理设置」检查模型连接和额度。`);
+      } else if (task.status === 'assigned' && online) {
+        if (age >= 10 && watch.attempts < MAX_ATTEMPTS) again(`${code}「${task.title}」派出 ${age} 分钟还没被 @${name} 的电脑领取，我已重新派发。`);
+        else if (watch.attempts >= MAX_ATTEMPTS) remind(10, `${code}「${task.title}」重新派发 ${watch.attempts} 次仍没被领取。请检查 @${name} 那台电脑的 Link 是否在运行、项目是否已绑定。`);
+      } else if (task.status === 'running') {
+        remind(30, `${code}「${task.title}」@${name} 已经 ${age} 分钟没有新进展，我在盯着。如果卡住了，可以在任务上取消，或告诉我重试。`);
+      }
+    }
+    return { messages, retry };
+  }
+
+  /** The board as Super Agent reads it to a person: every open task, how long it has been so, and what happens next. */
+  boardSummary(viewer: Viewer, roomId: string): string {
+    const tasks = this.listTasks(viewer, roomId);
+    const open = tasks.filter((task) => OPEN.has(task.status));
+    const done = tasks.filter((task) => COMPLETED.has(task.status)).length;
+    if (!open.length) return `看板上没有未完成的任务（共 ${tasks.length} 个，${done} 个已完成）。`;
+    const now = this.now();
+    const employees = this.employees();
+    const lines = open.slice(-12).map((task) => {
+      const name = employees.find((item) => item.id === task.employeeId)?.name ?? '数字员工';
+      const age = task.watch ? `，${minutesSince(task.watch.since, now)} 分钟` : '';
+      return `- ${taskCode(task)}「${task.title.slice(0, 40)}」@${name}：${stateText(task)}${age}。${this.nextStep(task)}`;
+    });
+    const more = open.length > 12 ? `\n（另有 ${open.length - 12} 个更早的未完成任务）` : '';
+    return `看板上还有 ${open.length} 个未完成（共 ${tasks.length} 个，${done} 个已完成）：\n${lines.join('\n')}${more}`;
+  }
+
+  /** What happens next with an open task, in one short clause. */
+  private nextStep(task: RoomTask): string {
+    if (task.hold) return '等企业负责人授权工具。';
+    if (task.status === 'running') return '电脑正在做，我在盯进度。';
+    if (task.status === 'assigned') return (task.watch?.attempts ?? 0) >= MAX_ATTEMPTS ? '多次派发没被领取，需要检查那台电脑的 Link。' : '等电脑领取，超时我会重新派发。';
+    if (task.waitingReason === WAITING_CONNECTION) return '电脑上线后我会自动继续。';
+    if (task.waitingReason === WAITING_FAILED) return (task.watch?.attempts ?? 0) >= MAX_ATTEMPTS ? '已重试仍失败，需要你决定：补充、改派或取消。' : '我会自动重试。';
+    if (task.waitingReason === WAITING_SIGN_IN) return '需要那台电脑完成本地登录。';
+    if (task.waitingReason === '等待补充') return '需要你补充信息。';
+    if (task.waitingReason === '等待模型') return '需要检查模型设置。';
+    return '';
+  }
+
+  /** The room's other open tasks, for the employee working on this one: the same board everyone in the room sees. */
+  boardFor(task: RoomTask): string {
+    const employees = this.employees();
+    return this.tasks
+      .filter((item) => item.roomId === task.roomId && item.tenantId === task.tenantId && item.id !== task.id && OPEN.has(item.status))
+      .slice(-10)
+      .map((item) => `- ${taskCode(item)} @${employees.find((employee) => employee.id === item.employeeId)?.name ?? '数字员工'}：${item.title.slice(0, 80)}（${stateText(item)}）`)
+      .join('\n');
+  }
+
+  /** The text Link runs for a task, with the team board as context. Only this task is the work. */
+  dispatchPrompt(task: RoomTask): string {
+    const board = this.boardFor(task);
+    return board
+      ? `${task.title}\n\n---\n你在做的是 ${taskCode(task)}，只做这一个任务。下面是指挥室看板上其他未完成的任务，仅供了解团队进度，不要去做：\n${board}`
+      : task.title;
+  }
+
+  /**
    * The person who asked, or an owner, resumes the same task once its employee is connected again.
    * Still offline is refused; nothing is re-created, and the task keeps its id, source and history.
    */
@@ -801,17 +969,13 @@ export class CommandRoom {
     if (number === null) return null;
     const task = this.listTasks(viewer, roomId).find((item) => item.id === `task_${number}`);
     if (!task) return `我看不到 T-${number} 这个任务：它不在这个房间，或不在你能看到的范围里。`;
-    const STATE: Record<string, string> = {
-      assigned: '已派出，等电脑领取', running: '进行中', waiting: '等待', reported: '已回报，待复核', outcome_unknown: '结果待确认',
-      completed: '已完成', reviewed: '已复核', cancelled: '已取消',
-    };
     const employee = this.employees().find((item) => item.id === task.employeeId)?.name ?? '数字员工';
-    const state = `${STATE[task.status] ?? task.status}${task.waitingReason ? `（${task.waitingReason}）` : ''}`;
+    const state = stateText(task);
     const report = [...this.messages].reverse().find((message) => message.kind === 'report' && message.taskIds.includes(task.id));
     const summary = report ? `
 回报：${report.body.replace(/\s+/g, ' ').trim().slice(0, 160)}${report.body.length > 160 ? '…' : ''}` : '';
     return `T-${number}：${task.title}
-状态：${state}；负责：@${employee}。${summary}`;
+状态：${state}；负责：@${employee}。${OPEN.has(task.status) ? this.nextStep(task) : ''}${summary}`;
   }
 
   /** Whether a message names a digital employee with @, so the room can skip reading it with the model. */

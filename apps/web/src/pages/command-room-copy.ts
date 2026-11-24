@@ -70,6 +70,7 @@ const ENGLISH: Readonly<Record<string, string>> = {
   "这是对外动作：执行前要在「待我处理」里批准，这里交办不等于授权。": "This action requires approval in My work before it can run.",
   "只读或起草，不需要动作审批。只使用该员工被授权的来源。": "This read or drafting task can use the employee’s authorized sources.",
   "验收契约": "Acceptance criteria",
+  "提醒": "Reminder",
   "还没有写验收契约。": "No acceptance criteria yet.",
   "执行与外部动作": "Execution and external actions",
   "事件 ": "Event ",

@@ -70,7 +70,7 @@ async function fixture(t, agent = 'codex', options = {}) {
     save: async (state) => writeFile(stateFile, JSON.stringify(state)),
     childPid: async () => Number(await readFile(join(directory, 'child-pid.log'), 'utf8')),
     requests, control,
-    wake: (seq, prompt, projectId = 'p1') => events.push({ seq, kind: 'wake', payload: { roomTaskId: 'task1', projectId, prompt } }),
+    wake: (seq, prompt, projectId = 'p1', attempt) => events.push({ seq, kind: 'wake', payload: { roomTaskId: 'task1', projectId, prompt, ...(attempt ? { attempt } : {}) } }),
     cancel: (seq) => events.push({ seq, kind: 'cancel', payload: { roomTaskId: 'task1' } }),
   };
 }
@@ -91,6 +91,28 @@ test('runs Codex and sends a result, then resumes the poll cursor without rerunn
   await restarted.runNext();
   assert.deepEqual(f.requests.filter(({ path }) => path.endsWith('/poll')).map(({ body }) => [body.since, body.eventsOnly]), [[0, true], [1, true]]);
   assert.equal((await f.args()).length, 1);
+});
+
+test('runs a finished task once more when Super Agent sends it again with a higher attempt, and only then', async (t) => {
+  const f = await fixture(t);
+  f.wake(1, 'Inspect the project');
+  const link = f.make();
+  await link.poll(undefined, 0);
+  await link.runNext();
+  f.wake(2, 'Inspect the project'); // a copy of the same wake: nothing to do
+  await link.poll(undefined, 0);
+  await link.runNext();
+  assert.equal((await f.args()).length, 1);
+  f.wake(3, 'Inspect the project again', 'p1', 1); // resumed by Super Agent
+  await link.poll(undefined, 0);
+  await link.runNext();
+  assert.equal((await f.args()).length, 2);
+  assert.ok(f.requests.some(({ path, body }) => path.endsWith('/report') && body.body === 'Result: Inspect the project again'));
+  assert.equal((await f.state()).jobs.length, 1);
+  f.wake(4, 'Inspect the project again', 'p1', 1); // the same attempt twice runs once
+  await link.poll(undefined, 0);
+  await link.runNext();
+  assert.equal((await f.args()).length, 2);
 });
 
 /** Claude Code's argv with Link's permission hook taken out; the hook itself is asserted separately. */

@@ -166,7 +166,7 @@ export async function dispatchWaitingRoomTasks(tenantId: string, employeeId: str
     task.projectId = target.projectId;
     await flushRoom();
     if (await workersState.registry.appendEvent(task.tenantId, target.workerId, 'wake', {
-      roomTaskId: task.id, projectId: target.projectId, prompt: task.title,
+      roomTaskId: task.id, projectId: target.projectId, prompt: roomState.current.dispatchPrompt(task), attempt: task.watch?.attempts ?? 0,
     }, 'super-agent', workersState.now(), task.id)) sent++;
   }
   return sent;
@@ -176,8 +176,23 @@ export async function queueRoomDispatch(task: RoomTask, target: { workerId: stri
   await workersState.registry.appendEvent(task.tenantId, target.workerId, 'wake', {
     roomTaskId: task.id,
     projectId: target.projectId,
-    prompt: task.title,
+    prompt: roomState.current.dispatchPrompt(task),
+    attempt: task.watch?.attempts ?? 0,
   }, 'super-agent', workersState.now(), task.id);
+}
+
+/**
+ * Super Agent sends a task it is resuming or retrying to the employee's computer again: the same task id, with a
+ * higher attempt number so Link runs it once more instead of treating it as already done. False when no single
+ * bound computer can take it (it then stays assigned, and the heartbeat re-dispatch picks it up later).
+ */
+export async function retryRoomDispatch(task: RoomTask): Promise<boolean> {
+  const target = await resolveRoomDispatch(task, null);
+  if (!target) return false;
+  task.projectId = target.projectId;
+  await workersState.registry.releaseRoomDispatch(task.tenantId, task.id);
+  await queueRoomDispatch(task, target);
+  return true;
 }
 
 const isManager = (roles: readonly string[]) => roles.includes('owner') || roles.includes('admin');
@@ -587,10 +602,12 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
       return reply.code(404).send({ error: 'task_not_found' });
     }
     const digest = createHash('sha256').update(body).digest('hex');
+    // A run Super Agent resumed or retried may say the same words as the run before; it is still a new update.
+    const attempt = roomState.current.listTasks({ userId: 'system', roles: ['owner'], projectScopes: [] }).find((item) => item.id === id)?.watch?.attempts ?? 0;
     let message;
     try {
       message = roomState.current.updateFromWorker(
-        id, worker.tenantId, body, 'worker-' + action + ':' + id + ':' + digest, action === 'report',
+        id, worker.tenantId, body, 'worker-' + action + ':' + id + ':' + (attempt ? `a${attempt}:` : '') + digest, action === 'report',
         task => workerMayRun(worker, task) && !!worker.capabilities.roomAssignments?.some(assignment =>
           assignment.employeeId === task.employeeId && assignment.projectId === task.projectId,
         ),

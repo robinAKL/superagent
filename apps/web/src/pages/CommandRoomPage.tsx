@@ -18,7 +18,7 @@ import { GettingStarted } from '../components/GettingStarted';
 const ROOM_ID = 'room-1';
 const POLL_MS = 4000;
 
-export type MessageKind = 'message' | 'reply' | 'report' | 'review' | 'cancel' | 'hold' | 'resume' | 'contract';
+export type MessageKind = 'message' | 'reply' | 'report' | 'review' | 'cancel' | 'hold' | 'resume' | 'contract' | 'nudge';
 
 function TypingBubble({ who, what, data }: { who: string; what: string; data: string }) {
   return <div className="room-typing" data-typing={data} role="status">
@@ -377,6 +377,7 @@ export function messageKindLabel(message: ApiMessage, tasks: readonly ApiTask[],
   if (message.kind === 'hold') return roomText('等待连接', lang);
   if (message.kind === 'resume') return roomText('恢复', lang);
   if (message.kind === 'contract') return roomText('验收契约', lang);
+  if (message.kind === 'nudge') return roomText('提醒', lang);
   if (message.kind === 'reply') return roomText(fromComputer(message) ? '进度' : message.taskIds.length > 0 ? '任务' : '回复', lang);
   return roomText(tasks.some((task) => task.messageId === message.id) ? '派活' : '消息', lang);
 }

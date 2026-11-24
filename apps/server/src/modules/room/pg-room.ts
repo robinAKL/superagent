@@ -53,9 +53,10 @@ interface TaskContext {
   hold?: ResultHold | null;
   contract?: TaskContract | null;
   runId?: string | null;
+  watch?: RoomTask['watch'];
 }
 
-const KINDS = new Set<MessageKind>(['message', 'reply', 'report', 'review', 'cancel', 'hold', 'resume', 'contract']);
+const KINDS = new Set<MessageKind>(['message', 'reply', 'report', 'review', 'cancel', 'hold', 'resume', 'contract', 'nudge']);
 
 function asContext(value: unknown): TaskContext {
   const parsed = typeof value === 'string' ? (JSON.parse(value) as unknown) : value;
@@ -113,6 +114,7 @@ export async function saveRoomRows(db: Queryable, snapshot: RoomSnapshot): Promi
         hold: task.hold,
         contract: task.contract,
         runId: task.runId,
+        watch: task.watch ?? null,
       } satisfies TaskContext),
     ]);
   }
@@ -174,6 +176,7 @@ export async function loadRoomRows(db: Queryable): Promise<RoomSnapshot> {
         hold: context.hold ?? null,
         contract: context.contract ?? null,
         runId: context.runId ?? null,
+        watch: context.watch ?? null,
       };
     }),
     members: [...byRoom.entries()].map(([roomId, userIds]) => ({ roomId, userIds })),
