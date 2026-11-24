@@ -101,3 +101,18 @@ it('tells the model which sources the platform itself has, apart from the employ
     .toEqual({ ask: { sourceId: 'src-vera', question: '订单总数' } });
   expect(JSON.parse(sent).platformSources).toEqual(sources);
 });
+
+it('tells the model to hand work to an employee when the person asks for one, even a lookup', async () => {
+  let system = '';
+  const brain = gatewayBrain({
+    check: async () => ({ ok: true, model: 'm' }),
+    chat: async (_t, _tier, req) => {
+      system = req.messages[0]!.content as string;
+      return { text: '{"action":"assign","employeeId":"emp-ops","task":"用 CRM 查询本周新增订单"}', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'end', model: 'm', reservedMicroUsd: 0, costMicroUsd: 0 };
+    },
+  });
+  const decision = await brain.understand({ tenantId: 't', body: '你让数字员工去查', roster: employees, history: [{ from: 'user', text: 'CRM里本周新增了几个订单？' }] });
+  expect(decision).toEqual({ employeeId: 'emp-ops', work: '用 CRM 查询本周新增订单' });
+  expect(system).toContain('你让数字员工去查');
+  expect(system).toContain('unless the');
+});
