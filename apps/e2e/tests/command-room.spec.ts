@@ -118,6 +118,25 @@ test('members list Super Agent first, then each employee with what it is doing; 
   await expect(draft(page)).toHaveValue(`@${away.name} `);
 });
 
+test('a message the room already has is shown once, even before the send call returns', async ({ page }) => {
+  await as(page, OWNER);
+  // The server stores the message at once; the page hears back late (Super Agent is still thinking).
+  await page.route('**/api/v1/room/messages', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    const response = await route.fetch();
+    await new Promise((resolve) => setTimeout(resolve, 6000));
+    await route.fulfill({ response });
+  });
+  await draft(page).fill('对 T-5');
+  await draft(page).press('Enter');
+  const mine = stream(page).locator('.exec-message[data-mine]').filter({ hasText: '对 T-5' });
+  // A refresh brings the saved message while the call is still open: it replaces the outbox, never beside it.
+  await expect(stream(page).locator('[data-message]').filter({ hasText: '对 T-5' })).toHaveCount(1, { timeout: 6000 });
+  await expect(mine).toHaveCount(1);
+  await expect(stream(page).locator('[data-outbox]')).toHaveCount(0);
+  await page.unroute('**/api/v1/room/messages');
+});
+
 test('a sent message shows at once with Super Agent thinking under it; a failed send gives the draft back', async ({ page }) => {
   await as(page, OWNER);
   let release!: () => void;
