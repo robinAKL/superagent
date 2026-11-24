@@ -533,6 +533,21 @@ export function CommandRoomPage() {
 
   /** The message just sent, shown at once while the server (and Super Agent) answer. */
   const [outbox, setOutbox] = useState<{ id: string; body: string } | null>(null);
+  /** A message the server stored while Super Agent is still reading it: thinking until its reply shows up. */
+  const [awaiting, setAwaiting] = useState<string | null>(null);
+  useEffect(() => {
+    if (!awaiting) return;
+    if (messages.some((message) => message.clientMessageId === `reply:${awaiting}`)) { setAwaiting(null); return; }
+    // Look for the answer every second while waiting, and give up showing the bubble after three minutes.
+    const tick = window.setInterval(() => void pull(), 1000);
+    const stop = window.setTimeout(() => setAwaiting(null), 180_000);
+    return () => { window.clearInterval(tick); window.clearTimeout(stop); };
+  }, [awaiting, messages]);
+  // My message on its way and the typing bubbles are part of the latest lines: keep them in view.
+  useEffect(() => {
+    const el = scroller.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [outbox, awaiting, tasks]);
 
   async function sendDraft() {
     const body = draft.trim();
@@ -558,7 +573,8 @@ export function CommandRoomPage() {
         setNotice('这条消息没有发出去，草稿还在，可以再发一次。');
         return;
       }
-      const data = (await response.json()) as { message: ApiMessage; reply: ApiMessage | null };
+      const data = (await response.json()) as { message: ApiMessage; reply: ApiMessage | null; awaiting?: boolean };
+      if (data.awaiting) setAwaiting(data.message.id);
       pending.current = null;
       stick.current = true;
       setMessages((current) => mergeRoomMessages(current, [data.message, ...(data.reply ? [data.reply] : [])]));
@@ -721,7 +737,7 @@ export function CommandRoomPage() {
   const counts = { open: tasks.filter((task) => OPEN_STATUS.has(task.status)).length, review: tasks.filter((task) => reviewStatus.has(task.status)).length };
   const delivered = tasks.filter((task) => task.status === 'completed' || task.status === 'reviewed').slice(-5).reverse();
   const firstEmployee = employees.find((employee) => employee.status === 'active') ?? employees[0];
-  const states = agentStates(employees, tasks, outbox !== null);
+  const states = agentStates(employees, tasks, outbox !== null || awaiting !== null);
 
   /**
    * Who is speaking right now: my message on its way, Super Agent reading it, and each digital employee whose
@@ -734,8 +750,8 @@ export function CommandRoomPage() {
         <header><strong>{t('我')}</strong><span>{t('发送中')}</span></header>
         <p>{outbox.body}</p>
       </article>);
-      bubbles.push(<TypingBubble key="super-agent" who={t('超级智能体')} what={t('正在思考')} data="super-agent" />);
     }
+    if (outbox || awaiting) bubbles.push(<TypingBubble key="super-agent" who={t('超级智能体')} what={t('正在思考')} data="super-agent" />);
     for (const task of tasks.filter((item) => item.status === 'running').slice(0, 3)) {
       const name = employees.find((employee) => employee.id === task.employeeId)?.name ?? t('数字员工');
       bubbles.push(<TypingBubble key={`task-${task.id}`} who={name} what={`${t('正在处理')}「${task.title}」`} data={task.id} />);

@@ -175,17 +175,53 @@ export const roomModule: FastifyPluginAsync = async (app) => {
     const viewer = viewerFrom(req.headers, req.user);
     const tenantId = req.user?.tenantId ?? body.tenantId ?? 't';
     const room = roomState.current;
-    let understood: import('./brain.js').Understood | null = null;
-    if (roomBrain && !body.followupTo && !room.hasClientMessage(body.roomId, body.clientMessageId) && !room.namesEmployee(body.body)) {
-      // Reports and progress from a computer are posted under the employee's owner; they are the employee speaking.
-      const history: RoomBrainInput['history'] = room.eventsAfter(body.roomId, 0, viewer).slice(-12).map((message) => ({
-        from: message.authorUserId === 'super-agent' ? 'super-agent'
-          : message.kind === 'report' || message.clientMessageId.startsWith('worker-') || message.authorUserId !== viewer.userId ? 'employee' : 'user',
-        text: message.body.slice(0, 1500),
-      }));
+    const think = roomBrain !== null && !body.followupTo && !room.hasClientMessage(body.roomId, body.clientMessageId) && !room.namesEmployee(body.body);
+
+    /** Send a task Super Agent created to the employee's computer, as an @mention would. */
+    const dispatch = async (task: import('./room.js').RoomTask | null) => {
+      const scopes = viewer.roles.includes('owner') || viewer.roles.includes('admin') ? null : viewer.projectScopes;
+      const target = req.user && task && task.tenantId === req.user.tenantId && task.createdByUserId === viewer.userId
+        && roomState.current.roster(viewer).some((employee) => employee.id === task.employeeId && employee.status !== 'paused')
+        ? await resolveRoomDispatch(task, scopes)
+        : undefined;
+      if (task && target) task.projectId = target.projectId;
+      await flushRoom();
+      if (task && target) await queueRoomDispatch(task, target);
+    };
+
+    const posted = room.post({
+      roomId: body.roomId,
+      // The signed-in user's tenant wins; the body value is only read where no auth hook is mounted (unit tests).
+      tenantId,
+      projectId: body.projectId ?? null,
+      authorUserId: viewer.userId,
+      authorRoles: viewer.roles,
+      authorProjectScopes: viewer.projectScopes,
+      modelAvailable: header(req.headers, 'x-model-available') === 'false' ? false : undefined,
+      body: body.body,
+      clientMessageId: body.clientMessageId,
+      followupTo: typeof body.followupTo === 'string' && body.followupTo ? body.followupTo : null,
+      // Super Agent may take a while (a model call, perhaps a lookup): the message is stored and confirmed now.
+      defer: think,
+    });
+    if (!think || posted.duplicate) {
+      await dispatch(posted.task);
+      return posted;
+    }
+    await flushRoom();
+
+    // Reports and progress from a computer are posted under the employee's owner; they are the employee speaking.
+    const history: RoomBrainInput['history'] = room.eventsAfter(body.roomId, 0, viewer).filter((message) => message.id !== posted.message.id).slice(-12).map((message) => ({
+      from: message.authorUserId === 'super-agent' ? 'super-agent'
+        : message.kind === 'report' || message.clientMessageId.startsWith('worker-') || message.authorUserId !== viewer.userId ? 'employee' : 'user',
+      text: message.body.slice(0, 1500),
+    }));
+    const text = body.body;
+    void (async () => {
+      let understood: import('./brain.js').Understood | null = null;
       try {
         const sources = req.user && roomLookups ? await roomLookups.sources(req.user).catch(() => []) : [];
-        const decision = await roomBrain.understand({ tenantId, body: body.body, roster: room.roster(viewer), sources, history });
+        const decision = await roomBrain!.understand({ tenantId, body: text, roster: room.roster(viewer), sources, history });
         if (decision && 'ask' in decision) {
           // Super Agent looks it up itself through the person's own connection, then answers in the room.
           const source = sources.find((item) => item.id === decision.ask.sourceId);
@@ -206,31 +242,11 @@ export const roomModule: FastifyPluginAsync = async (app) => {
       } catch (error) {
         req.log.warn({ err: error }, 'room brain failed; using fixed rules');
       }
-    }
-    const posted = roomState.current.post({
-      roomId: body.roomId,
-      // The signed-in user's tenant wins; the body value is only read where no auth hook is mounted (unit tests).
-      tenantId,
-      projectId: body.projectId ?? null,
-      authorUserId: viewer.userId,
-      authorRoles: viewer.roles,
-      authorProjectScopes: viewer.projectScopes,
-      modelAvailable: header(req.headers, 'x-model-available') === 'false' ? false : undefined,
-      body: body.body,
-      clientMessageId: body.clientMessageId,
-      followupTo: typeof body.followupTo === 'string' && body.followupTo ? body.followupTo : null,
-      understood,
-    });
-    const task = posted.task;
-    const scopes = viewer.roles.includes('owner') || viewer.roles.includes('admin') ? null : viewer.projectScopes;
-    const target = req.user && task && task.tenantId === req.user.tenantId && task.createdByUserId === viewer.userId
-      && roomState.current.roster(viewer).some((employee) => employee.id === task.employeeId && employee.status !== 'paused')
-      ? await resolveRoomDispatch(task, scopes)
-      : undefined;
-    if (task && target) task.projectId = target.projectId;
-    await flushRoom();
-    if (task && target) await queueRoomDispatch(task, target);
-    return posted;
+      // The room in effect now (it may have been reloaded meanwhile) gives the answer, with the same checks as ever.
+      const answered = roomState.current.answerDeferred(posted.message.id, understood);
+      if (answered) await dispatch(answered.task);
+    })().catch((error: unknown) => req.log.error({ err: error }, 'room deferred answer failed'));
+    return { ...posted, awaiting: true };
   });
 
   /** Who is looking, and which digital employees they may name. Read from the employee module on every call. */

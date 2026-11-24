@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Fastify from 'fastify';
 import { beforeEach, expect, it } from 'vitest';
-import { bindRoomStore, createCommandRoom, hydrateRoom, loadRoom, reloadRoom, roomModule, roomState, saveRoom } from './index.js';
+import { bindRoomBrain, bindRoomStore, createCommandRoom, hydrateRoom, loadRoom, reloadRoom, roomModule, roomState, saveRoom } from './index.js';
 import type { EmployeeRef } from './room.js';
 import { LOAD_MEMBERS_SQL, LOAD_MESSAGES_SQL, LOAD_TASKS_SQL, UPSERT_MEMBER_SQL, UPSERT_MESSAGE_SQL, UPSERT_TASK_SQL } from './sql.js';
 
@@ -14,6 +14,7 @@ const EMPLOYEES: EmployeeRef[] = [
 
 beforeEach(() => {
   bindRoomStore(null);
+  bindRoomBrain(null);
   roomState.current = createCommandRoom(EMPLOYEES);
 });
 
@@ -422,3 +423,28 @@ function memoryRoomDb() {
     },
   };
 }
+
+it('a message is confirmed at once while Super Agent is still thinking; its answer and task follow', async () => {
+  let decide!: (value: { employeeId: string; work: string }) => void;
+  bindRoomBrain({ understand: () => new Promise((resolve) => { decide = resolve; }) });
+  const app = Fastify();
+  await app.register(roomModule, { prefix: '/api/v1/room' });
+  const sent = await app.inject({ method: 'POST', url: '/api/v1/room/messages', payload: { roomId: 'room-1', body: '帮我整理询价草稿', clientMessageId: 'slow-1' } });
+  expect(sent.statusCode).toBe(200);
+  expect(sent.json()).toMatchObject({ reply: null, task: null, awaiting: true });
+  const before = await app.inject({ method: 'GET', url: '/api/v1/room/messages?roomId=room-1' });
+  expect(before.json().messages.map((m: { body: string }) => m.body)).toEqual(['帮我整理询价草稿']);
+
+  decide({ employeeId: 'emp-sales', work: '整理询价草稿' });
+  await expect.poll(async () => (await app.inject({ method: 'GET', url: '/api/v1/room/messages?roomId=room-1' })).json().messages.length).toBe(2);
+  const after = (await app.inject({ method: 'GET', url: '/api/v1/room/messages?roomId=room-1' })).json().messages;
+  expect(after[1]).toMatchObject({ authorUserId: 'super-agent', clientMessageId: `reply:${sent.json().message.id}` });
+  expect(after[1].body).toContain('整理询价草稿');
+  const tasks = (await app.inject({ method: 'GET', url: '/api/v1/room/tasks?roomId=room-1' })).json().tasks;
+  expect(tasks).toHaveLength(1);
+
+  // The same client id again is the same message: no second answer.
+  const again = await app.inject({ method: 'POST', url: '/api/v1/room/messages', payload: { roomId: 'room-1', body: '帮我整理询价草稿', clientMessageId: 'slow-1' } });
+  expect(again.json().duplicate).toBe(true);
+  expect(roomState.current.answerDeferred(sent.json().message.id, null)).toBeNull();
+});

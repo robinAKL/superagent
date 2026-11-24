@@ -133,6 +133,7 @@ test('a sent message shows at once with Super Agent thinking under it; a failed 
   await expect(draft(page)).toHaveValue('');
   await expect(stream(page).locator('[data-outbox]')).toContainText('你好');
   await expect(stream(page).locator('[data-typing="super-agent"]')).toContainText('正在思考');
+  await expect(stream(page).locator('[data-typing="super-agent"]')).toBeInViewport(); // the view follows it down
   if (process.env.ROOM_SHOTS) await page.screenshot({ path: process.env.ROOM_SHOTS });
   release();
   await expect(stream(page).locator('[data-kind="reply"]').last()).toContainText('你好');
