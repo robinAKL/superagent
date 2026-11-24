@@ -43,13 +43,14 @@ it('Super Agent resumes a task whose computer came back: the same task goes to L
   // Back online: Super Agent sends the same task again with the next attempt, without anyone pressing resume.
   employee.status = 'active';
   expect(await superviseRoom()).toBe(1);
-  expect(await wakes()).toEqual([{ roomTaskId: task.id, projectId, prompt: '检查本地 worker 是否在线', attempt: 1 }]);
+  // A re-send has its own run id, so a Link that remembers every id it ran (v0.1.4) still runs it.
+  expect(await wakes()).toEqual([{ roomTaskId: `${task.id}~r1`, projectId, prompt: '检查本地 worker 是否在线', attempt: 1 }]);
   const messages = (await app.inject({ method: 'GET', url: '/room/messages?roomId=room-1' })).json().messages as { body: string; kind: string }[];
   expect(messages.at(-1)).toMatchObject({ kind: 'resume' });
   expect(messages.at(-1)!.body).toContain('同一个任务，没有新建');
 
   // The second run's words may repeat the first run's; they are still taken as this run's progress.
-  const again = await progress(task.id, '正在处理任务…');
+  const again = await progress(`${task.id}~r1`, '正在处理任务…');
   expect(again.statusCode).toBe(200);
   expect(again.json().duplicate).toBeUndefined();
   expect(roomState.current.task(task.id, { userId: 'owner', roles: ['owner'], projectScopes: [] }).status).toBe('running');
@@ -124,7 +125,7 @@ it('a resumed task made under an old binding goes to the employee’s current bi
   employee.status = 'active';
   await superviseRoom();
   const events = (await app.inject({ method: 'POST', url: '/link/poll', headers: { authorization: 'Bearer ' + token }, payload: { waitMs: 0 } })).json().events;
-  expect(events.map((event: { payload: Record<string, unknown> }) => event.payload)).toEqual([{ roomTaskId: task.id, projectId: 'project-new', prompt: '列出项目文件', attempt: 1 }]);
+  expect(events.map((event: { payload: Record<string, unknown> }) => event.payload)).toEqual([{ roomTaskId: `${task.id}~r1`, projectId: 'project-new', prompt: '列出项目文件', attempt: 1 }]);
 });
 
 it('"全部重试" sends every open task again at once and says what happened, task by task', async () => {
@@ -155,6 +156,38 @@ it('"全部重试" sends every open task again at once and says what happened, t
     .map((event: { payload: Record<string, unknown> }) => event.payload);
   expect(wakes).toEqual([
     { roomTaskId: made.id, projectId, prompt: '列出项目文件', attempt: 0 },
-    { roomTaskId: made.id, projectId, prompt: '列出项目文件', attempt: 1 },
+    { roomTaskId: `${made.id}~r1`, projectId, prompt: '列出项目文件', attempt: 1 },
   ]);
+  // The run's report lands on the task.
+  const report = await app.inject({ method: 'POST', url: `/link/room-tasks/${encodeURIComponent(`${made.id}~r1`)}/report`, headers: { authorization: 'Bearer ' + token }, payload: { body: '目录：a, b' } });
+  expect(report.statusCode).toBe(200);
+  expect(roomState.current.task(made.id, { userId: 'owner', roles: ['owner'], projectScopes: [] }).status).toBe('completed');
+});
+
+it('when the model would make a new task to "do T-n", Super Agent retries T-n itself and makes nothing new', async () => {
+  resetWorkers();
+  bindRoomStore(null);
+  const employee: EmployeeRef = { id: employeeId, name: 'Analyst', ownerUserId: 'analyst-user', status: 'active' };
+  roomState.current = createCommandRoom(() => [employee]);
+  const { token } = await registerWorker(workersState.registry, {
+    tenantId, name: 'Link', kind: 'link', createdBy: 'owner', capabilities: { roomAssignments: [{ projectId, employeeId }] },
+  }, Date.now());
+  const app = Fastify();
+  app.addHook('preHandler', async (request) => { request.user = { tenantId, userId: 'owner', roles: ['owner'], projectScopes: [] }; });
+  await app.register(roomModule, { prefix: '/room' });
+  await app.register(workerLinkModule, { prefix: '/link' });
+  bindRoomBrain(null);
+  const made = (await app.inject({ method: 'POST', url: '/room/messages', payload: { roomId: 'room-1', body: '@Analyst 列出项目文件', clientMessageId: 'c1' } })).json().task;
+  const code = made.id.replace('task_', 'T-');
+  bindRoomBrain({ understand: async () => ({ employeeId, work: `请在你的电脑上领取并完成 ${code}：列出项目文件` }) });
+  await app.inject({ method: 'POST', url: '/room/messages', payload: { roomId: 'room-1', body: '让它把这个做完', clientMessageId: 'c2' } });
+  for (let i = 0; i < 50 && !roomState.current.eventsAfter('room-1', 0, { userId: 'owner', roles: ['owner' as const], projectScopes: [] }).some((m) => m.body.includes('原任务，不新建')); i++) await new Promise((r) => setTimeout(r, 10));
+  const owner = { userId: 'owner', roles: ['owner' as const], projectScopes: [] };
+  expect(roomState.current.listTasks(owner)).toHaveLength(1);
+  const reply = roomState.current.eventsAfter('room-1', 0, owner).at(-1)!;
+  expect(reply.body).toContain('原任务，不新建');
+  const wakes = (await app.inject({ method: 'POST', url: '/link/poll', headers: { authorization: 'Bearer ' + token }, payload: { waitMs: 0 } })).json().events
+    .map((event: { payload: Record<string, unknown> }) => event.payload.roomTaskId);
+  expect(wakes).toEqual([made.id, `${made.id}~r1`]);
+  bindRoomBrain(null);
 });

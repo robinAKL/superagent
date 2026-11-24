@@ -7,6 +7,7 @@ import { claimTask, deadLetterTask, heartbeatTask, releaseTask, succeedTask, typ
 import { PgWorkerRegistry, type WorkersDb } from './pg-registry.js';
 import { markLinkPresence, resetLinkPresence } from './presence.js';
 import { tenantKey, workerKey, workSignal } from './signal.js';
+import { roomRunId, roomTaskOfRun } from './room-run.js';
 import { MemoryApprovalStore, PgApprovalStore, registerApprovalAdminRoutes, registerApprovalLinkRoutes, type ApprovalDeps, type ApprovalStore } from './approvals.js';
 import {
   authenticateWorker,
@@ -166,7 +167,7 @@ export async function dispatchWaitingRoomTasks(tenantId: string, employeeId: str
     task.projectId = target.projectId;
     await flushRoom();
     if (await workersState.registry.appendEvent(task.tenantId, target.workerId, 'wake', {
-      roomTaskId: task.id, projectId: target.projectId, prompt: roomState.current.dispatchPrompt(task), attempt: sendNumber(task),
+      roomTaskId: roomRunId(task.id, sendNumber(task)), projectId: target.projectId, prompt: roomState.current.dispatchPrompt(task), attempt: sendNumber(task),
     }, 'super-agent', workersState.now(), task.id)) sent++;
   }
   return sent;
@@ -177,7 +178,7 @@ const sendNumber = (task: RoomTask) => task.watch?.sends ?? task.watch?.attempts
 
 export async function queueRoomDispatch(task: RoomTask, target: { workerId: string; projectId: string }, attempt = sendNumber(task)): Promise<void> {
   await workersState.registry.appendEvent(task.tenantId, target.workerId, 'wake', {
-    roomTaskId: task.id,
+    roomTaskId: roomRunId(task.id, attempt),
     projectId: target.projectId,
     prompt: roomState.current.dispatchPrompt(task),
     attempt,
@@ -595,7 +596,8 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
   }
 
   app.post('/room-tasks/:id/:action', async (req, reply) => {
-    const { id, action } = req.params as { id: string; action: string };
+    const { id: runId, action } = req.params as { id: string; action: string };
+    const id = roomTaskOfRun(runId);
     if (action !== 'report' && action !== 'progress') return reply.code(404).send({ error: 'not_found' });
     const worker = req.worker!;
     const body = (req.body as { body?: unknown } | undefined)?.body;

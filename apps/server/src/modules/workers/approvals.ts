@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Queryable } from '../runtime/pg-queue.js';
 import type { WorkerRecord } from './registry.js';
 import { workerKey, workSignal } from './signal.js';
+import { roomTaskOfRun } from './room-run.js';
 
 /**
  * Agent permission prompts relayed to the command room (room task T-13).
@@ -211,7 +212,7 @@ export function registerApprovalLinkRoutes(app: FastifyInstance, deps: ApprovalD
     const store = deps.store();
     if ((await store.countPending(worker.id, now)) >= MAX_PENDING_PER_WORKER) return reply.code(429).send({ error: 'too_many_pending' });
     const record: ApprovalRecord = {
-      id: randomUUID(), tenantId: worker.tenantId, workerId: worker.id, roomTaskId: (body.roomTaskId as string | undefined) ?? null,
+      id: randomUUID(), tenantId: worker.tenantId, workerId: worker.id, roomTaskId: typeof body.roomTaskId === 'string' ? roomTaskOfRun(body.roomTaskId) : null,
       tool: (body.tool as string).trim(), input: body.input as Record<string, unknown>, summary: (body.summary as string).trim(),
       status: 'pending', reason: null, decidedBy: null, decidedAt: null, expiresAt: now + APPROVAL_TTL_MS, createdAt: now,
     };
