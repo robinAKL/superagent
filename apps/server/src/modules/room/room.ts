@@ -111,6 +111,8 @@ export interface PostInput {
    * Only a roster employee the author may assign is used; everything else still goes through the checks below.
    */
   understood?: { employeeId: string; work: string } | { answer: string } | null;
+  /** Store the message now and answer later through answerDeferred() (Super Agent is still reading it). */
+  defer?: boolean;
 }
 
 const OPEN: ReadonlySet<TaskStatus> = new Set<TaskStatus>(['assigned', 'running', 'waiting']);
@@ -183,6 +185,8 @@ export class CommandRoom {
   private readonly messages: RoomMessage[] = [];
   private readonly tasks: RoomTask[] = [];
   private readonly byClientId = new Map<string, RoomMessage>();
+  /** Messages Super Agent is still reading, with what they were posted with. Process-local: a restart drops them. */
+  private readonly deferred = new Map<string, PostInput>();
   private readonly members = new Map<string, Set<string>>();
   private readonly source: EmployeeSource;
   private readonly now: () => Date;
@@ -269,6 +273,32 @@ export class CommandRoom {
       kind: 'message',
     });
     this.byClientId.set(key, message);
+    if (input.defer) {
+      // Stored now so the person sees it sent; Super Agent's answer follows through answerDeferred().
+      this.deferred.set(message.id, input);
+      return { message, reply: null, task: null, duplicate: false };
+    }
+    return this.respond(message, input);
+  }
+
+  /** Super Agent's answer to a message it took time to read: the same checks and outcomes as an immediate answer. */
+  answerDeferred(messageId: string, understood: PostInput['understood']): { message: RoomMessage; reply: RoomMessage | null; task: RoomTask | null; duplicate: boolean } | null {
+    const input = this.deferred.get(messageId);
+    const message = this.messages.find((item) => item.id === messageId);
+    if (!input || !message) return null;
+    this.deferred.delete(messageId);
+    return this.respond(message, { ...input, understood });
+  }
+
+  private respond(message: RoomMessage, input: PostInput): { message: RoomMessage; reply: RoomMessage | null; task: RoomTask | null; duplicate: boolean } {
+    const author: Viewer = {
+      userId: input.authorUserId,
+      roles: input.authorRoles && input.authorRoles.length > 0 ? input.authorRoles : ['owner'],
+      projectScopes: input.authorProjectScopes ?? [],
+    };
+    const { mentions, work: named } = this.resolveMentions(input.body);
+    const original = input.followupTo ? this.tasks.find((item) => item.id === input.followupTo) ?? null : null;
+    const originalVisible = original !== null && original.roomId === input.roomId && this.canSeeTask(original, author);
     const say = (body: string, link: { mentions?: string[]; taskIds?: string[] } = {}) => this.push({
       roomId: input.roomId,
       tenantId: input.tenantId,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import './execution.css';
 import { authHeaders } from '../api';
 import { useLang, type Lang } from '../i18n';
@@ -223,6 +223,54 @@ function writeDraft(userId: string, value: string): void {
   }
 }
 
+/** What an agent in the room is doing right now, from the roster, the tasks and whether a message is being read. */
+export type AgentState = 'thinking' | 'working' | 'queued' | 'idle' | 'offline' | 'paused' | 'unconnected';
+
+export function agentStates(
+  employees: readonly RosterEmployee[],
+  tasks: readonly Pick<ApiTask, 'employeeId' | 'status'>[],
+  superAgentThinking: boolean,
+): { superAgent: AgentState; employees: Record<string, { state: AgentState; open: number }> } {
+  const result: Record<string, { state: AgentState; open: number }> = {};
+  for (const employee of employees) {
+    const mine = tasks.filter((task) => task.employeeId === employee.id);
+    const open = mine.filter((task) => task.status === 'assigned' || task.status === 'waiting' || task.status === 'running').length;
+    const state: AgentState = employee.status === 'paused' ? 'paused'
+      : employee.status === 'unconnected' ? 'unconnected'
+        : employee.status === 'offline' ? 'offline'
+          : mine.some((task) => task.status === 'running') ? 'working'
+            : open > 0 ? 'queued' : 'idle';
+    result[employee.id] = { state, open };
+  }
+  return { superAgent: superAgentThinking ? 'thinking' : 'idle', employees: result };
+}
+
+const AGENT_STATE_LABEL: Record<AgentState, string> = {
+  thinking: '思考中', working: '干活中', queued: '排队中', idle: '空闲', offline: '掉线', paused: '已暂停', unconnected: '未连接电脑',
+};
+
+function AgentRow({ id, name, role, state, extra, speaking, onPick, icon }: {
+  id: string; name: string; role: string; state: AgentState; extra?: string; speaking: boolean; onPick?: () => void; icon: ReactNode;
+}) {
+  const [lang] = useLang();
+  const t = (copy: string) => roomText(copy, lang);
+  const busy = state === 'thinking' || state === 'working';
+  const body = <>
+    <span className={`room-agent-avatar is-${state}`} aria-hidden="true">{icon}</span>
+    <span className="room-agent-text">
+      <strong>{name}</strong>
+      <small>{role}</small>
+    </span>
+    <span className={`room-agent-state is-${state}`}>
+      {busy ? <span className="room-dots" aria-hidden="true"><i /><i /><i /></span> : <i className="room-agent-dot" aria-hidden="true" />}
+      {t(AGENT_STATE_LABEL[state])}{extra ? <em>{extra}</em> : null}
+    </span>
+  </>;
+  return <li className={`room-agent${speaking ? ' is-speaking' : ''}`} data-agent={id} data-state={state}>
+    {onPick ? <button type="button" onClick={onPick} title={t('交办')}>{body}</button> : <div>{body}</div>}
+  </li>;
+}
+
 const EMPLOYEE_STATE: Record<RosterEmployee['status'], string> = {
   active: '在线',
   paused: '已暂停',
@@ -355,7 +403,9 @@ export function CommandRoomPage() {
   const [notice, setNotice] = useState('');
   const [sending, setSending] = useState(false);
   const [acting, setActing] = useState(false);
-  const [teamOpen, setTeamOpen] = useState(false);
+  /** Which agent just spoke: its row in the roster pulses for a moment. */
+  const [speaking, setSpeaking] = useState<string | null>(null);
+  const lastSeq = useRef(0);
   // Business workflows live behind a header button (prototype); a #room?workflow= link opens them directly.
   const linkedWorkflow = () => {
     if (typeof window === 'undefined') return false;
@@ -483,6 +533,21 @@ export function CommandRoomPage() {
 
   /** The message just sent, shown at once while the server (and Super Agent) answer. */
   const [outbox, setOutbox] = useState<{ id: string; body: string } | null>(null);
+  /** A message the server stored while Super Agent is still reading it: thinking until its reply shows up. */
+  const [awaiting, setAwaiting] = useState<string | null>(null);
+  useEffect(() => {
+    if (!awaiting) return;
+    if (messages.some((message) => message.clientMessageId === `reply:${awaiting}`)) { setAwaiting(null); return; }
+    // Look for the answer every second while waiting, and give up showing the bubble after three minutes.
+    const tick = window.setInterval(() => void pull(), 1000);
+    const stop = window.setTimeout(() => setAwaiting(null), 180_000);
+    return () => { window.clearInterval(tick); window.clearTimeout(stop); };
+  }, [awaiting, messages]);
+  // My message on its way and the typing bubbles are part of the latest lines: keep them in view.
+  useEffect(() => {
+    const el = scroller.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [outbox, awaiting, tasks]);
 
   async function sendDraft() {
     const body = draft.trim();
@@ -508,7 +573,8 @@ export function CommandRoomPage() {
         setNotice('这条消息没有发出去，草稿还在，可以再发一次。');
         return;
       }
-      const data = (await response.json()) as { message: ApiMessage; reply: ApiMessage | null };
+      const data = (await response.json()) as { message: ApiMessage; reply: ApiMessage | null; awaiting?: boolean };
+      if (data.awaiting) setAwaiting(data.message.id);
       pending.current = null;
       stick.current = true;
       setMessages((current) => mergeRoomMessages(current, [data.message, ...(data.reply ? [data.reply] : [])]));
@@ -671,6 +737,8 @@ export function CommandRoomPage() {
   const counts = { open: tasks.filter((task) => OPEN_STATUS.has(task.status)).length, review: tasks.filter((task) => reviewStatus.has(task.status)).length };
   const delivered = tasks.filter((task) => task.status === 'completed' || task.status === 'reviewed').slice(-5).reverse();
   const firstEmployee = employees.find((employee) => employee.status === 'active') ?? employees[0];
+  const states = agentStates(employees, tasks, outbox !== null || awaiting !== null);
+
   /**
    * Who is speaking right now: my message on its way, Super Agent reading it, and each digital employee whose
    * computer is working on a task. They sit at the end of the conversation like a chat app's typing bubbles.
@@ -682,14 +750,31 @@ export function CommandRoomPage() {
         <header><strong>{t('我')}</strong><span>{t('发送中')}</span></header>
         <p>{outbox.body}</p>
       </article>);
-      bubbles.push(<TypingBubble key="super-agent" who={t('超级智能体')} what={t('正在思考')} data="super-agent" />);
     }
+    if (outbox || awaiting) bubbles.push(<TypingBubble key="super-agent" who={t('超级智能体')} what={t('正在思考')} data="super-agent" />);
     for (const task of tasks.filter((item) => item.status === 'running').slice(0, 3)) {
       const name = employees.find((employee) => employee.id === task.employeeId)?.name ?? t('数字员工');
       bubbles.push(<TypingBubble key={`task-${task.id}`} who={name} what={`${t('正在处理')}「${task.title}」`} data={task.id} />);
     }
     return bubbles;
   }
+
+  // When an agent posts something new, its row in the roster pulses for a moment, like a chat app's activity cue.
+  useEffect(() => {
+    const newest = messages[messages.length - 1];
+    if (!newest || newest.seq <= lastSeq.current) return;
+    const first = lastSeq.current === 0;
+    lastSeq.current = newest.seq;
+    if (first) return;
+    const who = newest.authorUserId === 'super-agent' ? 'super-agent'
+      : newest.kind === 'report' || fromComputer(newest)
+        ? tasks.find((task) => newest.taskIds.includes(task.id))?.employeeId ?? null
+        : null;
+    if (!who) return;
+    setSpeaking(who);
+    const timer = window.setTimeout(() => setSpeaking(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [messages, tasks]);
 
   function startWith(text: string) {
     changeDraft(text);
@@ -702,9 +787,6 @@ export function CommandRoomPage() {
       <div className="page-head room-head">
         <h1>{t('指挥室')}</h1>
         <div className="page-head-actions room-head-actions">
-          <button type="button" className="btn quiet" aria-expanded={teamOpen} aria-controls="room-team" onClick={() => setTeamOpen((open) => !open)}>
-            <Icon name="team" /><span>{t('团队')}</span>
-          </button>
           {viewer?.owner ? <button type="button" className="btn" aria-expanded={flowsOpen} aria-controls="room-flows" onClick={() => setFlowsOpen((open) => !open)}><Icon name="flow" /><span>{t('业务流程')}</span></button> : null}
         </div>
       </div>
@@ -721,6 +803,21 @@ export function CommandRoomPage() {
         ) : null}
       </> : null}
       <div className="exec-grid">
+        <aside id="room-agents" className="room-agents" aria-label={t('成员')}>
+          <h2 className="room-agents-title">{t('成员')} <span className="room-count">{employees.length + 1}</span></h2>
+          <ul>
+            <AgentRow id="super-agent" name={t('超级智能体')} role={t('协调与分派')} state={states.superAgent}
+              speaking={speaking === 'super-agent'} icon={<Icon name="brain" size={18} />} />
+            {employees.map((employee) => {
+              const live = states.employees[employee.id] ?? { state: 'idle' as const, open: 0 };
+              return <AgentRow key={employee.id} id={employee.id} name={employee.name} role={employee.duty || t('数字员工')}
+                state={live.state} extra={live.open > 1 ? ` ${live.open}` : undefined} speaking={speaking === employee.id}
+                icon={<span>{employee.name.slice(0, 1).toUpperCase()}</span>}
+                onPick={viewer ? () => startWith(`@${employee.name} `) : undefined} />;
+            })}
+          </ul>
+          {employees.length === 0 && roster ? <p className="exec-empty">{t('还没有可以指派的数字员工。')}</p> : null}
+        </aside>
         <section className="panel exec-pane room-chat" aria-label={t('共享协作记录')}>
           <h2 className="sr-only">{t('共享协作记录')}</h2>
           <div
@@ -744,7 +841,7 @@ export function CommandRoomPage() {
                     <button type="button" className="room-start" onClick={() => startWith(t('今天要推进的目标是：'))}>
                       <Icon name="box" /><span><strong>{t('说说今天的目标')}</strong><small>{t('超级智能体会拆解并建议分工')}</small></span><Icon name="arrow" />
                     </button>
-                    <button type="button" className="room-start" onClick={() => setTeamOpen(true)}>
+                    <button type="button" className="room-start" onClick={() => document.getElementById('room-agents')?.scrollIntoView({ block: 'nearest' })}>
                       <Icon name="team" /><span><strong>{t('看看团队状态')}</strong><small>{t('了解谁在线、谁可以接单')}</small></span><Icon name="arrow" />
                     </button>
                   </div>
@@ -825,25 +922,6 @@ export function CommandRoomPage() {
         <aside className="panel exec-pane room-tasks" aria-label={t('任务列表')}>
           {/* An agent waiting for a yes or no is work waiting on you: it sits with the tasks, not above the conversation. */}
           {viewer?.owner ? <WorkerApprovals key={viewer.userId} /> : null}
-          {teamOpen ? (
-            <section id="room-team" className="room-team" aria-label={t('团队')}>
-              <div className="room-section-head">
-                <h3>{t('团队')} <span className="room-count">{employees.length}</span></h3>
-                <button type="button" className="room-icon-btn" aria-label={t('关闭')} onClick={() => setTeamOpen(false)}><Icon name="close" size={16} /></button>
-              </div>
-              {employees.length === 0 ? <p className="exec-empty">{t('还没有可以指派的数字员工。')}</p> : (
-                <ul>
-                  {employees.map((employee) => (
-                    <li key={employee.id} data-team-member={employee.id}>
-                      <span className={`room-dot is-${employee.status}`} aria-hidden="true" />
-                      <span><strong>{employee.name}</strong><small>{[employee.duty, t(EMPLOYEE_STATE[employee.status])].filter(Boolean).join(' · ')}</small></span>
-                      {viewer ? <button type="button" className="exec-link" onClick={() => { startWith(`@${employee.name} `); }}>{t('交办')}</button> : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          ) : null}
           <div className="exec-pane-head room-tasks-head">
             <h2>{t('任务')} <span className="room-count">{tasks.length}</span></h2>
           </div>
