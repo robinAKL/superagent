@@ -818,10 +818,16 @@ export function CommandRoomPage() {
    */
   function liveBubbles() {
     const bubbles = [];
-    if (outbox) {
-      bubbles.push(<article key="outbox" className="exec-message room-outbox" data-mine="yes" data-outbox="">
-        <header><strong>{t('我')}</strong><span>{t('发送中')}</span></header>
-        <p>{outbox.body}</p>
+    // Once the room has the message itself (a refresh can bring it before the send call returns), the saved one
+    // takes the outbox's place: never both, and nothing below it shifts when the call returns.
+    const outboxSaved = outbox !== null && messages.some((message) => message.clientMessageId === outbox.id);
+    if (outbox && !outboxSaved) {
+      // Built exactly like a sent message of mine, so the saved one replaces it without anything moving.
+      bubbles.push(<article key="outbox" className="exec-message room-outbox" data-mine="yes" data-outbox="" aria-label={t('发送中')}>
+        <div className="room-msg-body">
+          <header><strong>{t('我')}</strong><span>{t('发送中')}</span></header>
+          <p>{outbox.body}</p>
+        </div>
       </article>);
     }
     if (outbox || awaiting) bubbles.push(<TypingBubble key="super-agent" who={t('超级智能体')} what={t('正在思考')} data="super-agent" />);
