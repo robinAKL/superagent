@@ -26,6 +26,8 @@ const TEXT = {
     bindSaved: 'Employee bound.',
     loadingName: 'Loading…',
     download: 'Download Link for Windows',
+    downloadLatest: 'Download the latest Link (Windows)',
+    downloadHint: 'This link always gets the newest version. A computer that already has Link offers the upgrade in its tray menu.',
     allBound: 'Every digital employee is already bound. To put this computer to work, add people in Team or remove a binding elsewhere.', bindRemoved: 'Binding removed.',
   },
   zh: {
@@ -50,6 +52,8 @@ const TEXT = {
     bindSaved: '已绑定员工。', bindRemoved: '已移除绑定。',
     loadingName: '正在读取…',
     download: '下载 Link（Windows）',
+    downloadLatest: '下载最新版 Link（Windows）',
+    downloadHint: '这个链接始终下载最新版本。已经装了 Link 的电脑，会在托盘菜单里提示升级。',
     allBound: '所有数字员工都已绑定。要让这台电脑干活，请在「数字员工」里增加人数，或先移除其他电脑上的绑定。',
   },
 } satisfies Dict<string>;
@@ -137,10 +141,14 @@ export function WorkerConnectPanel() {
       <header className="setup-card-head">
         <h2 id="linked-computers" className="h2">{t('title')}</h2>
         <p className="helper">{t('lead')}</p>
+        <p className="link-download">
+          <a className="btn" href={LINK_INSTALLER_URL} data-link-download>{t('downloadLatest')}</a>
+          <span className="helper">{t('downloadHint')}</span>
+        </p>
       </header>
       {unavailable ? <p role="alert">{t('loadError')}</p>
         : !workers ? <p className="helper" role="status">{t('loading')}</p>
-          : workers.length === 0 ? <div className="state-empty"><p>{t('empty')}</p><a className="btn" href={LINK_INSTALLER_URL}>{t('download')}</a></div> : workers.map((w) => (
+          : workers.length === 0 ? <div className="state-empty"><p>{t('empty')}</p></div> : workers.map((w) => (
         <article key={w.id} data-worker={w.id} className="link-device">
           <div className="link-device-head">
             <h3>{w.name}</h3>

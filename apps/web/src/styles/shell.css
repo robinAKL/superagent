@@ -228,3 +228,7 @@ button, input, select, textarea { font-family: inherit; }
 .tool-rule-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-rule-note { grid-column: 1 / -1; font-size: 12px; color: var(--color-subtle); }
 .chip.chip-small { height: 26px; padding: 0 10px; font-size: 12px; }
+
+/* Always-latest Link download, at the top of the Link devices card. */
+.link-download { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-sm); margin: var(--space-sm) 0 0; }
+.link-download .helper { margin: 0; font-size: 13px; }

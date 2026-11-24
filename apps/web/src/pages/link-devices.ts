@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 
-/** The newest Link for Windows; the release workflow keeps this address current (link-latest). */
-export const LINK_INSTALLER_URL = 'https://github.com/robinAKL/superagent/releases/download/link-latest/SuperAgentLink-Setup-x64.exe';
+/** Always the newest Link for Windows: the server redirects to the link-latest release, which the release workflow keeps current. */
+export const LINK_INSTALLER_URL = '/download/link';
 
 export interface LinkProject {
   id: string;
