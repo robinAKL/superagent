@@ -448,3 +448,20 @@ it('a message is confirmed at once while Super Agent is still thinking; its answ
   expect(again.json().duplicate).toBe(true);
   expect(roomState.current.answerDeferred(sent.json().message.id, null)).toBeNull();
 });
+
+it('a question about a numbered task is answered from the task, never turned into a new task', async () => {
+  const app = Fastify();
+  await app.register(roomModule, { prefix: '/api/v1/room' });
+  const send = async (body: string, id: string) => (await app.inject({ method: 'POST', url: '/api/v1/room/messages', payload: { roomId: 'room-1', body, clientMessageId: id } })).json();
+  const made = await send('@销售员工 整理询价草稿', 'q1');
+  const n = made.task.id.replace('task_', '');
+  const asked = await send(`T-${n}是什么任务？`, 'q2');
+  expect(asked.task).toBeNull();
+  expect(asked.reply.body).toContain(`T-${n}：整理询价草稿`);
+  expect(asked.reply.body).toContain('负责：@销售员工');
+  expect((await send(`t${n} 怎么样了`, 'q3')).reply.body).toContain('状态：');
+  expect((await send('T-999是什么任务？', 'q4')).reply.body).toContain('我看不到 T-999');
+  expect((await send(`对 t${n}`, 'q5')).reply.body).not.toContain(`T-${n}：`); // not a question: not this path
+  const tasks = (await app.inject({ method: 'GET', url: '/api/v1/room/tasks?roomId=room-1' })).json().tasks;
+  expect(tasks).toHaveLength(1);
+});

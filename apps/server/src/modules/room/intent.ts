@@ -43,3 +43,13 @@ export function needsParameters(body: string): boolean {
   const text = workText(body);
   return !(EMAIL.test(text) || QUOTED.test(text) || RECORD.test(text));
 }
+
+const TASK_NUMBER = /(?:^|[^A-Za-z0-9])t-?(\d{1,6})(?![0-9])/iu;
+const ASKS_ABOUT = /[?？]|是什么|是啥|什么任务|怎么样|怎样了|进展|进度|状态|完成了吗|好了吗|做完|在干嘛|what|status|how/iu;
+
+/** "T-5是什么任务？", "t5 怎么样了": the number of the task a question is about, else null. */
+export function askedTaskNumber(body: string): number | null {
+  const match = TASK_NUMBER.exec(body);
+  if (!match || !ASKS_ABOUT.test(body)) return null;
+  return Number(match[1]);
+}
