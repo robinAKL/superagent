@@ -20,6 +20,14 @@ const POLL_MS = 4000;
 
 export type MessageKind = 'message' | 'reply' | 'report' | 'review' | 'cancel' | 'hold' | 'resume' | 'contract';
 
+function TypingBubble({ who, what, data }: { who: string; what: string; data: string }) {
+  return <div className="room-typing" data-typing={data} role="status">
+    <strong>{who}</strong>
+    <span className="room-typing-what">{what}</span>
+    <span className="room-dots" aria-hidden="true"><i /><i /><i /></span>
+  </div>;
+}
+
 export interface ApiMessage {
   id: string;
   seq: number;
@@ -473,6 +481,9 @@ export function CommandRoomPage() {
     if (el.value === want) el.setSelectionRange(want.length, want.length);
   }, [draft]);
 
+  /** The message just sent, shown at once while the server (and Super Agent) answer. */
+  const [outbox, setOutbox] = useState<{ id: string; body: string } | null>(null);
+
   async function sendDraft() {
     const body = draft.trim();
     if (!body || sending || !viewerId) return;
@@ -481,6 +492,11 @@ export function CommandRoomPage() {
     pending.current = { id, body, followupTo: followupId };
     setSending(true);
     setNotice('');
+    // Show it straight away and clear the box; the reply arrives under it.
+    setOutbox({ id, body });
+    setDraft('');
+    stick.current = true;
+    const restore = () => { setDraft(body); setOutbox(null); };
     try {
       const response = await fetch('/api/v1/room/messages', {
         method: 'POST',
@@ -488,6 +504,7 @@ export function CommandRoomPage() {
         body: JSON.stringify({ roomId: ROOM_ID, body, clientMessageId: id, followupTo: followupId }),
       });
       if (!response.ok) {
+        restore();
         setNotice('这条消息没有发出去，草稿还在，可以再发一次。');
         return;
       }
@@ -495,12 +512,13 @@ export function CommandRoomPage() {
       pending.current = null;
       stick.current = true;
       setMessages((current) => mergeRoomMessages(current, [data.message, ...(data.reply ? [data.reply] : [])]));
-      setDraft('');
+      setOutbox(null);
       writeDraft(viewerId, '');
       setFollowupId(null);
       setMentionOpen(false);
       void pull();
     } catch {
+      restore();
       setNotice('这条消息没有发出去，草稿还在，可以再发一次。');
     } finally {
       setSending(false);
@@ -653,6 +671,26 @@ export function CommandRoomPage() {
   const counts = { open: tasks.filter((task) => OPEN_STATUS.has(task.status)).length, review: tasks.filter((task) => reviewStatus.has(task.status)).length };
   const delivered = tasks.filter((task) => task.status === 'completed' || task.status === 'reviewed').slice(-5).reverse();
   const firstEmployee = employees.find((employee) => employee.status === 'active') ?? employees[0];
+  /**
+   * Who is speaking right now: my message on its way, Super Agent reading it, and each digital employee whose
+   * computer is working on a task. They sit at the end of the conversation like a chat app's typing bubbles.
+   */
+  function liveBubbles() {
+    const bubbles = [];
+    if (outbox) {
+      bubbles.push(<article key="outbox" className="exec-message room-outbox" data-mine="yes" data-outbox="">
+        <header><strong>{t('我')}</strong><span>{t('发送中')}</span></header>
+        <p>{outbox.body}</p>
+      </article>);
+      bubbles.push(<TypingBubble key="super-agent" who={t('超级智能体')} what={t('正在思考')} data="super-agent" />);
+    }
+    for (const task of tasks.filter((item) => item.status === 'running').slice(0, 3)) {
+      const name = employees.find((employee) => employee.id === task.employeeId)?.name ?? t('数字员工');
+      bubbles.push(<TypingBubble key={`task-${task.id}`} who={name} what={`${t('正在处理')}「${task.title}」`} data={task.id} />);
+    }
+    return bubbles;
+  }
+
   function startWith(text: string) {
     changeDraft(text);
     window.setTimeout(() => { const el = input.current; if (el) { el.focus(); el.setSelectionRange(text.length, text.length); } }, 0);
@@ -693,7 +731,7 @@ export function CommandRoomPage() {
               stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
             }}
           >
-            {messages.length === 0 ? (
+            {messages.length === 0 && !outbox ? (
               roster && viewer ? (
                 <div className="room-welcome">
                   <span className="room-avatar room-avatar-lg" aria-hidden="true"><Icon name="brain" size={26} /></span>
@@ -727,7 +765,7 @@ export function CommandRoomPage() {
                   <span>{messageKindLabel(message, tasks, lang)}</span>
                 </header>
                 {message.authorUserId === 'super-agent'
-                  ? <p>{roomMessage(message.body, lang)}</p>
+                  ? <RichText text={roomMessage(message.body, lang)} />
                   : message.kind === 'report' || fromComputer(message)
                     ? <RichText text={message.kind === 'report' ? message.body : computerText(message.body, lang)} />
                     : <p>{message.body}</p>}
@@ -735,7 +773,7 @@ export function CommandRoomPage() {
                   <button type="button" className="exec-link" key={id} data-open-task={id} onClick={() => openTaskDrawer(id)}>{t('查看任务')}</button>
                 ))}
               </article>
-            ))}
+            )).concat(liveBubbles())}
           </div>
           <form className="exec-composer room-composer" onSubmit={(event) => { event.preventDefault(); void sendDraft(); }}>
             <label htmlFor="room-draft" className="sr-only">{t('发给指挥室')}</label>

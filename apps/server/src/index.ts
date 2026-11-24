@@ -4,6 +4,7 @@ import { dispatchBound, runWorker } from './worker.js';
 import { bindRuntimeDb, runtimeState } from './modules/runtime/index.js';
 import { bindRoomBrain, bindRoomStore, hydrateRoom } from './modules/room/index.js';
 import { gatewayBrain } from './modules/room/brain.js';
+import { answerFromMcp } from './modules/knowledge/mcp-answer.js';
 import { bindWorkersDb, startPgListener } from './modules/workers/index.js';
 import { bindSopStore, hydrateSop } from './modules/sop/index.js';
 import { bindGatewayStore, hydrateGateway } from './modules/gateway/index.js';
@@ -25,7 +26,10 @@ if (role === 'web') {
   const runtime = await createRuntime(process.env); // throws BootstrapError naming missing settings → container exits
   const knowledge = createKnowledgeDeps(runtime);
   const longwork = createLongWorkDeps(runtime);
-  bindRoomBrain(gatewayBrain(runtime.llm, undefined, (why) => console.warn(`room brain: ${why}; using fixed rules`)));
+  bindRoomBrain(gatewayBrain(runtime.llm, undefined, (why) => console.warn(`room brain: ${why}; using fixed rules`)), knowledge.liveMcp ? {
+    sources: async (user) => (await knowledge.liveMcp!.sources(user)).map(({ id, name, endpoint }) => ({ id, name, endpoint })),
+    ask: (user, sourceId, question) => answerFromMcp(user, sourceId, question, knowledge.liveMcp!, runtime.llm),
+  } : null);
   let roomHydrated = !runtime.pool;
   let sopHydrated = !runtime.pool;
   let inboxHydrated = !runtime.pool;
