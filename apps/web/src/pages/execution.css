@@ -317,3 +317,55 @@
 .room-dots i:nth-child(3) { animation-delay: .3s; }
 @keyframes room-dot { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 .room .exec-message .rich-text > p:first-child { margin-top: var(--space-2xs); }
+
+/* ---- Members: Super Agent first, then each digital employee with what it is doing right now. ---- */
+.room .exec-grid { grid-template-columns: 228px minmax(0, 1fr) 336px; }
+.room .exec-grid:has(.exec-drawer) { grid-template-columns: 208px minmax(0, 1fr) 260px minmax(280px, 320px); }
+.room-agents { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.room-agents-title { display: flex; align-items: center; gap: var(--space-xs); margin: var(--space-2xs) 0 var(--space-sm); font-size: 20px; }
+.room-agents ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2xs); }
+.room-agent > button, .room-agent > div { width: 100%; display: grid; grid-template-columns: 36px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: var(--space-sm); row-gap: 2px;
+  align-items: center; padding: var(--space-xs); border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--color-ink); font: inherit; text-align: start; }
+.room-agent > button { cursor: pointer; }
+.room-agent > button:hover, .room-agent > button:focus-visible { background: var(--color-paper-2); border-color: var(--color-soft-rule); }
+.room-agent[data-agent="super-agent"] > div { background: color-mix(in srgb, var(--color-accent) 7%, var(--color-paper-2)); border-color: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+.room-agent-avatar { grid-row: 1 / 3; position: relative; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px;
+  background: var(--color-paper-3); color: var(--color-ink); font-weight: 700; font-size: 15px; border: 1px solid var(--color-rule); }
+.room-agent[data-agent="super-agent"] .room-agent-avatar { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, var(--color-paper-3)); border-color: color-mix(in srgb, var(--color-accent) 35%, transparent); }
+.room-agent-avatar.is-offline, .room-agent-avatar.is-unconnected, .room-agent-avatar.is-paused { opacity: .5; }
+/* A ring that breathes while the agent is thinking or working. */
+.room-agent-avatar.is-thinking::after, .room-agent-avatar.is-working::after { content: ""; position: absolute; inset: -4px; border-radius: 13px;
+  border: 2px solid var(--color-accent); animation: room-breathe 1.6s ease-in-out infinite; }
+.room-agent-text { display: grid; min-width: 0; }
+.room-agent-text strong { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-agent-text small { font-size: 12px; color: var(--color-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-agent-state { grid-column: 2; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-muted); white-space: nowrap; }
+.room-agent-state em { font-style: normal; color: var(--color-subtle); }
+.room-agent-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-subtle); }
+.room-agent-state.is-idle .room-agent-dot { background: var(--color-success); }
+.room-agent-state.is-queued .room-agent-dot { background: var(--color-warning); }
+.room-agent-state.is-paused .room-agent-dot { background: var(--color-warning); opacity: .6; }
+.room-agent-state.is-thinking, .room-agent-state.is-working { color: var(--color-accent); }
+.room-agent-state .room-dots i { width: 4px; height: 4px; }
+/* Just spoke: the row lifts for a moment. */
+.room-agent.is-speaking > button, .room-agent.is-speaking > div { animation: room-spoke 1.2s ease-out 2; }
+@keyframes room-breathe { 0%, 100% { opacity: .15; transform: scale(.96); } 50% { opacity: .9; transform: scale(1.04); } }
+@keyframes room-spoke { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent); transform: translateY(0); }
+  30% { transform: translateY(-2px); } 100% { box-shadow: 0 0 0 8px transparent; transform: translateY(0); } }
+
+/* Medium screens: members become a strip above the conversation. */
+@media (max-width: 1200px) and (min-width: 801px) {
+  .room .exec-grid, .room .exec-grid:has(.exec-drawer) { grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr); }
+  .room .exec-grid:has(.exec-drawer) { grid-template-columns: minmax(0, 1fr) 260px minmax(260px, 300px); }
+  .room-agents { grid-column: 1 / -1; overflow: visible; }
+  .room-agents-title { display: none; }
+  .room-agents ul { display: flex; gap: var(--space-xs); overflow-x: auto; padding-bottom: 2px; }
+  .room-agent { flex: 0 0 210px; }
+}
+@media (max-width: 800px) {
+  .room .exec-grid, .room .exec-grid:has(.exec-drawer) { grid-template-columns: minmax(0, 1fr); }
+  .room-agents { overflow: visible; }
+  .room-agents-title { display: none; }
+  .room-agents ul { display: flex; gap: var(--space-xs); overflow-x: auto; padding-bottom: 2px; }
+  .room-agent { flex: 0 0 200px; }
+}

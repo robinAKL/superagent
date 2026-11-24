@@ -85,6 +85,39 @@ test.beforeEach(async ({ page }) => {
   await ok(page.request.post('/__e2e/room/reset'));
 });
 
+test('members list Super Agent first, then each employee with what it is doing; picking one starts an @mention', async ({ page }) => {
+  const staff = `e2e-room-staff-${tag()}`;
+  const busy = await employee(page, '运营员工', staff);
+  const away = await employee(page, '财务员工', staff, false);
+  await as(page, OWNER);
+  const agents = page.getByRole('complementary', { name: '成员' });
+  await expect(agents.locator('[data-agent]').first()).toHaveAttribute('data-agent', 'super-agent');
+  await expect(agents.locator('[data-agent="super-agent"]')).toHaveAttribute('data-state', 'idle');
+  await expect(agents.locator(`[data-agent="${busy.id}"]`)).toHaveAttribute('data-state', 'idle');
+  await expect(agents.locator(`[data-agent="${away.id}"]`)).toContainText('未连接电脑'); // never linked a computer; a linked one that drops shows 掉线
+
+  await say(page, `@${busy.name} 整理本周的订单清单`);
+  await expect(agents.locator(`[data-agent="${busy.id}"]`)).toHaveAttribute('data-state', 'queued');
+
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/v1/room/messages', async (route) => {
+    if (route.request().method() === 'POST') await held;
+    await route.continue();
+  });
+  await draft(page).fill('你好');
+  await draft(page).press('Enter');
+  await expect(agents.locator('[data-agent="super-agent"]')).toHaveAttribute('data-state', 'thinking');
+  await expect(agents.locator('[data-agent="super-agent"]')).toContainText('思考中');
+  if (process.env.ROOM_SHOTS) await page.screenshot({ path: process.env.ROOM_SHOTS.replace('.png', '-agents.png') });
+  release();
+  await expect(agents.locator('[data-agent="super-agent"]')).toHaveAttribute('data-state', 'idle');
+  await page.unroute('**/api/v1/room/messages');
+
+  await agents.locator(`[data-agent="${away.id}"] button`).click();
+  await expect(draft(page)).toHaveValue(`@${away.name} `);
+});
+
 test('a sent message shows at once with Super Agent thinking under it; a failed send gives the draft back', async ({ page }) => {
   await as(page, OWNER);
   let release!: () => void;

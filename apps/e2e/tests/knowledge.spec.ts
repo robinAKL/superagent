@@ -456,9 +456,9 @@ test('a saved team size proposal is preselected and applies with one click', asy
   expect(team).toHaveLength(2);
   // The command room offers exactly these two team employees for assignment.
   await page.goto('/#room');
-  await page.getByRole('button', { name: '团队', exact: true }).click();
-  await expect(page.locator('#room-team [data-team-member^="emp-org-"]')).toHaveCount(2);
-  for (const e of team) await expect(page.locator(`#room-team [data-team-member="${e.id}"]`)).toBeVisible();
+  // The members list (left of the conversation) shows them; it replaced the 团队 panel.
+  await expect(page.locator('#room-agents [data-agent^="emp-org-"]')).toHaveCount(2);
+  for (const e of team) await expect(page.locator(`#room-agents [data-agent="${e.id}"]`)).toBeVisible();
   // Leave no draft or team behind for later files (the shell spec checks the empty state).
   await response(page.request.post('/__test/knowledge/reset', { data: {} }));
 });
@@ -484,9 +484,8 @@ test('one team size submission leaves one employee and that employee can be boun
   const team = registry.filter(e => e.id.startsWith('emp-org-'));
   expect(team).toHaveLength(1);
   await page.goto('/#room');
-  await page.getByRole('button', { name: '团队', exact: true }).click();
-  await expect(page.locator('#room-team [data-team-member^="emp-org-"]')).toHaveCount(1);
-  await expect(page.locator(`#room-team [data-team-member="${team[0]!.id}"]`)).toBeVisible();
+  await expect(page.locator('#room-agents [data-agent^="emp-org-"]')).toHaveCount(1);
+  await expect(page.locator(`#room-agents [data-agent="${team[0]!.id}"]`)).toBeVisible();
 
   const device = await response<{ token: string; worker: { id: string } }>(
     page.request.post('/api/v1/workers', { data: { name: 'E2E Link', kind: 'link' } }),
