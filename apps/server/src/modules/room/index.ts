@@ -5,7 +5,7 @@ import { employeesState } from '../employees/index.js';
 import { queueRoomDispatch, resolveRoomDispatch, retryRoomDispatch, workersState } from '../workers/index.js';
 import { linkMayBeOnline, linkOnline } from '../workers/presence.js';
 import type { PlatformSource, RoomBrain, RoomBrainInput } from './brain.js';
-import { isGreeting, smallTalkReply, asksBoard } from './intent.js';
+import { isGreeting, smallTalkReply, asksBoard, asksRetry } from './intent.js';
 import { CommandRoom, roomHooks, stateText, taskCode, type EmployeeRef, type EmployeeSource, type RoomSnapshot, type Viewer } from './room.js';
 
 roomHooks.linkMayBeOnline = (employeeId) => linkMayBeOnline(employeeId, workersState.now());
@@ -66,11 +66,21 @@ async function supervisePass(): Promise<number> {
   const room = roomState.current;
   room.holdDisconnected();
   const { messages, retry } = room.supervise();
+  const said = messages.length + await sendAgain(retry);
   if (messages.length) await flushRoom();
-  for (const task of retry) {
-    try { await retryRoomDispatch(task); } catch (error) { console.warn(`room retry dispatch failed: ${error instanceof Error ? error.message : String(error)}`); }
+  return said;
+}
+
+/** Sends each task to its computer again; the room is told only what actually happened. Returns messages posted. */
+async function sendAgain(retry: import('./room.js').RetryRequest[]): Promise<number> {
+  let said = 0;
+  for (const request of retry) {
+    let sent = false;
+    try { sent = await retryRoomDispatch(request.task); } catch (error) { console.warn(`room retry dispatch failed: ${error instanceof Error ? error.message : String(error)}`); }
+    if (roomState.current.retried(request, sent)) said++;
   }
-  return messages.length;
+  if (retry.length) await flushRoom();
+  return said;
 }
 /** One pass at a time: a call while a pass runs shares it. */
 export function superviseRoom(): Promise<number> {
@@ -211,6 +221,19 @@ export const roomModule: FastifyPluginAsync = async (app) => {
     const room = roomState.current;
     // A question about a numbered task is answered from the task, not read by the model.
     let aboutTask = !body.followupTo && !room.namesEmployee(body.body) ? room.answerAboutTask(body.body, viewer, body.roomId) : null;
+    // "重试 T-5", "全部重试": a person tells Super Agent to start tasks over; it does, and says what happened.
+    const retryAsk = !body.followupTo && !room.namesEmployee(body.body) ? asksRetry(body.body) : null;
+    if (aboutTask === null && retryAsk && !room.hasClientMessage(body.roomId, body.clientMessageId)) {
+      const { retry, skipped } = room.retryRequested(viewer, body.roomId, retryAsk);
+      const before = room.eventsAfter(body.roomId, 0, viewer).length;
+      await sendAgain(retry);
+      const notes = roomState.current.eventsAfter(body.roomId, 0, viewer).slice(before).map((message) => message.body);
+      aboutTask = [
+        retry.length ? `好的，开始重试 ${retry.length} 个任务：` : '没有可以重试的未完成任务。',
+        ...notes.map((note) => `- ${note}`),
+        ...(skipped.length ? [`${skipped.join('、')} 不在未完成的任务里，没有重试。`] : []),
+      ].join('\n');
+    }
     // "进行中的任务怎么还没完成", "看板": Super Agent acts on the board first, then reads it out.
     if (aboutTask === null && !body.followupTo && !room.namesEmployee(body.body) && !room.hasClientMessage(body.roomId, body.clientMessageId) && asksBoard(body.body)) {
       await superviseRoom();

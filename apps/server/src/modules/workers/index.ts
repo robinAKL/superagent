@@ -166,18 +166,21 @@ export async function dispatchWaitingRoomTasks(tenantId: string, employeeId: str
     task.projectId = target.projectId;
     await flushRoom();
     if (await workersState.registry.appendEvent(task.tenantId, target.workerId, 'wake', {
-      roomTaskId: task.id, projectId: target.projectId, prompt: roomState.current.dispatchPrompt(task), attempt: task.watch?.attempts ?? 0,
+      roomTaskId: task.id, projectId: target.projectId, prompt: roomState.current.dispatchPrompt(task), attempt: sendNumber(task),
     }, 'super-agent', workersState.now(), task.id)) sent++;
   }
   return sent;
 }
 
-export async function queueRoomDispatch(task: RoomTask, target: { workerId: string; projectId: string }): Promise<void> {
+/** The wake number Link compares: how many times the task has been sent again (0 for the first send). */
+const sendNumber = (task: RoomTask) => task.watch?.sends ?? task.watch?.attempts ?? 0;
+
+export async function queueRoomDispatch(task: RoomTask, target: { workerId: string; projectId: string }, attempt = sendNumber(task)): Promise<void> {
   await workersState.registry.appendEvent(task.tenantId, target.workerId, 'wake', {
     roomTaskId: task.id,
     projectId: target.projectId,
     prompt: roomState.current.dispatchPrompt(task),
-    attempt: task.watch?.attempts ?? 0,
+    attempt,
   }, 'super-agent', workersState.now(), task.id);
 }
 
@@ -193,7 +196,7 @@ export async function retryRoomDispatch(task: RoomTask): Promise<boolean> {
   if (!target) return false;
   task.projectId = target.projectId;
   await workersState.registry.releaseRoomDispatch(task.tenantId, task.id);
-  await queueRoomDispatch(task, target);
+  await queueRoomDispatch(task, target, sendNumber(task) + 1);
   return true;
 }
 
@@ -605,11 +608,12 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     }
     const digest = createHash('sha256').update(body).digest('hex');
     // A run Super Agent resumed or retried may say the same words as the run before; it is still a new update.
-    const attempt = roomState.current.listTasks({ userId: 'system', roles: ['owner'], projectScopes: [] }).find((item) => item.id === id)?.watch?.attempts ?? 0;
+    const attempt = roomState.current.listTasks({ userId: 'system', roles: ['owner'], projectScopes: [] }).find((item) => item.id === id)?.watch;
+    const sends = attempt?.sends ?? attempt?.attempts ?? 0;
     let message;
     try {
       message = roomState.current.updateFromWorker(
-        id, worker.tenantId, body, 'worker-' + action + ':' + id + ':' + (attempt ? `a${attempt}:` : '') + digest, action === 'report',
+        id, worker.tenantId, body, 'worker-' + action + ':' + id + ':' + (sends ? `a${sends}:` : '') + digest, action === 'report',
         task => workerMayRun(worker, task) && !!worker.capabilities.roomAssignments?.some(assignment =>
           assignment.employeeId === task.employeeId && assignment.projectId === task.projectId,
         ),

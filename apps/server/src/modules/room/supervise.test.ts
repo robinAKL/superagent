@@ -16,7 +16,12 @@ function setup() {
   return {
     room, employee, post,
     later: (minutes: number) => { now += minutes * MIN; },
-    say: () => room.supervise(),
+    /** One supervisor pass, with every re-send reaching the computer (as the HTTP layer reports it). */
+    say: () => {
+      const pass = room.supervise();
+      const sent = pass.retry.map((request) => room.retried(request, true)).filter((message): message is NonNullable<typeof message> => Boolean(message));
+      return { messages: [...pass.messages, ...sent], retry: pass.retry.map((request) => request.task) };
+    },
     task: (id: string) => room.listTasks(owner).find((item) => item.id === id)!,
   };
 }
@@ -115,4 +120,34 @@ it('the board summary lists every open task with its state, time and next step; 
   assert.match(prompt, /检查本地 worker 是否在线/);
   assert.doesNotMatch(prompt.split('---')[1]!, /列出项目文件/);
   assert.ok(first);
+});
+
+it('a re-send that reaches no computer is neither counted nor announced as sent; the room hears why, once', () => {
+  const s = setup();
+  const made = s.post('@运营员工 列出项目文件', 'c1').task!;
+  s.room.supervise();
+  s.later(10);
+  const pass = s.room.supervise();
+  assert.equal(pass.retry.length, 1);
+  const note = s.room.retried(pass.retry[0]!, false)!;
+  assert.match(note.body, /现在没有电脑能接/);
+  assert.equal(note.kind, 'nudge');
+  assert.equal(s.task(made.id).watch?.attempts, 0);
+  s.later(1);
+  assert.equal(s.room.retried(s.room.supervise().retry[0]!, false), null); // not again within two hours
+  assert.equal(s.task(made.id).watch?.attempts, 0);
+});
+
+it('"重试" from a person resets the count and sends the open tasks again', () => {
+  const s = setup();
+  const made = s.post('@运营员工 列出项目文件', 'c1').task!;
+  s.say();
+  for (let i = 0; i < 3; i++) { s.later(10); s.say(); }
+  assert.equal(s.task(made.id).watch?.attempts, 2);
+  const { retry, skipped } = s.room.retryRequested(owner, 'room-1', [Number(made.id.replace('task_', '')), 999]);
+  assert.equal(retry.length, 1);
+  assert.deepEqual(skipped, ['T-999']);
+  assert.match(s.room.retried(retry[0]!, true)!.body, /按你的要求/);
+  assert.equal(s.task(made.id).watch?.attempts, 1);
+  assert.equal(s.room.retryRequested(owner, 'room-1', 'all').retry.length, 1);
 });
