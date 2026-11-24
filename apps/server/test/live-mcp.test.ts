@@ -312,6 +312,18 @@ it('discovers OAuth on a different host and lets the Brain read knowledge under 
     expect(calls).toHaveLength(3);
     expect(calls.every((call) => call[2].effort === 'low')).toBe(true);
     expect(calls[1]![2].messages[0]!.content).toContain('could not be used');
+
+    // A reasoning model that spends its allowance thinking returns no answer text: asked once more, briefly.
+    chat.mockResolvedValueOnce(reply('[{"name":"get_crm_guide","arguments":{}}]'))
+      .mockResolvedValueOnce({ ...reply(''), stopReason: 'length' })
+      .mockResolvedValueOnce(reply('Verify receipt first. [1]'));
+    const second = chat.mock.calls.length;
+    const retried = await answerFromMcp({ tenantId: 'test', userId: 'alice', roles: ['employee'], projectScopes: [] }, hash(endpoint), 'How do I record a deposit?', liveMcp, gateway, { quick: true });
+    expect(retried.answer).toBe('Verify receipt first. [1]');
+    const answerCalls = chat.mock.calls.slice(second + 1);
+    expect(answerCalls).toHaveLength(2);
+    expect(answerCalls[0]![2].maxOutputTokens).toBe(4000);
+    expect(answerCalls[1]![2].messages[0]!.content).toContain('Keep the answer short');
     const mcp = await send(root + '/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/list' });
     expect(mcp.json().result.tools).toContainEqual(expect.objectContaining({ name: 'read_mcp_knowledge' }));
 
@@ -334,7 +346,7 @@ it('discovers OAuth on a different host and lets the Brain read knowledge under 
     expect(overview.mcpRecommendations[0].evidence[0]).toMatchObject({
       locator: 'VERA CRM / get_crm_guide', quote: expect.stringContaining('Verify receipt before recording a deposit.'),
     });
-    expect(usedTools).toEqual(['get_crm_guide', 'get_crm_guide', 'get_crm_guide']) // ask, quick ask, analysis;
+    expect(usedTools).toEqual(['get_crm_guide', 'get_crm_guide', 'get_crm_guide', 'get_crm_guide']) // ask, quick ask, retried answer, analysis;
 
     await app.inject({ method: 'DELETE', url: connection, headers: { 'x-dev-user': 'alice|employee|' } });
     expect((await send(connection + '/catalog')).statusCode).toBe(404);
