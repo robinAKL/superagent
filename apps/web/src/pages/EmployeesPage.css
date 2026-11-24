@@ -191,3 +191,8 @@ li.emp-card h3 { margin: var(--space-2xs) 0 0; font-size: 17px; overflow-wrap: a
   .emp-table td.num::before { content: attr(data-label) " "; color: var(--color-subtle); font-size: var(--text-caption); }
   .emp-table td.actions { grid-column: 1 / -1; text-align: left; display: flex; gap: var(--space-xs); }
 }
+
+/* v2: who is in each row — an avatar beside the name and duty. */
+.emp-who { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; }
+.emp-who-text { display: grid; min-width: 0; }
+.emp-wall-bar .chip-row { flex: 1; }

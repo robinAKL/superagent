@@ -126,17 +126,17 @@ export function MaterialReview({ items, canManage, request, errorMessage, onChan
     <div className="mr-controls">
       <div className="mr-head">
         {tabs.length > 1 ? <div className="mr-tabs">
-          {tabs.map(([key, n]) => <button key={key} type="button" aria-pressed={activeTab === key} className={`mr-pill ${activeTab === key ? 'is-active' : ''}`} onClick={() => { setTab(key); setCategory(''); changePage(0); }}>
+          {tabs.map(([key, n]) => <button key={key} type="button" aria-pressed={activeTab === key} className="chip" onClick={() => { setTab(key); setCategory(''); changePage(0); }}>
             {t(key === 'all' ? 'tabAll' : key === 'pending' ? 'tabPending' : 'tabFlagged', { n })}
           </button>)}
         </div> : null}
-        {counts.length > 1 ? <label className="mr-category field">
-          <span>{t('categoryLabel')}</span>
-          <select value={activeCategory} onChange={event => { setCategory(event.target.value as Category | ''); changePage(0); }}>
-            <option value="">{t('categoryAll')}</option>
-            {counts.map(([c, n]) => <option key={c} value={c}>{catLabel(c)} ({n})</option>)}
-          </select>
-        </label> : null}
+        {/* Categories as chips with counts, the same filter look as the command room. */}
+        {counts.length > 1 ? <div className="chip-row mr-category" role="group" aria-label={t('categoryLabel')}>
+          <button type="button" className="chip" aria-pressed={activeCategory === ''} onClick={() => { setCategory(''); changePage(0); }}>{t('categoryAll')}</button>
+          {counts.map(([c, n]) => <button key={c} type="button" className="chip" aria-pressed={activeCategory === c} onClick={() => { setCategory(c); changePage(0); }}>
+            {catLabel(c)}<span className="chip-n">{n}</span>
+          </button>)}
+        </div> : null}
       </div>
 
       {confirmTarget.length && (onAnalyze || selectableVisible.length > 1) ? <div className="mr-toolbar">
@@ -163,7 +163,7 @@ export function MaterialReview({ items, canManage, request, errorMessage, onChan
             </div> : <>
               <div className="mr-title-row">
                 <strong title={p?.title ?? item.title}>{readableTitle(p?.title ?? item.title, item.title)}</strong>
-                {p ? <span className="knowledge-badge is-gold">{catLabel(p.category)}</span> : null}
+                {p ? <span className="tag is-accent">{catLabel(p.category)}</span> : null}
                 {p?.refining ? <span className="mr-origin mr-refining">{t('refining')}</span> :
                   p?.origin === 'human' ? <span className="mr-origin">{t('originHuman')}</span> : null}
               </div>

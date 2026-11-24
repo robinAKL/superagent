@@ -164,6 +164,20 @@ function requestedSection(): SetupSection | null {
 
 export function SetupPage() {
   const t = useT(TEXT);
+  // The section in view is the highlighted one in the menu (the room's "you are here" look).
+  const [current, setCurrent] = useState<SetupSection>(() => requestedSection() ?? 'company');
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver((entries) => {
+      const top = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      const id = top?.target.id.replace(/^settings-/, '') as SetupSection | undefined;
+      if (id && SECTIONS.includes(id)) setCurrent(id);
+    }, { rootMargin: '-20% 0px -60% 0px' });
+    const timer = window.setTimeout(() => {
+      for (const section of SECTIONS) { const el = document.getElementById(`settings-${section}`); if (el) observer.observe(el); }
+    }, 400);
+    return () => { window.clearTimeout(timer); observer.disconnect(); };
+  }, []);
   useEffect(() => {
     const jump = () => { const section = requestedSection(); if (section) document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' }); };
     const timer = window.setTimeout(jump, 300);
@@ -322,8 +336,8 @@ export function SetupPage() {
     <div className="setup-layout">
       <nav className="setup-sections" aria-label={t('sectionsNav')}>
         {SECTIONS.filter(section => isAdmin || !ADMIN_SECTIONS.has(section)).map(section =>
-          <button key={section} type="button" className={`btn quiet${section === 'danger' ? ' is-danger' : ''}`}
-            onClick={() => document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' })}>{t(SECTION_LABELS[section])}</button>)}
+          <button key={section} type="button" className={`btn quiet${section === 'danger' ? ' is-danger' : ''}`} aria-current={current === section ? 'true' : undefined}
+            onClick={() => { setCurrent(section); document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' }); }}>{t(SECTION_LABELS[section])}</button>)}
       </nav>
       <div className="setup-body">
     {isAdmin ? <div id="settings-company"><CompanyContextPanel fromOrganization={false} guide={false} /></div> : null}
