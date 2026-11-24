@@ -473,3 +473,14 @@
 .room .exec-task, .room .exec-task[data-status="waiting"] { border: 1px solid var(--color-rule); }
 .room .exec-task[data-status="waiting"] { border-color: color-mix(in srgb, var(--color-warning) 35%, var(--color-rule)); }
 .room .exec-task[data-status="running"], .room .exec-task[aria-current="true"] { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 6%, var(--color-paper-2)); }
+
+/* Filters on the title row, between 指挥室 and the actions. */
+.room .room-head .room-filters { flex: 1; min-width: 0; margin: 0 var(--space-lg); padding: 0; border: 0; flex-wrap: nowrap; overflow-x: auto; }
+.room .room-head .room-search { margin-left: auto; }
+@media (max-width: 1200px) {
+  .room .room-head { flex-wrap: wrap; }
+  .room .room-head .room-filters { order: 3; flex: 1 1 100%; margin: var(--space-xs) 0 0; }
+}
+.room .page-head.room-head { display: flex; align-items: center; gap: var(--space-md); }
+.room .page-head.room-head h1 { flex: none; }
+.room .room-head .page-head-actions { flex: none; margin-left: 0; }
