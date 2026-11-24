@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import type { FastifyPluginAsync } from 'fastify';
 import { loadRoomRows, saveRoomRows, type Queryable } from './pg-room.js';
 import { employeesState } from '../employees/index.js';
-import { queueRoomDispatch, resolveRoomDispatch, workersState } from '../workers/index.js';
+import { queueRoomDispatch, resolveRoomDispatch, retryRoomDispatch, workersState } from '../workers/index.js';
 import { linkMayBeOnline, linkOnline } from '../workers/presence.js';
 import type { PlatformSource, RoomBrain, RoomBrainInput } from './brain.js';
-import { isGreeting, smallTalkReply } from './intent.js';
-import { CommandRoom, roomHooks, type EmployeeRef, type EmployeeSource, type RoomSnapshot, type Viewer } from './room.js';
+import { isGreeting, smallTalkReply, asksBoard } from './intent.js';
+import { CommandRoom, roomHooks, stateText, taskCode, type EmployeeRef, type EmployeeSource, type RoomSnapshot, type Viewer } from './room.js';
 
 roomHooks.linkMayBeOnline = (employeeId) => linkMayBeOnline(employeeId, workersState.now());
 
@@ -56,6 +56,39 @@ export interface RoomLookups {
   ask(user: NonNullable<import('fastify').FastifyRequest['user']>, sourceId: string, question: string): Promise<{ answer: string }>;
 }
 let roomLookups: RoomLookups | null = null;
+
+/**
+ * One pass of Super Agent managing the board: resume tasks whose computer is back, retry failed or unclaimed ones,
+ * remind people of what waits on them. Runs on a timer and before Super Agent answers a question about progress.
+ */
+let supervising: Promise<number> | null = null;
+async function supervisePass(): Promise<number> {
+  const room = roomState.current;
+  room.holdDisconnected();
+  const { messages, retry } = room.supervise();
+  if (messages.length) await flushRoom();
+  for (const task of retry) {
+    try { await retryRoomDispatch(task); } catch (error) { console.warn(`room retry dispatch failed: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  return messages.length;
+}
+/** One pass at a time: a call while a pass runs shares it. */
+export function superviseRoom(): Promise<number> {
+  if (!supervising) {
+    const pass = supervisePass();
+    supervising = pass;
+    const clear = () => { if (supervising === pass) supervising = null; };
+    pass.then(clear, clear);
+  }
+  return supervising;
+}
+
+/** Super Agent checks the board every minute (unref: never keeps the process alive). */
+export function startRoomSupervisor(everyMs = 60_000): () => void {
+  const timer = setInterval(() => { void superviseRoom().catch((error: unknown) => console.warn(`room supervisor failed: ${error instanceof Error ? error.message : String(error)}`)); }, everyMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
 
 export function bindRoomBrain(brain: RoomBrain | null, lookups: RoomLookups | null = null): void {
   roomBrain = brain;
@@ -177,7 +210,12 @@ export const roomModule: FastifyPluginAsync = async (app) => {
     const tenantId = req.user?.tenantId ?? body.tenantId ?? 't';
     const room = roomState.current;
     // A question about a numbered task is answered from the task, not read by the model.
-    const aboutTask = !body.followupTo && !room.namesEmployee(body.body) ? room.answerAboutTask(body.body, viewer, body.roomId) : null;
+    let aboutTask = !body.followupTo && !room.namesEmployee(body.body) ? room.answerAboutTask(body.body, viewer, body.roomId) : null;
+    // "进行中的任务怎么还没完成", "看板": Super Agent acts on the board first, then reads it out.
+    if (aboutTask === null && !body.followupTo && !room.namesEmployee(body.body) && !room.hasClientMessage(body.roomId, body.clientMessageId) && asksBoard(body.body)) {
+      await superviseRoom();
+      aboutTask = roomState.current.boardSummary(viewer, body.roomId);
+    }
     // Greetings, thanks and "测试，请忽略" get a fixed short reply: the model would answer what came before them.
     const smallTalk = isGreeting(body.body) || smallTalkReply(body.body) !== null;
     const think = aboutTask === null && !smallTalk && roomBrain !== null && !body.followupTo && !room.hasClientMessage(body.roomId, body.clientMessageId) && !room.namesEmployee(body.body);
@@ -228,11 +266,13 @@ export const roomModule: FastifyPluginAsync = async (app) => {
       try {
         const sources = req.user && roomLookups ? await roomLookups.sources(req.user).catch(() => []) : [];
         const roster = room.roster(viewer);
+        const now = Date.now();
         const tasks = room.listTasks(viewer, body.roomId).map((task) => ({
-          code: `T-${/(\d+)$/.exec(task.id)?.[1] ?? task.id}`,
+          code: taskCode(task),
           title: task.title.slice(0, 200),
-          status: task.waitingReason ? `${task.status} (${task.waitingReason})` : task.status,
+          status: stateText(task),
           employee: roster.find((employee) => employee.id === task.employeeId)?.name ?? '',
+          ...(task.watch ? { minutesInState: Math.max(0, Math.round((now - new Date(task.watch.since).getTime()) / 60_000)), retries: task.watch.attempts } : {}),
         }));
         const decision = await roomBrain!.understand({ tenantId, body: text, roster, sources, tasks, history });
         if (decision && 'ask' in decision) {

@@ -160,6 +160,8 @@ export interface WorkerRegistry {
   bindRoom(tenantId: string, id: string, change: RoomBindingChange): Promise<RoomBindingOutcome>;
   appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number, roomTaskId?: string): Promise<WorkerEvent | null>;
   hasRoomDispatch(tenantId: string, workerId: string, roomTaskId: string): Promise<boolean>;
+  /** Forget where a room task was sent, so Super Agent can send the same task again (a retry, never a new task). */
+  releaseRoomDispatch(tenantId: string, roomTaskId: string): Promise<void>;
   /** Oldest first, at most `limit`, strictly after `since`. */
   eventsAfter(workerId: string, since: number, limit: number): Promise<WorkerEvent[]>;
 }
@@ -328,6 +330,10 @@ export class MemoryWorkerRegistry implements WorkerRegistry {
 
   async hasRoomDispatch(tenantId: string, workerId: string, roomTaskId: string): Promise<boolean> {
     return this.roomDispatches.get(JSON.stringify([tenantId, roomTaskId]))?.workerId === workerId;
+  }
+
+  async releaseRoomDispatch(tenantId: string, roomTaskId: string): Promise<void> {
+    this.roomDispatches.delete(JSON.stringify([tenantId, roomTaskId]));
   }
 
   async appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number, roomTaskId?: string): Promise<WorkerEvent | null> {

@@ -106,6 +106,11 @@ FROM workers w
 WHERE e.tenant_id = $1::uuid AND e.room_task_id = $2 AND w.id = e.worker_id AND w.revoked_at IS NOT NULL
 `.trim();
 
+/** Super Agent sends the same room task again: the earlier dispatch row no longer holds the one-dispatch key. */
+export const RELEASE_ROOM_DISPATCH_SQL = `
+UPDATE worker_events SET room_task_id = NULL WHERE tenant_id = $1::uuid AND room_task_id = $2
+`.trim();
+
 const FIND_ROOM_DISPATCH_SQL = `
 SELECT seq FROM worker_events
 WHERE tenant_id = $1::uuid AND worker_id = $2::uuid AND room_task_id = $3;
@@ -233,6 +238,10 @@ export class PgWorkerRegistry implements WorkerRegistry {
         if ((error as { code?: string }).code !== '23505' || tries >= 25) throw error;
       }
     }
+  }
+
+  async releaseRoomDispatch(tenantId: string, roomTaskId: string): Promise<void> {
+    await this.db.query(RELEASE_ROOM_DISPATCH_SQL, [tenantId, roomTaskId]);
   }
 
   async hasRoomDispatch(tenantId: string, workerId: string, roomTaskId: string): Promise<boolean> {

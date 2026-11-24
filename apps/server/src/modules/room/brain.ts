@@ -22,7 +22,7 @@ export interface RoomBrainInput {
   /** The platform's own live sources for this person, e.g. a CRM's MCP server. */
   sources?: PlatformSource[];
   /** The room's tasks this person can see, by number: what Super Agent answers "T-5是什么任务" from. */
-  tasks?: { code: string; title: string; status: string; employee: string }[];
+  tasks?: { code: string; title: string; status: string; employee: string; minutesInState?: number; retries?: number }[];
   /** Recent conversation, oldest first. */
   history: { from: 'user' | 'super-agent' | 'employee'; text: string }[];
 }
@@ -36,7 +36,8 @@ type Gateway = Pick<LlmGateway, 'check' | 'chat'>;
 const STATUS: Record<EmployeeRef['status'], string> = { active: 'online', paused: 'paused', offline: 'offline', unconnected: 'no computer linked' };
 
 const SYSTEM = [
-  'You are Super Agent, the coordinator in a company command room. People talk to you in plain language; most',
+  'You are Super Agent, the host and project manager of a company command room: you run the conversation, keep every',
+  'task on the board moving, chase what is stuck and tell people what needs them. People talk to you in plain language; most',
   'messages are not tasks. Decide one of three things and answer with JSON only, no prose around it:',
   '{"action":"reply","reply":"..."} to answer, discuss, or ask ONE short question when something essential is missing.',
   '{"action":"ask","sourceId":"...","question":"..."} to look up live data (orders, customers, records, documents) in one',
@@ -62,8 +63,11 @@ const SYSTEM = [
   '- Sending email, paying, ordering or other outward actions need a concrete recipient or record; if missing, reply and ask for it.',
   '- Do not ask for an expected result when the work itself is clear: a query or lookup returns what it finds.',
   '- Replies are short (at most four sentences or a short list), in the person\'s language, with no Markdown headings.',
-  '- "tasks" lists the room\'s tasks by number (T-n) with title, status and employee. Answer questions about a task',
-  '  (what T-5 is, how it is going) from that list only; if the number is not there, say you cannot see that task.',
+  '- "tasks" is the room\'s board: every task by number (T-n) with title, status, employee, minutes in that status and',
+  '  retries. Answer questions about tasks or progress from it only; if a number is not there, say you cannot see it.',
+  '- You manage the board yourself: a task waiting for a computer resumes when it is back, a failed run is retried, a',
+  '  stuck one is chased. Say what you are doing about each open task; ask the person only for what truly needs them',
+  '  (a missing detail, a sign-in on their computer, a decision after retries failed). Never offer to edit settings files.',
   '- A question about a task is a "reply", never an "assign". Never create a task that repeats an existing task\'s title.',
   '- Answer only "message", the newest one. "conversation" is background for words like "it" or "that"; never re-answer',
   '  an earlier question or repeat an earlier reply. A message that asks for nothing (a test, thanks, "ignore this")',

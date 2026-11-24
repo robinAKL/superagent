@@ -132,5 +132,6 @@ it('knows the room\'s tasks by number, so "T-5是什么任务" is answered from 
   const decision = await brain.understand({ tenantId: 't', body: 'T-5是什么任务？', roster: employees, tasks, history: [] });
   expect(decision).toEqual({ answer: 'T-5 是：检查本地 worker 是否在线，并把结果告诉我。现在等待连接。' });
   expect(JSON.parse(sent).tasks).toEqual(tasks);
-  expect(system).toContain('from that list only');
+  expect(system).toContain('Answer questions about tasks or progress from it only');
+  expect(system).toContain('You manage the board yourself');
 });

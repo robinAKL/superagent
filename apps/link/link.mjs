@@ -231,9 +231,19 @@ export class WorkerLink {
 
   #wake(event) {
     const { roomTaskId, projectId, prompt } = event.payload ?? {};
+    const attempt = Number.isSafeInteger(event.payload?.attempt) && event.payload.attempt > 0 ? event.payload.attempt : 0;
     if (typeof roomTaskId !== 'string' || !roomTaskId || typeof projectId !== 'string' || typeof prompt !== 'string'
-      || !prompt.trim() || prompt.length > 32_000 || this.#state.jobs.some((job) => job.id === roomTaskId)) return;
-    this.#state.jobs.push({ id: roomTaskId, projectId, prompt, status: 'queued' });
+      || !prompt.trim() || prompt.length > 32_000) return;
+    const known = this.#state.jobs.find((job) => job.id === roomTaskId);
+    if (!known) {
+      this.#state.jobs.push({ id: roomTaskId, projectId, prompt, status: 'queued', attempt });
+      return;
+    }
+    // Super Agent sends the same task again (resumed or retried) with a higher attempt: run it once more. A copy of
+    // a wake already taken, or one for a task still queued or running here, changes nothing.
+    if (attempt <= (known.attempt ?? 0) || known.status === 'queued' || known.status === 'reporting' || this.#active?.job === known) return;
+    Object.assign(known, { projectId, prompt, status: 'queued', attempt });
+    delete known.outcome;
   }
 
   #cancel(event) {
