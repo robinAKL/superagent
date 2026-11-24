@@ -503,3 +503,5 @@
 .room .rich-text h3, .room .rich-text h4, .room .rich-text h5, .room .rich-text h6 { font-size: 14px; }
 .room .room-tasks-empty strong { font-size: 14px; }
 .room .room-task-ref-title { font-size: 13px; }
+/* As drawn: column headings are small muted labels (13px), not titles. */
+.room .room-agents-title, .room .room-tasks-head h2 { font-size: 13px; color: var(--color-muted); }
