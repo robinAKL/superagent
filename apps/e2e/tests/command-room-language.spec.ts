@@ -27,7 +27,7 @@ test('command room defaults to English and switches system copy live', async ({ 
   await expect(room.getByRole('heading', { name: 'Tasks' })).toBeVisible();
   // UX plan step 5: the header keeps the team and workflows; super agent setup lives under Admin settings.
   await expect(room.getByRole('button', { name: 'Workflows' })).toBeVisible();
-  await expect(room.getByText('No tasks yet')).toBeVisible();
+  await expect(room.getByText('No open tasks')).toBeVisible();
   await expect(room.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
   const textbox = room.getByRole('textbox', { name: 'Message the command room' });
   await expect(textbox).toHaveAttribute('placeholder', 'Write a message or @mention a digital employee to assign work.');

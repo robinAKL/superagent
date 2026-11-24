@@ -377,7 +377,8 @@ test('an employee sees and assigns only their own digital employee; drafts stay 
 
 test('an empty summary invents nothing; an unsent draft stays unsent; failed evidence cannot be accepted', async ({ page }) => {
   await as(page, OWNER);
-  await expect(page.locator('[data-outcome="summary"]')).toContainText('暂无事项');
+  // An empty room shows one empty state, not an empty 已完成 list as well.
+  await expect(page.getByRole('complementary', { name: '任务列表' })).toContainText('还没有待处理任务');
   await expect(page.locator('[data-outcome="summary-message"]')).toHaveCount(0);
 
   const staff = `e2e-room-staff-${tag()}`;
