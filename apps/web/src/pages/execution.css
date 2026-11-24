@@ -484,3 +484,8 @@
 .room .page-head.room-head { display: flex; align-items: center; gap: var(--space-md); }
 .room .page-head.room-head h1 { flex: none; }
 .room .room-head .page-head-actions { flex: none; margin-left: 0; }
+
+/* v2 type scale in the room: small column headings, 14px conversation, 15px composer. */
+.room .room-agents-title, .room .room-tasks-head h2 { font-size: 15px; font-weight: 600; }
+.room .room-welcome h3 { font-size: 22px; }
+.room .exec-message p, .room .rich-text { font-size: 14px; line-height: 1.6; }

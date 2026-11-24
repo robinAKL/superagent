@@ -50,7 +50,7 @@
   --header: 64px;
   /* Type scale at about 1.2: caption, body, title, section, page. */
   --text-caption: 13px;
-  --text-body: 15px;
+  --text-body: 14px;
   --text-title: 17px;
   --text-section: 20px;
   --text-page: 26px;
@@ -64,7 +64,7 @@ body {
   margin: 0;
   background: var(--color-paper);
   color: var(--color-ink);
-  font: var(--text-body)/1.65 "DM Sans", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font: var(--text-body)/1.6 "DM Sans", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 a { color: var(--color-accent); }
 :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
