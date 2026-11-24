@@ -4,7 +4,7 @@ import { loadRoomRows, saveRoomRows, type Queryable } from './pg-room.js';
 import { employeesState } from '../employees/index.js';
 import { queueRoomDispatch, resolveRoomDispatch, workersState } from '../workers/index.js';
 import { linkMayBeOnline, linkOnline } from '../workers/presence.js';
-import type { RoomBrain, RoomBrainInput } from './brain.js';
+import type { PlatformSource, RoomBrain, RoomBrainInput } from './brain.js';
 import { CommandRoom, roomHooks, type EmployeeRef, type EmployeeSource, type RoomSnapshot, type Viewer } from './room.js';
 
 roomHooks.linkMayBeOnline = (employeeId) => linkMayBeOnline(employeeId, workersState.now());
@@ -49,8 +49,16 @@ let roomStore: Queryable | null = null;
 /** Super Agent's model reading of messages that name nobody. Without one the room keeps its fixed wording rules. */
 let roomBrain: RoomBrain | null = null;
 
-export function bindRoomBrain(brain: RoomBrain | null): void {
+/** The person's own platform sources (live MCP connections) and a read-only lookup through one of them. */
+export interface RoomLookups {
+  sources(user: NonNullable<import('fastify').FastifyRequest['user']>): Promise<PlatformSource[]>;
+  ask(user: NonNullable<import('fastify').FastifyRequest['user']>, sourceId: string, question: string): Promise<{ answer: string }>;
+}
+let roomLookups: RoomLookups | null = null;
+
+export function bindRoomBrain(brain: RoomBrain | null, lookups: RoomLookups | null = null): void {
   roomBrain = brain;
+  roomLookups = lookups;
 }
 
 export function bindRoomStore(db: Queryable | null): void {
@@ -167,14 +175,34 @@ export const roomModule: FastifyPluginAsync = async (app) => {
     const viewer = viewerFrom(req.headers, req.user);
     const tenantId = req.user?.tenantId ?? body.tenantId ?? 't';
     const room = roomState.current;
-    let understood: Awaited<ReturnType<RoomBrain['understand']>> = null;
+    let understood: import('./brain.js').Understood | null = null;
     if (roomBrain && !body.followupTo && !room.hasClientMessage(body.roomId, body.clientMessageId) && !room.namesEmployee(body.body)) {
+      // Reports and progress from a computer are posted under the employee's owner; they are the employee speaking.
       const history: RoomBrainInput['history'] = room.eventsAfter(body.roomId, 0, viewer).slice(-12).map((message) => ({
-        from: message.authorUserId === 'super-agent' ? 'super-agent' : message.authorUserId === viewer.userId && !message.clientMessageId.startsWith('worker-') ? 'user' : 'employee',
+        from: message.authorUserId === 'super-agent' ? 'super-agent'
+          : message.kind === 'report' || message.clientMessageId.startsWith('worker-') || message.authorUserId !== viewer.userId ? 'employee' : 'user',
         text: message.body.slice(0, 1500),
       }));
       try {
-        understood = await roomBrain.understand({ tenantId, body: body.body, roster: room.roster(viewer), history });
+        const sources = req.user && roomLookups ? await roomLookups.sources(req.user).catch(() => []) : [];
+        const decision = await roomBrain.understand({ tenantId, body: body.body, roster: room.roster(viewer), sources, history });
+        if (decision && 'ask' in decision) {
+          // Super Agent looks it up itself through the person's own connection, then answers in the room.
+          const source = sources.find((item) => item.id === decision.ask.sourceId);
+          try {
+            const found = await roomLookups!.ask(req.user!, decision.ask.sourceId, decision.ask.question);
+            understood = { answer: found.answer.trim()
+              ? `${found.answer.trim()}
+
+（来自 ${source?.name ?? 'MCP'}）`
+              : `我查了 ${source?.name ?? 'MCP'}，没有找到能回答这个问题的数据。` };
+          } catch (error) {
+            req.log.warn({ err: error }, 'room lookup failed');
+            understood = { answer: `我去 ${source?.name ?? 'MCP'} 查了，但这次没有拿到结果。可以稍后再试，或到「企业知识 → 知识来源」检查连接。` };
+          }
+        } else {
+          understood = decision;
+        }
       } catch (error) {
         req.log.warn({ err: error }, 'room brain failed; using fixed rules');
       }

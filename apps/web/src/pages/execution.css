@@ -305,3 +305,15 @@
 .room .room-tasks .exec-approval-actions { justify-content: flex-start; }
 /* The conversation never shrinks below a usable height; if the top of the page grows, the page scrolls instead. */
 @media (min-width: 801px) { .exec-room .exec-grid { min-height: 440px; } }
+/* Live bubbles: my message on its way, and who is speaking right now. */
+.room .room-outbox { opacity: .7; }
+.room-typing { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-xs); max-width: 88%; padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--color-soft-rule); border-radius: 12px; background: var(--color-paper); font-size: 13.5px; color: var(--color-muted); }
+.room-typing strong { color: var(--color-ink); font-weight: 600; white-space: nowrap; }
+.room-typing-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-dots { display: inline-flex; gap: 3px; flex: none; }
+.room-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--color-accent); animation: room-dot 1.2s infinite ease-in-out; }
+.room-dots i:nth-child(2) { animation-delay: .15s; }
+.room-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes room-dot { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+.room .exec-message .rich-text > p:first-child { margin-top: var(--space-2xs); }

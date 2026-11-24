@@ -78,3 +78,26 @@ it('sends the roster and the message, and gives up when the model is slow', asyn
   expect(await empty.understand({ tenantId: 't', body: '你能做什么', roster: employees, history: [] })).toBeNull();
   expect(misses).toEqual(['no answer within 20 ms', 'unusable answer (stop: length, 0 chars)']);
 });
+
+it('a lookup names one of the platform sources the person has; anything else is not a decision', () => {
+  const sources = [{ id: 'src-vera', name: 'VERA CRM', endpoint: 'https://crm.example/api/mcp' }];
+  expect(readDecision('{"action":"ask","sourceId":"src-vera","question":"现在 CRM 里一共有多少个订单？"}', employees, sources))
+    .toEqual({ ask: { sourceId: 'src-vera', question: '现在 CRM 里一共有多少个订单？' } });
+  expect(readDecision('{"action":"ask","sourceId":"src-other","question":"订单数"}', employees, sources)).toBeNull();
+  expect(readDecision('{"action":"ask","sourceId":"src-vera","question":"  "}', employees, sources)).toBeNull();
+});
+
+it('tells the model which sources the platform itself has, apart from the employees', async () => {
+  let sent = '';
+  const brain = gatewayBrain({
+    check: async () => ({ ok: true, model: 'm' }),
+    chat: async (_t, _tier, req) => {
+      sent = req.messages[1]!.content as string;
+      return { text: '{"action":"ask","sourceId":"src-vera","question":"订单总数"}', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'end', model: 'm', reservedMicroUsd: 0, costMicroUsd: 0 };
+    },
+  });
+  const sources = [{ id: 'src-vera', name: 'VERA CRM', endpoint: 'https://crm.example/api/mcp' }];
+  expect(await brain.understand({ tenantId: 't', body: '我要查询下crm的订单有多少', roster: employees, sources, history: [] }))
+    .toEqual({ ask: { sourceId: 'src-vera', question: '订单总数' } });
+  expect(JSON.parse(sent).platformSources).toEqual(sources);
+});

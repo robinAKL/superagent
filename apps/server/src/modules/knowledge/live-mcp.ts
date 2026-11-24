@@ -115,6 +115,12 @@ async function discover(client: Client, endpoint: string, allowTools: boolean) {
 export class LiveMcpKnowledge {
   constructor(private readonly repo: KnowledgeRepository, private readonly secrets: SecretStore, private readonly network: typeof fetch = publicMcpFetch) {}
 
+  /** This person's live MCP sources, read fresh: what Super Agent may query on their behalf in the command room. */
+  async sources(ctx: UserContext) {
+    const state = await this.repo.read(ctx);
+    return state.disabledPlugins.includes('mcp') ? [] : this.list(state, ctx);
+  }
+
   list(state: KnowledgeState, ctx: UserContext) {
     return Object.values(entries(state, hash(ctx.userId)).sources).map(({ id, endpoint, name, oauth, allowTools }) =>
       ({ id, endpoint, name, authorization: oauth ? 'oauth' : 'public', allowTools, enabled: !state.disabledPlugins.includes('mcp') }));

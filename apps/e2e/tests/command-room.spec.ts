@@ -85,6 +85,35 @@ test.beforeEach(async ({ page }) => {
   await ok(page.request.post('/__e2e/room/reset'));
 });
 
+test('a sent message shows at once with Super Agent thinking under it; a failed send gives the draft back', async ({ page }) => {
+  await as(page, OWNER);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/v1/room/messages', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    await held; // the server (and the model) take their time
+    await route.continue();
+  });
+  await draft(page).fill('你好');
+  await draft(page).press('Enter');
+  // before the server answers: the box is clear, my message is there, and someone is visibly working on it
+  await expect(draft(page)).toHaveValue('');
+  await expect(stream(page).locator('[data-outbox]')).toContainText('你好');
+  await expect(stream(page).locator('[data-typing="super-agent"]')).toContainText('正在思考');
+  if (process.env.ROOM_SHOTS) await page.screenshot({ path: process.env.ROOM_SHOTS });
+  release();
+  await expect(stream(page).locator('[data-kind="reply"]').last()).toContainText('你好');
+  await expect(stream(page).locator('[data-outbox], [data-typing="super-agent"]')).toHaveCount(0);
+  await page.unroute('**/api/v1/room/messages');
+
+  await page.route('**/api/v1/room/messages', (route) => route.request().method() === 'POST' ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' }) : route.continue());
+  await draft(page).fill('这条发不出去');
+  await draft(page).press('Enter');
+  await expect(page.getByRole('status', { name: '指挥室提示' })).toContainText('没有发出去');
+  await expect(draft(page)).toHaveValue('这条发不出去');
+  await expect(stream(page).locator('[data-outbox]')).toHaveCount(0);
+});
+
 test('a new room has no tasks; greetings, questions and discussion only get a reply; one @mention with work makes one task', async ({ page }) => {
   const staff = `e2e-room-staff-${tag()}`;
   const sales = await employee(page, '销售员工', staff);
