@@ -120,6 +120,14 @@ namespace SuperAgentLinkTray
         private SafeFileHandle _childJob;
         private volatile bool _exiting;
         private bool _taskActive;
+        /** A newer Link found on link-latest, waiting for the person to click 升级. */
+        private UpdateOffer _offer;
+        private string _notifiedVersion;
+        private bool _updating;
+        private bool _updateAfterTask;
+        private Action _balloonClick;
+        private ToolStripMenuItem _updateItem;
+        private ToolStripMenuItem _checkUpdateItem;
         private LinkStatus _status = LinkStatus.Unpaired;
         private int _restartAttempt;
         private Icon _currentIcon;
@@ -158,15 +166,22 @@ namespace SuperAgentLinkTray
             var exitItem = new ToolStripMenuItem("Exit / 退出", null, OnExit);
             _signInItem = new ToolStripMenuItem("Sign in again / 重新登录", null, (s, e) => BeginReauth(_authAgent)) { Visible = false };
 
+            _updateItem = new ToolStripMenuItem("Update / 升级", null, (s, e) => BeginUpdate()) { Visible = false };
+            _checkUpdateItem = new ToolStripMenuItem("Check for updates / 检查更新", null, (s, e) => CheckForUpdatesInBackground(true));
+            var versionItem = new ToolStripMenuItem("Version / 版本 " + AppVersion) { Enabled = false };
+
             var menu = new ContextMenuStrip();
             menu.Items.Add(_statusItem);
             menu.Items.Add(_signInItem);
+            menu.Items.Add(_updateItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(openRoomItem);
             menu.Items.Add(configureItem);
             menu.Items.Add(repairItem);
             menu.Items.Add(logsItem);
             menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(versionItem);
+            menu.Items.Add(_checkUpdateItem);
             menu.Items.Add(exitItem);
 
             _tray = new NotifyIcon
@@ -187,7 +202,9 @@ namespace SuperAgentLinkTray
             AppDomain.CurrentDomain.ProcessExit += (s, e) => Cleanup();
 
             StartLinkProcess(pairMode: false);
-            _updateTimer = new System.Threading.Timer(_ => CheckForUpdatesSafe(), null, TimeSpan.FromSeconds(15), TimeSpan.FromHours(6));
+            _tray.BalloonTipClicked += (s, e) => { var click = _balloonClick; _balloonClick = null; if (click != null) click(); };
+            _tray.BalloonTipClosed += (s, e) => { _balloonClick = null; };
+            _updateTimer = new System.Threading.Timer(_ => CheckForUpdatesSafe(false), null, TimeSpan.FromSeconds(15), TimeSpan.FromHours(6));
         }
 
         private string ReadConfiguredServerUrl()
@@ -339,6 +356,11 @@ namespace SuperAgentLinkTray
         private void SetTaskSleepInhibition(bool active)
         {
             _taskActive = active;
+            if (!active && _updateAfterTask)
+            {
+                _updateAfterTask = false;
+                _uiContext.Post(_ => BeginUpdate(), null);
+            }
             NativeMethods.SetThreadExecutionState(active
                 ? NativeMethods.ES_CONTINUOUS | NativeMethods.ES_SYSTEM_REQUIRED
                 : NativeMethods.ES_CONTINUOUS);
@@ -605,58 +627,151 @@ namespace SuperAgentLinkTray
             }
         }
 
-        private void CheckForUpdatesSafe()
+        private sealed class UpdateOffer
+        {
+            public Version Version;
+            public string InstallerUrl;
+            public string SumsUrl;
+        }
+
+        private void CheckForUpdatesInBackground(bool manual)
+        {
+            ThreadPool.QueueUserWorkItem(_ => CheckForUpdatesSafe(manual));
+        }
+
+        /**
+         * Look at link-latest. A newer version is offered, never installed behind the person's back: a notification
+         * (click it to upgrade) and a 升级 item in the menu. `manual` also says when Link is already up to date.
+         */
+        private void CheckForUpdatesSafe(bool manual)
         {
             try
             {
-                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
-                using (var wc = new WebClient())
+                var offer = FetchUpdateOffer();
+                _uiContext.Post(_ =>
                 {
-                    wc.Headers.Add("User-Agent", "SuperAgentLink/" + AppVersion);
-                    var json = wc.DownloadString(ReleasesApiUrl);
-                    // link-latest carries its version in the release title, e.g. "SuperAgent Link v0.1.3".
-                    var tagMatch = Regex.Match(json, "\"name\"\\s*:\\s*\"SuperAgent Link v([0-9]+\\.[0-9]+\\.[0-9]+)\"");
-                    if (!tagMatch.Success) return;
-                    var remoteVer = new Version(tagMatch.Groups[1].Value);
-                    var localVer = new Version(AppVersion);
-                    if (remoteVer <= localVer) return;
-
-                    var exeMatch = Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]*" + InstallerName + ")\"");
-                    var sumMatch = Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]*SHA256SUMS\\.txt)\"");
-                    if (!exeMatch.Success || !sumMatch.Success) return;
-
-                    var tempExe = Path.Combine(Path.GetTempPath(), InstallerName);
-                    wc.DownloadFile(exeMatch.Groups[1].Value, tempExe);
-                    var sums = wc.DownloadString(sumMatch.Groups[1].Value);
-                    var expected = ParseSha256(sums, InstallerName);
-                    if (string.IsNullOrEmpty(expected) || !string.Equals(expected, FileSha256(tempExe), StringComparison.OrdinalIgnoreCase))
+                    if (_exiting) return;
+                    if (offer == null)
                     {
-                        Log("Auto-update SHA-256 mismatch; aborting.");
+                        if (manual) Notify("SuperAgent Link 已是最新版本", "当前版本 " + AppVersion + "。", ToolTipIcon.Info);
                         return;
                     }
-
-                    _uiContext.Post(_ =>
+                    _offer = offer;
+                    if (!_updating)
                     {
-                        if (_exiting || _taskActive) return;
-                        try
-                        {
-                            Log("Launching silent auto-update to " + remoteVer);
-                            Process.Start(new ProcessStartInfo
-                            {
-                                FileName = tempExe,
-                                Arguments = "/S /D=" + _installDir.TrimEnd(Path.DirectorySeparatorChar),
-                                UseShellExecute = true
-                            });
-                            OnExit(null, EventArgs.Empty);
-                        }
-                        catch (Exception ex) { Log("Could not launch the update: " + ex.Message); }
-                    }, null);
-                }
+                        _updateItem.Text = "Update to v" + offer.Version + " / 升级到 v" + offer.Version;
+                        _updateItem.Visible = true;
+                    }
+                    if (manual || _notifiedVersion != offer.Version.ToString())
+                    {
+                        _notifiedVersion = offer.Version.ToString();
+                        _balloonClick = BeginUpdate;
+                        Notify("SuperAgent Link 有新版本 v" + offer.Version,
+                            "点击这里立即升级（约 1 分钟，Link 会自动重启）。也可以在托盘菜单点「升级到 v" + offer.Version + "」。", ToolTipIcon.Info);
+                    }
+                }, null);
             }
             catch (Exception ex)
             {
                 Log("Update check skipped: " + ex.Message);
+                if (manual) _uiContext.Post(_ => Notify("检查更新失败", "暂时连不上更新服务器，稍后再试。", ToolTipIcon.Warning), null);
             }
+        }
+
+        private UpdateOffer FetchUpdateOffer()
+        {
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            using (var wc = new WebClient())
+            {
+                wc.Headers.Add("User-Agent", "SuperAgentLink/" + AppVersion);
+                var json = wc.DownloadString(ReleasesApiUrl);
+                // link-latest carries its version in the release title, e.g. "SuperAgent Link v0.1.3".
+                var tagMatch = Regex.Match(json, "\"name\"\\s*:\\s*\"SuperAgent Link v([0-9]+\\.[0-9]+\\.[0-9]+)\"");
+                if (!tagMatch.Success) return null;
+                var remoteVer = new Version(tagMatch.Groups[1].Value);
+                if (remoteVer <= new Version(AppVersion)) return null;
+                var exeMatch = Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]*" + InstallerName + ")\"");
+                var sumMatch = Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]*SHA256SUMS\\.txt)\"");
+                if (!exeMatch.Success || !sumMatch.Success) return null;
+                return new UpdateOffer { Version = remoteVer, InstallerUrl = exeMatch.Groups[1].Value, SumsUrl = sumMatch.Groups[1].Value };
+            }
+        }
+
+        /** The person clicked 升级: download, check the SHA-256, run the installer silently; it restarts Link. */
+        private void BeginUpdate()
+        {
+            var offer = _offer;
+            if (offer == null || _updating || _exiting) return;
+            if (_taskActive)
+            {
+                _updateAfterTask = true;
+                Notify("正在执行任务", "当前任务完成后会自动升级到 v" + offer.Version + "。", ToolTipIcon.Info);
+                return;
+            }
+            _updating = true;
+            _updateItem.Enabled = false;
+            _updateItem.Text = "Downloading v" + offer.Version + "… / 正在下载 v" + offer.Version + "…";
+            Notify("正在升级 SuperAgent Link", "正在下载 v" + offer.Version + "，完成后会自动安装并重启。", ToolTipIcon.Info);
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                string tempExe = null;
+                string failure = null;
+                try
+                {
+                    ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                    using (var wc = new WebClient())
+                    {
+                        wc.Headers.Add("User-Agent", "SuperAgentLink/" + AppVersion);
+                        tempExe = Path.Combine(Path.GetTempPath(), "SuperAgentLink-Setup-" + offer.Version + ".exe");
+                        wc.DownloadFile(offer.InstallerUrl, tempExe);
+                        var expected = ParseSha256(wc.DownloadString(offer.SumsUrl), InstallerName);
+                        if (string.IsNullOrEmpty(expected) || !string.Equals(expected, FileSha256(tempExe), StringComparison.OrdinalIgnoreCase))
+                            failure = "下载的安装包校验不通过，已停止升级。";
+                    }
+                }
+                catch (Exception ex) { failure = "下载失败：" + ex.Message; }
+                _uiContext.Post(__ =>
+                {
+                    if (failure != null || _exiting)
+                    {
+                        _updating = false;
+                        _updateItem.Enabled = true;
+                        _updateItem.Text = "Update to v" + offer.Version + " / 升级到 v" + offer.Version;
+                        if (failure != null)
+                        {
+                            Log("Update failed: " + failure);
+                            Notify("升级没有完成", failure + " 可以稍后在托盘菜单再点一次「升级」。", ToolTipIcon.Warning);
+                        }
+                        return;
+                    }
+                    if (_taskActive)
+                    {
+                        // A task started while downloading: install when it ends.
+                        _updating = false;
+                        _updateItem.Enabled = true;
+                        _updateAfterTask = true;
+                        return;
+                    }
+                    try
+                    {
+                        Log("Installing update " + offer.Version);
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = tempExe,
+                            Arguments = "/S /D=" + _installDir.TrimEnd(Path.DirectorySeparatorChar),
+                            UseShellExecute = true
+                        });
+                        OnExit(null, EventArgs.Empty);
+                    }
+                    catch (Exception ex)
+                    {
+                        _updating = false;
+                        _updateItem.Enabled = true;
+                        Log("Could not launch the update: " + ex.Message);
+                        Notify("升级没有完成", "无法启动安装程序：" + ex.Message, ToolTipIcon.Warning);
+                    }
+                }, null);
+            });
         }
 
         private static string ParseSha256(string sumsText, string fileName)
