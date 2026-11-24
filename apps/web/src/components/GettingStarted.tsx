@@ -18,13 +18,13 @@ const TEXT = {
     title: 'Getting started: {n} of 6 done', hide: 'Hide', show: 'Show the steps',
     model: 'Connect a model', company: 'Describe the company and its boundaries', knowledge: 'Add materials and run an analysis',
     team: 'Confirm the team', computer: 'Bind a computer to an employee', result: 'Get the first result back',
-    go: 'Go', done: 'Done', resultHint: 'Mention an employee below and ask for a piece of work.',
+    go: 'Go', done: 'Done', resultHint: 'Mention an employee below and ask for a piece of work.', next: 'Next: {step}',
   },
   zh: {
     title: '开始使用：已完成 {n} / 6 步', hide: '收起', show: '展开步骤',
     model: '连接模型', company: '填写企业信息与工作边界', knowledge: '添加资料并完成分析',
     team: '确认团队', computer: '给员工绑定一台电脑', result: '收到第一份结果',
-    go: '去完成', done: '已完成', resultHint: '在下方 @ 一名员工，交给它一件事。',
+    go: '去完成', done: '已完成', resultHint: '在下方 @ 一名员工，交给它一件事。', next: '下一步：{step}',
   },
 };
 
@@ -57,10 +57,16 @@ export async function readSetupState(): Promise<Record<StepId, boolean> | null> 
   };
 }
 
-export function GettingStarted() {
+/**
+ * `compact` (the command room): one slim line with the next step until the person opens the list, so the conversation
+ * keeps the window's height. A choice the person made (open or folded) is remembered either way.
+ */
+export function GettingStarted({ compact = false }: { compact?: boolean } = {}) {
   const t = useT(TEXT);
   const [state, setState] = useState<Record<StepId, boolean> | null>(null);
-  const [folded, setFolded] = useState(() => { try { return localStorage.getItem(HIDDEN_KEY) === '1'; } catch { return false; } });
+  const [folded, setFolded] = useState(() => {
+    try { const saved = localStorage.getItem(HIDDEN_KEY); return saved === null ? compact : saved === '1'; } catch { return compact; }
+  });
   useEffect(() => {
     let stop = false;
     void readSetupState().then(next => { if (!stop) setState(next); });
@@ -74,9 +80,13 @@ export function GettingStarted() {
     setFolded(value);
     try { localStorage.setItem(HIDDEN_KEY, value ? '1' : '0'); } catch { /* not remembered */ }
   };
-  return <section className="getting-started" aria-labelledby="getting-started-title">
+  return <section className={`getting-started${compact ? ' is-compact' : ''}`} aria-labelledby="getting-started-title">
     <div className="getting-started-head">
       <h2 id="getting-started-title">{t('title', { n: done })}</h2>
+      {folded && compact ? <span className="getting-started-next">
+        {t('next', { step: t(next) })}
+        {next === 'result' ? null : <a className="getting-started-link" href={HREF[next]}>{t('go')}</a>}
+      </span> : null}
       <button type="button" className="btn quiet small" aria-expanded={!folded} aria-controls="getting-started-steps" onClick={() => fold(!folded)}>
         {t(folded ? 'show' : 'hide')}
       </button>

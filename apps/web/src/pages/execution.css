@@ -299,7 +299,6 @@
 .room .room-tasks .exec-approval-input { max-height: 120px; overflow: auto; font-size: 12px; }
 .room .room-tasks .exec-approval-actions { justify-content: flex-start; }
 /* The conversation never shrinks below a usable height; if the top of the page grows, the page scrolls instead. */
-@media (min-width: 801px) { .exec-room .exec-grid { min-height: 440px; } }
 /* Live bubbles: my message on its way, and who is speaking right now. */
 .room .room-outbox { opacity: .7; }
 .room-typing { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-xs); max-width: 88%; padding: var(--space-xs) var(--space-md);
@@ -512,3 +511,17 @@
 .room .room-composer-bar > span { font-size: 12px; }
 .room .exec-task .room-task-code, .room .exec-task .room-task-state { font-size: 12px; }
 .room .room-task-group.is-done .outcome-message-card { font-size: 13px; }
+
+/* The room fits the window: a slim setup line, and the three columns take the rest; only the conversation, the task
+   list and the task detail scroll. Very short windows (under 560px) let the page scroll instead of crushing them. */
+.room .getting-started.is-compact { margin-bottom: 0; padding: var(--space-xs) var(--space-md); }
+.room .getting-started.is-compact .getting-started-head h2 { font-size: 14px; }
+.getting-started-next { margin-right: auto; display: inline-flex; align-items: center; gap: var(--space-sm); color: var(--color-muted); font-size: 13px; }
+@media (min-width: 801px) {
+  .exec-room .exec-grid { flex: 1; min-height: 0; }
+  .room .room-tasks.panel, .room .room-chat.panel, .room .room-agents, .room .exec-drawer { min-height: 0; }
+}
+@media (min-width: 801px) and (max-height: 560px) {
+  .exec-room { height: auto; }
+  .exec-room .exec-grid { flex: none; height: 400px; }
+}
