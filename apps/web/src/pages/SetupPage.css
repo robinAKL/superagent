@@ -84,3 +84,7 @@
   .setup-sections .btn { width: auto; }
 }
 .ux-company-layout.is-single { grid-template-columns: minmax(0, 1fr); }
+
+/* v2: the section in view, highlighted like the room's active member. */
+.setup-sections .btn[aria-current="true"] { background: color-mix(in srgb, var(--color-accent) 12%, var(--color-paper-2)); color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+.setup-sections .btn.is-danger[aria-current="true"] { background: var(--color-danger-fill); color: var(--color-danger-ink); border-color: var(--color-danger-edge); }

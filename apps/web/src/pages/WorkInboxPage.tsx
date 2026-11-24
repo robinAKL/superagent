@@ -273,9 +273,11 @@ export function WorkInboxPage() {
       </header>
       {nothing ? null : <div className={`exec-toolbar inbox-toolbar ${filtersOpen ? 'is-open' : ''}`}>
         <div className="inbox-segmented" role="group" aria-label={t('status')}>
-          <button type="button" aria-pressed={group === 'all'} onClick={() => setGroup('all')}>{t('grouped')}</button>
+          <button type="button" className="chip" aria-pressed={group === 'all'} onClick={() => setGroup('all')}>{t('grouped')}<span className="chip-n" aria-hidden="true">{(items ?? []).length}</span></button>
           {GROUPS.map((g) => (
-            <button key={g.id} type="button" aria-pressed={group === g.id} onClick={() => setGroup(g.id)}>{groupLabel(g.id)}</button>
+            <button key={g.id} type="button" className="chip" aria-pressed={group === g.id} onClick={() => setGroup(g.id)}>
+              {groupLabel(g.id)}<span className="chip-n" aria-hidden="true">{(items ?? []).filter((item) => groupOf(item) === g.id).length}</span>
+            </button>
           ))}
         </div>
         <div className="inbox-filter-controls">
@@ -327,9 +329,12 @@ export function WorkInboxPage() {
               if (rows.length === 0) return null;
               return (
                 <section key={section.id} aria-label={groupLabel(section.id)}>
-                  <h2 className="exec-group">{groupLabel(section.id)}</h2>
+                  <h2 className={`exec-group group-head${section.id === 'action' ? ' is-accent' : section.id === 'waiting' ? ' is-warn' : ''}`}>
+                    {groupLabel(section.id)} <span className="group-n">{rows.length}</span>
+                  </h2>
                   {rows.map((item) => (
                     <button key={item.id} type="button" className="exec-task" data-item={item.id} onClick={() => { setOpenId(item.id); setMsg(''); }} aria-current={item.id === openId ? 'true' : undefined}>
+                      <span className="inbox-item-top"><span className={`tag${section.id === 'action' ? ' is-accent' : ''}`}>{w(KIND_LABEL[item.kind] ?? item.kind)}</span></span>
                       <strong>{String(item.payload.title ?? w(KIND_LABEL[item.kind] ?? item.kind))}</strong>
                       <span>
                         {w(KIND_LABEL[item.kind] ?? item.kind)} · {w(RENDERER_LABEL[item.renderer] ?? item.renderer)} · {w('截止 {due}', { due: typeof item.payload.due === 'string' ? item.payload.due : w('未设截止') })}

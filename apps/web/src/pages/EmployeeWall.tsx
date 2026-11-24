@@ -22,6 +22,7 @@ const TEXT = {
     missingProject: 'Project not found on the device', busy: 'Running a task', ready: 'Ready for tasks',
     status_offline: 'Offline',
     employee: 'Employee', state: 'Status', bindComputer: 'Bind a computer', toolsPage: 'Employee tools', workflowsPage: 'Workflows',
+    all: 'All', filterAria: 'Filter by status', noneMatch: 'No employee has this status.',
   },
   zh: {
     addRole: '新增岗位', suggestRoles: '生成岗位建议', reviewDraft: '审阅组织草案',
@@ -35,6 +36,7 @@ const TEXT = {
     missingProject: '设备上找不到项目', busy: '正在执行任务', ready: '可接任务',
     status_offline: '离线',
     employee: '员工', state: '状态', bindComputer: '绑定电脑', toolsPage: '员工工具', workflowsPage: '业务流程',
+    all: '全部', filterAria: '按状态筛选', noneMatch: '没有这个状态的员工。',
   },
 };
 type Key = keyof typeof TEXT.en;
@@ -43,6 +45,7 @@ export function EmployeeWall({ employees, hasDraft, onManage }: { employees: Wal
   const t = useT(TEXT);
   const { devices, unavailable } = useLinkDevices();
   const [toolCounts, setToolCounts] = useState<Record<string, number>>({});
+  const [only, setOnly] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     void Promise.all(employees.map(async employee => {
@@ -52,11 +55,37 @@ export function EmployeeWall({ employees, hasDraft, onManage }: { employees: Wal
     return () => { cancelled = true; };
   }, [employees]);
   const label = (key: string, fallback: string) => (key in TEXT.en ? t(key as Key) : fallback);
-  const tone = (status: string) => status === 'online' || status === 'busy' ? 'is-good'
+  const tone = (status: string) => status === 'online' ? 'is-good' : status === 'busy' ? 'is-busy'
     : status === 'fault' ? 'is-bad' : status === 'paused' || status === 'waiting_auth' || status === 'offline' ? 'is-warn' : '';
+  // Each employee's state as the wall shows it: its own status, refined by its bound computer.
+  const rows = employees.map(employee => {
+    const link = devices && !unavailable ? getEmployeeLink(devices, employee.id) : null;
+    const status = employee.status === 'paused' || employee.status === 'fault' ? employee.status
+      : link?.status === 'ready' ? 'online'
+      : link?.status === 'busy' ? 'busy'
+      : link?.status === 'offline' ? 'offline'
+      : link?.status === 'waitingAuth' ? 'waiting_auth' : employee.status;
+    return { employee, link, status };
+  });
+  const counts = rows.reduce<Record<string, number>>((all, row) => ({ ...all, [row.status]: (all[row.status] ?? 0) + 1 }), {});
+  const shown = only ? rows.filter(row => row.status === only) : rows;
+  const initial = (name: string) => {
+    const words = name.trim().split(/\s+/);
+    return (/^[A-Za-z]/.test(name) && words.length > 1 ? words[0]![0]! + words[1]![0]! : name.trim().slice(0, /^[A-Za-z]/.test(name) ? 2 : 1)).toUpperCase();
+  };
   return <section className="emp-wall-section" aria-label={t('wallAria')}>
     <div className="emp-wall-bar">
-      <span className="helper">{t('count', { n: employees.length })}</span>
+      {/* Status chips with counts, like the command room's filters; one chip is just the count. */}
+      {Object.keys(counts).length > 1 ? (
+        <div className="chip-row" role="group" aria-label={t('filterAria')}>
+          <button type="button" className="chip" aria-pressed={only === null} onClick={() => setOnly(null)}>{t('all')}<span className="chip-n">{employees.length}</span></button>
+          {Object.entries(counts).map(([status, n]) => (
+            <button key={status} type="button" className="chip" aria-pressed={only === status} onClick={() => setOnly(only === status ? null : status)}>
+              {label(`status_${status}`, status)}<span className="chip-n">{n}</span>
+            </button>
+          ))}
+        </div>
+      ) : <span className="helper">{t('count', { n: employees.length })}</span>}
       <div className="emp-wall-actions">
         <a className="btn quiet" href="#tools">{t('toolsPage')}</a>
         <a className="btn quiet" href="#brain?tab=sop">{t('workflowsPage')}</a>
@@ -75,20 +104,20 @@ export function EmployeeWall({ employees, hasDraft, onManage }: { employees: Wal
           <th scope="col"><span className="sr-only">{t('manage')}</span></th>
         </tr></thead>
         <tbody>
-          {employees.map(employee => {
+          {shown.length === 0 ? <tr><td colSpan={5} className="helper">{t('noneMatch')}</td></tr> : null}
+          {shown.map(({ employee, link, status }) => {
             const tools = toolCounts[employee.id];
-            const link = devices && !unavailable ? getEmployeeLink(devices, employee.id) : null;
-            const status = employee.status === 'paused' || employee.status === 'fault' ? employee.status
-              : link?.status === 'ready' ? 'online'
-              : link?.status === 'busy' ? 'busy'
-              : link?.status === 'offline' ? 'offline'
-              : link?.status === 'waitingAuth' ? 'waiting_auth' : employee.status;
             return <tr key={employee.id} className="emp-card" data-employee={employee.id}>
               <td>
-                <span className="name">{employee.name}</span>
-                <span className="clip" title={employee.duty}>{employee.duty}</span>
+                <span className="emp-who">
+                  <span className={`avatar${status === 'paused' || status === 'unconnected' || status === 'offline' ? ' is-dim' : ''}`} aria-hidden="true">{initial(employee.name)}</span>
+                  <span className="emp-who-text">
+                    <span className="name">{employee.name}</span>
+                    <span className="clip" title={employee.duty}>{employee.duty}</span>
+                  </span>
+                </span>
               </td>
-              <td><span className={`status ${tone(status)}`}>{label(`status_${status}`, status)}</span></td>
+              <td><span className={`state ${tone(status)}`}>{label(`status_${status}`, status)}</span></td>
               <td>
                 {devices === null && !unavailable ? <span className="clip">…</span>
                   : link && link.status !== 'unbound'
