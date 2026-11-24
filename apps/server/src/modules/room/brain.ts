@@ -110,6 +110,8 @@ export function gatewayBrain(gateway: Gateway, timeoutMs = 40_000, onMiss: (why:
       const sources = input.sources ?? [];
       const call = gateway.chat(input.tenantId, 'economy', {
         maxOutputTokens: 3000,
+        // Deciding what a message wants is a small judgement: a reasoning model need not think long.
+        effort: 'low',
         messages: [
           { role: 'system', content: SYSTEM },
           { role: 'user', content: JSON.stringify({
