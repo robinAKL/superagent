@@ -211,3 +211,6 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .group-head.is-accent { color: var(--color-accent); }
 .group-head.is-good { color: var(--color-success); }
 .group-head.is-warn { color: var(--color-warning); }
+
+/* Form controls use the page's fonts (browsers default buttons and inputs to Arial / system UI). */
+button, input, select, textarea { font-family: inherit; }

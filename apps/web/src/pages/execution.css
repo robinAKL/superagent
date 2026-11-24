@@ -505,3 +505,10 @@
 .room .room-task-ref-title { font-size: 13px; }
 /* As drawn: column headings are small muted labels (13px), not titles. */
 .room .room-agents-title, .room .room-tasks-head h2 { font-size: 13px; color: var(--color-muted); }
+
+/* Measured against the mockup on staging: older generic span rules made these 13px. */
+.room .exec-message .room-tag { font-size: 11px; }
+.room .exec-message .room-task-ref-meta, .room .exec-message .room-task-ref-who { font-size: 12px; }
+.room .room-composer-bar > span { font-size: 12px; }
+.room .exec-task .room-task-code, .room .exec-task .room-task-state { font-size: 12px; }
+.room .room-task-group.is-done .outcome-message-card { font-size: 13px; }
