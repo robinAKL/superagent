@@ -221,9 +221,11 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await expect(privateDrafts.getByRole('heading', { name: '退货审核流程' })).toBeVisible();
   await page.goto('/#brain?tab=ontology');
   const ontology = page.getByRole('region', { name: '本体关系图', exact: true });
-  // One graph since #155: personal MCP drafts sit with company knowledge, tagged 仅自己 instead of behind a scope tab.
+  // One graph since #155: personal MCP drafts sit with company knowledge, marked private instead of behind a scope tab.
+  // When every entity is private the list says so once rather than tagging each row.
   await expect(ontology.locator('.onto-node.is-private').first()).toBeVisible();
-  await expect(ontology).toContainText('仅自己');
+  await expect(ontology.locator('.onto-private-note')).toContainText('共享前只有你能看到');
+  await expect(ontology.locator('.onto-list .is-private')).toHaveCount(0);
   await expect(ontology.getByRole('img', { name: /个实体 ·/ })).toBeVisible();
   await ontology.locator('.onto-panel').getByRole('button', { name: /退货记录/ }).click();
   await expect(ontology.locator('.onto-panel')).toContainText('退货手册 MCP');

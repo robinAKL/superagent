@@ -38,7 +38,7 @@ const TEXT = {
     zoomIn: 'Zoom in', zoomOut: 'Zoom out', fit: 'Fit', canvas: 'Ontology graph', search: 'Find an entity',
     showSources: 'Source layer', typeFilter: 'Entity types',
     hint: 'Hover to trace · click for details · Ctrl + scroll to zoom',
-    entities: 'Entities', relation: 'Relationship',
+    entities: 'Entities', relation: 'Relationship', pickHint: 'Pick one to see its attributes, relationships and sources.', allPrivate: 'All of these come from your own MCP connection. Only you can see them until they are shared.',
     attributes: 'Attributes', noAttributes: 'No attribute extracted yet. Re-run the analysis to extract properties such as amounts, limits and owners.',
     relations: 'Relationships', noRelations: 'Not linked to another entity yet.',
     sources: 'Sources', noSources: 'No locatable source.', citations: '{n} passages',
@@ -58,7 +58,7 @@ const TEXT = {
     zoomIn: '放大', zoomOut: '缩小', fit: '适配', canvas: '本体关系图', search: '查找实体',
     showSources: '来源图层', typeFilter: '实体类型',
     hint: '悬停追踪关系 · 点击查看详情 · Ctrl + 滚轮缩放',
-    entities: '实体', relation: '关系',
+    entities: '实体', relation: '关系', pickHint: '点一项，查看它的属性、关系和来源。', allPrivate: '这些都来自你个人的 MCP 连接，共享前只有你能看到。',
     attributes: '属性', noAttributes: '还没有抽取到属性。重新运行分析即可抽取金额、比例、上限、负责人等属性。',
     relations: '关系', noRelations: '还没有和其他实体建立关系。',
     sources: '依据', noSources: '没有可定位的依据。', citations: '{n} 处',
@@ -439,6 +439,7 @@ export function OntologyGraphView({ drafts, time, companyName }: {
   }
   const attributes = selNode?.draft.attributes ?? [];
   const summary = t('summary', { objects: graph.nodes.length, relations: graph.links.length });
+  const allPrivate = graph.nodes.length > 0 && graph.nodes.every(n => n.type === 'source' || n.draft.privateMcp);
 
   return <section className="onto" aria-label={t('canvas')}>
     <header className="onto-bar">
@@ -537,16 +538,21 @@ export function OntologyGraphView({ drafts, time, companyName }: {
             </dl>
           </details>
         </> : <>
-          <h4 className="onto-panel-title">{t('entities')}</h4>
+          <div className="onto-list-head">
+            <h4 className="onto-panel-title">{t('entities')}<span>{graph.nodes.length}</span></h4>
+            <p className="onto-muted">{t('pickHint')}</p>
+            {/* When everything is private, say it once instead of tagging every row. */}
+            {allPrivate ? <p className="onto-private-note">{t('allPrivate')}</p> : null}
+          </div>
           {LANES.filter(type => graph.nodes.some(n => n.type === type)).map(type => {
             const list = graph.nodes.filter(n => n.type === type).sort((a, b) => b.degree - a.degree || a.name.localeCompare(b.name));
             return <div key={type} className="onto-group">
-              <h5 className={`onto-type-${type}`}><span className="onto-swatch" aria-hidden="true" />{typeName(type)}<span>{list.length}</span></h5>
+              <h5 className={`onto-type-${type}`}><i className="onto-swatch" aria-hidden="true" /><span className="onto-group-name">{typeName(type)}</span><span className="onto-count">{list.length}</span></h5>
               <ul className="onto-list">{list.map(n => <li key={n.id}>
-                <button type="button" onClick={() => setSelected(n.id)}>
-                  <span>{n.name}</span>
+                <button type="button" title={n.name} onClick={() => setSelected(n.id)}>
+                  <span className="onto-item-name">{n.name}</span>
                   {n.draft.attributes?.length ? <small>{n.draft.attributes.length} {t('attributes')}</small> : null}
-                  {n.draft.privateMcp ? <small className="is-private">{t('private')}</small> : null}
+                  {n.draft.privateMcp && !allPrivate ? <small className="is-private">{t('private')}</small> : null}
                 </button>
               </li>)}</ul>
             </div>;
