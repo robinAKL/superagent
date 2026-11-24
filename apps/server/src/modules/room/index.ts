@@ -81,6 +81,23 @@ async function sendAgain(retry: import('./room.js').RetryRequest[]): Promise<num
   return said;
 }
 
+/**
+ * Retries the given open tasks (or all) and says, in one reply, what happened to each. Null when none of them is an
+ * open task this person may retry.
+ */
+async function retryAndSay(viewer: Viewer, roomId: string, numbers: number[] | 'all'): Promise<string | null> {
+  const { retry, skipped } = roomState.current.retryRequested(viewer, roomId, numbers);
+  if (!retry.length) return null;
+  // Told once, in the reply under the person's message, not as separate lines posted before it.
+  const notes: string[] = [];
+  for (const request of retry) notes.push(roomState.current.retriedForReply(request, await dispatchAgain(request)));
+  return [
+    `好的，开始重试 ${retry.length} 个任务（原任务，不新建）：`,
+    ...notes.map((note) => `- ${note}`),
+    ...(skipped.length ? [`${skipped.join('、')} 不在未完成的任务里，没有重试。`] : []),
+  ].join('\n');
+}
+
 async function dispatchAgain(request: import('./room.js').RetryRequest): Promise<boolean> {
   try { return await retryRoomDispatch(request.task); } catch (error) { console.warn(`room retry dispatch failed: ${error instanceof Error ? error.message : String(error)}`); return false; }
 }
@@ -226,15 +243,7 @@ export const roomModule: FastifyPluginAsync = async (app) => {
     // "重试 T-5", "全部重试": a person tells Super Agent to start tasks over; it does, and says what happened.
     const retryAsk = !body.followupTo && !room.namesEmployee(body.body) ? asksRetry(body.body) : null;
     if (aboutTask === null && retryAsk && !room.hasClientMessage(body.roomId, body.clientMessageId)) {
-      const { retry, skipped } = room.retryRequested(viewer, body.roomId, retryAsk);
-      // Told once, in the reply under the person's message, not as separate lines posted before it.
-      const notes: string[] = [];
-      for (const request of retry) notes.push(roomState.current.retriedForReply(request, await dispatchAgain(request)));
-      aboutTask = [
-        retry.length ? `好的，开始重试 ${retry.length} 个任务：` : '没有可以重试的未完成任务。',
-        ...notes.map((note) => `- ${note}`),
-        ...(skipped.length ? [`${skipped.join('、')} 不在未完成的任务里，没有重试。`] : []),
-      ].join('\n');
+      aboutTask = (await retryAndSay(viewer, body.roomId, retryAsk)) ?? '没有可以重试的未完成任务。';
     }
     // "进行中的任务怎么还没完成", "看板": Super Agent acts on the board first, then reads it out.
     if (aboutTask === null && !body.followupTo && !room.namesEmployee(body.body) && !room.hasClientMessage(body.roomId, body.clientMessageId) && asksBoard(body.body)) {
@@ -286,6 +295,7 @@ export const roomModule: FastifyPluginAsync = async (app) => {
       text: message.body.slice(0, 1500),
     }));
     const text = body.body;
+    const roomId = body.roomId;
     void (async () => {
       let understood: import('./brain.js').Understood | null = null;
       try {
@@ -318,6 +328,13 @@ export const roomModule: FastifyPluginAsync = async (app) => {
           }
         } else {
           understood = decision;
+        }
+        // The model may "assign" a new task whose work is to do an open one (「去完成 T-16」). That would leave T-16
+        // open beside a duplicate: Super Agent retries T-16 itself instead.
+        if (understood && 'work' in understood) {
+          const codes = [...understood.work.matchAll(/(?:^|[^A-Za-z0-9])[Tt]-(\d{1,6})(?!\d)/gu)].map((match) => Number(match[1]));
+          const said = codes.length ? await retryAndSay(viewer, roomId, [...new Set(codes)]) : null;
+          if (said) understood = { answer: said };
         }
       } catch (error) {
         console.warn(`room brain failed; using fixed rules: ${error instanceof Error ? error.message : String(error)}`);
