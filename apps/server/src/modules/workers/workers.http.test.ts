@@ -4,6 +4,7 @@ import type { Role } from '@superagent/shared';
 import { buildApp } from '../../app.js';
 import { resetRuntime, runtimeState } from '../runtime/index.js';
 import { OFFLINE_AFTER_MS, resetWorkers, workerLinkModule, workersModule, workersState } from './index.js';
+import { createCommandRoom, roomState } from '../room/index.js';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
@@ -304,4 +305,76 @@ it('a room task sent to a computer revoked since goes to the current computer; a
   // Revoked since: the task never ran there, so the current computer can take it — once.
   expect(await workersState.registry.appendEvent(TENANT, current.id, 'wake', { projectId: 'p1' }, 'super-agent', at, 'task_5')).not.toBeNull();
   expect(await workersState.registry.appendEvent(TENANT, current.id, 'wake', { projectId: 'p1' }, 'super-agent', at, 'task_5')).toBeNull();
+});
+
+it('authorisation modes: set per employee from the web, read by Link per project, switched by the tray, always-allow remembered', async () => {
+  const a = await app();
+  const { worker, token } = await register(a, []);
+  // Two employees bound to this computer (written directly: binding has its own tests).
+  await workersState.registry.patchCapabilities(TENANT, worker.id, {
+    roomAssignments: [{ employeeId: 'emp-ops', projectId: 'p-ops' }, { employeeId: 'emp-fin', projectId: 'p-fin' }],
+  });
+  const linkPolicies = async () => (await a.inject({ method: 'POST', url: '/api/v1/worker-link/permissions', headers: auth(token), payload: {} })).json();
+  // Nothing set: standard for both.
+  expect((await linkPolicies()).policies).toEqual({ 'p-ops': { mode: 'standard' }, 'p-fin': { mode: 'standard' } });
+
+  const set = (payload: object) => a.inject({ method: 'POST', url: `/api/v1/workers/${worker.id}/permissions`, payload });
+  expect((await set({ employeeId: 'emp-ops', mode: 'strict' })).statusCode).toBe(200);
+  expect((await set({ employeeId: 'emp-ops', tool: 'mcp__vera-crm__search_orders', rule: 'allow' })).statusCode).toBe(200);
+  expect((await set({ employeeId: 'emp-ops', mode: 'loose' })).statusCode).toBe(400);
+  expect((await set({ employeeId: 'emp-nobody', mode: 'full' })).statusCode).toBe(409); // not bound here
+  let policies = (await linkPolicies()).policies;
+  expect(policies['p-ops']).toEqual({ mode: 'strict', rules: { 'mcp__vera-crm__search_orders': 'allow' } });
+  expect(policies['p-fin']).toEqual({ mode: 'standard' }); // the other employee is untouched
+
+  // A rule can be taken back.
+  await set({ employeeId: 'emp-ops', tool: 'mcp__vera-crm__search_orders', rule: null });
+  expect((await linkPolicies()).policies['p-ops']).toEqual({ mode: 'strict' });
+
+  // The tray's one-click switch: every employee on this computer.
+  expect((await a.inject({ method: 'POST', url: '/api/v1/worker-link/permissions/mode', headers: auth(token), payload: { mode: 'full' } })).statusCode).toBe(200);
+  policies = (await linkPolicies()).policies;
+  expect(policies['p-ops'].mode).toBe('full');
+  expect(policies['p-fin'].mode).toBe('full');
+  expect((await a.inject({ method: 'POST', url: '/api/v1/worker-link/permissions/mode', headers: auth(token), payload: { mode: 'yolo' } })).statusCode).toBe(400);
+});
+
+it('the tool list: Link reports the MCP servers on the heartbeat and the tools a task asked about', async () => {
+  const a = await app();
+  const { worker, token } = await register(a, []);
+  await workersState.registry.patchCapabilities(TENANT, worker.id, { roomAssignments: [{ employeeId: 'emp-ops', projectId: 'p-ops' }] });
+  await a.inject({
+    method: 'POST', url: '/api/v1/worker-link/heartbeat', headers: auth(token),
+    payload: { capabilities: { mcpServers: [{ name: 'vera-crm', status: 'connected' }, { name: 'claude_ai_Gmail', status: 'needs_auth' }, { name: 'bad name!', status: 'connected' }, { name: 'x', status: 'weird' }] } },
+  });
+  const fresh = async () => (await workersState.registry.get(TENANT, worker.id))!.capabilities;
+  expect((await fresh()).mcpServers).toEqual([{ name: 'vera-crm', status: 'connected' }, { name: 'claude_ai_Gmail', status: 'needs_auth' }]);
+
+  const seen = (payload: object) => a.inject({ method: 'POST', url: '/api/v1/worker-link/permissions/seen', headers: auth(token), payload });
+  expect((await seen({ projectId: 'p-ops', tools: ['mcp__vera-crm__search_orders', 'Bash'] })).statusCode).toBe(200);
+  expect((await seen({ projectId: 'p-ops', tools: ['Bash', 'not a tool name'] })).statusCode).toBe(200);
+  expect((await fresh()).permissions?.['emp-ops']?.seen).toEqual(['mcp__vera-crm__search_orders', 'Bash']); // deduplicated, newest last
+  expect((await seen({ projectId: 'p-elsewhere', tools: ['Bash'] })).statusCode).toBe(404);
+  expect((await seen({ projectId: 'p-ops' })).statusCode).toBe(400);
+});
+
+it('"always allow" on an approval remembers the tool for that employee on that computer; plain allow and Codex do not', async () => {
+  const a = await app();
+  const { worker, token } = await register(a, []);
+  await workersState.registry.patchCapabilities(TENANT, worker.id, { roomAssignments: [{ employeeId: 'emp-ops', projectId: 'p-ops' }] });
+  roomState.current = createCommandRoom([{ id: 'emp-ops', name: '运营员工', ownerUserId: 'admin-1', status: 'active' }]);
+  const task = roomState.current.post({ roomId: 'room-1', tenantId: TENANT, authorUserId: 'admin-1', body: '@运营员工 审批订单 SS-1', clientMessageId: 'c1' }).task!;
+  const file = async (tool: string) => (await a.inject({
+    method: 'POST', url: '/api/v1/worker-link/approvals', headers: auth(token),
+    payload: { roomTaskId: task.id, tool, input: { order: 'SS-1' }, summary: '想使用 vera-crm 的「approve_order」' },
+  })).json().approval.id as string;
+  const decide = (id: string, payload: object) => a.inject({ method: 'POST', url: `/api/v1/workers/approvals/${id}/decide`, payload });
+  const rules = async () => (await a.inject({ method: 'POST', url: '/api/v1/worker-link/permissions', headers: auth(token), payload: {} })).json().policies['p-ops'].rules ?? {};
+
+  expect((await decide(await file('mcp__vera-crm__approve_order'), { decision: 'allow' })).statusCode).toBe(200);
+  expect(await rules()).toEqual({}); // allowed once, not remembered
+  expect((await decide(await file('mcp__vera-crm__approve_order'), { decision: 'allow', remember: true })).statusCode).toBe(200);
+  expect(await rules()).toEqual({ 'mcp__vera-crm__approve_order': 'allow' });
+  await decide(await file('codex.command'), { decision: 'allow', remember: true });
+  expect(await rules()).toEqual({ 'mcp__vera-crm__approve_order': 'allow' }); // Codex requests are not tool rules
 });

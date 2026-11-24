@@ -149,6 +149,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const FILTERS = new Set<ApprovalStatus | 'all'>(['pending', 'allowed', 'denied', 'expired', 'all']);
 
 export interface ApprovalDeps {
+  /** Always-allow: remember the allowed tool for the employee and computer that asked. */
+  remember?: (tenantId: string, record: ApprovalRecord) => Promise<void>;
   store: () => ApprovalStore;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
@@ -173,13 +175,16 @@ export function registerApprovalAdminRoutes(app: FastifyInstance, deps: Approval
     if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
     const { id } = req.params as { id: string };
     if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
-    const body = (req.body ?? {}) as { decision?: unknown; reason?: unknown };
+    const body = (req.body ?? {}) as { decision?: unknown; reason?: unknown; remember?: unknown };
     if (body.decision !== 'allow' && body.decision !== 'deny') return reply.code(400).send({ error: 'bad_decision' });
     if (body.reason !== undefined && (typeof body.reason !== 'string' || body.reason.length > 500)) return reply.code(400).send({ error: 'bad_reason' });
     const store = deps.store();
     const now = deps.now();
     const decided = await store.decide(user.tenantId, id, body.decision === 'allow' ? 'allowed' : 'denied', user.userId, (body.reason as string | undefined) || null, now);
-    if (decided) return { approval: approvalView(decided, now) };
+    if (decided) {
+      if (body.decision === 'allow' && body.remember === true) await deps.remember?.(user.tenantId, decided).catch(() => undefined);
+      return { approval: approvalView(decided, now) };
+    }
     const current = await store.get(user.tenantId, id);
     if (!current) return reply.code(404).send({ error: 'not_found' });
     // Already decided, or expired: the first outcome stands.

@@ -27,7 +27,7 @@ using System.Reflection;
 [assembly: AssemblyVersion("$Version.0")]
 [assembly: AssemblyFileVersion("$Version.0")]
 "@ | Set-Content -LiteralPath $VersionSrc -Encoding Ascii
-& $Csc /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ "/out:$TrayOut" "/win32icon:$LinkIcon" /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll $TraySrc $VersionSrc
+& $Csc /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ "/out:$TrayOut" "/win32icon:$LinkIcon" /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll /reference:System.Security.dll $TraySrc $VersionSrc
 if ($LASTEXITCODE -ne 0) { throw "csc.exe failed" }
 
 # 2. Bundle Node.js x64 runtime

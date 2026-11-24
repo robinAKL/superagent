@@ -10,12 +10,14 @@ import { useT, type Dict } from '../i18n';
 const TEXT = {
   en: {
     title: 'Agent confirmations', empty: 'No agent is waiting for confirmation.', loadError: 'Could not load confirmations.',
-    tool: 'Action', task: 'Task', expires: 'Expires in {min} min', allow: 'Allow', deny: 'Deny',
+    tool: 'Action', task: 'Task', expires: 'Expires in {min} min', allow: 'Allow once', always: 'Always allow this tool', deny: 'Deny',
+    alwaysHint: 'From now on this tool runs for this employee on this computer without asking.',
     decided: 'Already decided by someone else.', actionError: 'Could not record the decision.',
   },
   zh: {
     title: '待确认的 agent 操作', empty: '目前没有 agent 在等确认。', loadError: '无法加载待确认操作。',
-    tool: '操作', task: '任务', expires: '{min} 分钟后过期', allow: '允许', deny: '拒绝',
+    tool: '操作', task: '任务', expires: '{min} 分钟后过期', allow: '允许这一次', always: '以后都允许', deny: '拒绝',
+    alwaysHint: '以后这名员工在这台电脑上用这个工具，不再问你。',
     decided: '已经有人处理过了。', actionError: '无法记录这次决定。',
   },
 } satisfies Dict<string>;
@@ -57,11 +59,11 @@ export function WorkerApprovals() {
     return () => { abort.abort(); window.clearInterval(timer); };
   }, [load]);
 
-  async function decide(id: string, decision: 'allow' | 'deny') {
+  async function decide(id: string, decision: 'allow' | 'deny', remember = false) {
     setBusy(id);
     setError(null);
     try {
-      const res = await api(PATH + '/' + id + '/decide', { method: 'POST', body: JSON.stringify({ decision }) });
+      const res = await api(PATH + '/' + id + '/decide', { method: 'POST', body: JSON.stringify({ decision, ...(remember ? { remember: true } : {}) }) });
       if (res.status === 409) setError(t('decided'));
       else if (res.status !== 200) setError(t('actionError'));
       await load();
@@ -93,6 +95,10 @@ export function WorkerApprovals() {
               <span>{t('expires', { min: Math.max(0, Math.ceil((item.expiresAt - now) / 60_000)) })}</span>
               <button type="button" className="exec-action" disabled={busy !== null} onClick={() => void decide(item.id, 'deny')}>{t('deny')}</button>
               <button type="button" className="exec-action exec-approval-allow" disabled={busy !== null} onClick={() => void decide(item.id, 'allow')}>{t('allow')}</button>
+              {/* Claude Code tools can be remembered; Codex requests are one-off. */}
+              {item.tool.startsWith('codex.') ? null : (
+                <button type="button" className="exec-action exec-approval-always" title={t('alwaysHint')} disabled={busy !== null} onClick={() => void decide(item.id, 'allow', true)}>{t('always')}</button>
+              )}
             </div>
           </li>
         ))}

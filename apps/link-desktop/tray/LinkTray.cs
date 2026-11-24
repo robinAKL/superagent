@@ -128,6 +128,7 @@ namespace SuperAgentLinkTray
         private Action _balloonClick;
         private ToolStripMenuItem _updateItem;
         private ToolStripMenuItem _checkUpdateItem;
+        private ToolStripMenuItem _modeMenu;
         private LinkStatus _status = LinkStatus.Unpaired;
         private int _restartAttempt;
         private Icon _currentIcon;
@@ -169,6 +170,14 @@ namespace SuperAgentLinkTray
             _updateItem = new ToolStripMenuItem("Update / 升级", null, (s, e) => BeginUpdate()) { Visible = false };
             _checkUpdateItem = new ToolStripMenuItem("Check for updates / 检查更新", null, (s, e) => CheckForUpdatesInBackground(true));
             var versionItem = new ToolStripMenuItem("Version / 版本 " + AppVersion) { Enabled = false };
+            _modeMenu = new ToolStripMenuItem("Authorisation / 授权模式");
+            foreach (var mode in new[] { "strict", "standard", "full" })
+            {
+                var name = mode;
+                var item = new ToolStripMenuItem(ModeLabel(name), null, (s, e) => SetPermissionMode(name)) { Tag = name };
+                _modeMenu.DropDownItems.Add(item);
+            }
+            _modeMenu.DropDownOpening += (s, e) => RefreshPermissionMode();
 
             var menu = new ContextMenuStrip();
             menu.Items.Add(_statusItem);
@@ -179,6 +188,7 @@ namespace SuperAgentLinkTray
             menu.Items.Add(configureItem);
             menu.Items.Add(repairItem);
             menu.Items.Add(logsItem);
+            menu.Items.Add(_modeMenu);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(versionItem);
             menu.Items.Add(_checkUpdateItem);
@@ -632,6 +642,99 @@ namespace SuperAgentLinkTray
             public Version Version;
             public string InstallerUrl;
             public string SumsUrl;
+        }
+
+
+        private static string ModeLabel(string mode)
+        {
+            return mode == "strict" ? "Strict / 严格（几乎都要批准）"
+                : mode == "full" ? "Allow all / 全部放行"
+                : "Standard / 标准（推荐）";
+        }
+
+        /** The worker token Link saved (DPAPI, current user), or null when this computer is not paired. */
+        private string ReadWorkerToken()
+        {
+            try
+            {
+                if (!File.Exists(_tokenPath)) return null;
+                var protectedBytes = Convert.FromBase64String(File.ReadAllText(_tokenPath, Encoding.UTF8).Trim());
+                var plain = ProtectedData.Unprotect(protectedBytes, null, DataProtectionScope.CurrentUser);
+                return Encoding.UTF8.GetString(plain).Trim();
+            }
+            catch (Exception ex) { Log("Could not read the Link token: " + ex.Message); return null; }
+        }
+
+        private string WorkerLinkPost(string path, string json)
+        {
+            var token = ReadWorkerToken();
+            if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(_serverUrl)) return null;
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            using (var wc = new WebClient())
+            {
+                wc.Encoding = Encoding.UTF8;
+                wc.Headers.Add("User-Agent", "SuperAgentLink/" + AppVersion);
+                wc.Headers.Add("Authorization", "Bearer " + token);
+                wc.Headers.Add("Content-Type", "application/json");
+                return wc.UploadString(_serverUrl.TrimEnd('/') + "/api/v1/worker-link" + path, "POST", json);
+            }
+        }
+
+        /** Tick the mode every employee on this computer has; none when they differ or it cannot be read. */
+        private void RefreshPermissionMode()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                string current = null;
+                try
+                {
+                    var body = WorkerLinkPost("/permissions", "{}");
+                    if (body != null)
+                    {
+                        var parsed = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(body);
+                        object modesObj;
+                        var modes = parsed.TryGetValue("modes", out modesObj) ? modesObj as Dictionary<string, object> : null;
+                        if (modes != null && modes.Count > 0)
+                        {
+                            var distinct = new HashSet<string>();
+                            foreach (var value in modes.Values) distinct.Add(Convert.ToString(value));
+                            if (distinct.Count == 1) foreach (var only in distinct) current = only;
+                        }
+                    }
+                }
+                catch (Exception ex) { Log("Could not read the authorisation mode: " + ex.Message); }
+                _uiContext.Post(__ =>
+                {
+                    foreach (ToolStripItem item in _modeMenu.DropDownItems)
+                    {
+                        var menuItem = item as ToolStripMenuItem;
+                        if (menuItem != null) menuItem.Checked = current != null && (string)menuItem.Tag == current;
+                    }
+                }, null);
+            });
+        }
+
+        private void SetPermissionMode(string mode)
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                string failure = null;
+                try { if (WorkerLinkPost("/permissions/mode", "{\"mode\":\"" + mode + "\"}") == null) failure = "这台电脑还没有配对。"; }
+                catch (Exception ex) { failure = ex.Message; }
+                _uiContext.Post(__ =>
+                {
+                    if (failure != null)
+                    {
+                        Log("Could not change the authorisation mode: " + failure);
+                        Notify("没能切换授权模式", failure, ToolTipIcon.Warning);
+                        return;
+                    }
+                    Log("Authorisation mode set to " + mode);
+                    Notify("授权模式：" + ModeLabel(mode), mode == "full"
+                        ? "这台电脑上的员工操作会直接执行；发邮件默认仍然先问你。"
+                        : "需要批准的操作会出现在指挥室的「待确认的 agent 操作」里。", ToolTipIcon.Info);
+                }, null);
+            });
         }
 
         private void CheckForUpdatesInBackground(bool manual)
