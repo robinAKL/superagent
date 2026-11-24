@@ -1,5 +1,5 @@
 .topbar { height: var(--header); display: flex; align-items: center; gap: var(--space-lg); padding: 0 var(--space-lg); border-bottom: 1px solid var(--color-soft-rule); }
-.brand { color: var(--color-accent); font-weight: 700; letter-spacing: .03em; font-size: 18px; }
+.brand { color: var(--color-accent); font-weight: 700; letter-spacing: .03em; font-size: 17px; }
 .product { color: var(--color-muted); font-size: 14px; padding-left: var(--space-lg); border-left: 1px solid var(--color-rule); }
 .app { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); min-height: calc(100dvh - var(--header)); }
 .sidebar { padding: var(--space-lg) var(--space-md); border-right: 1px solid var(--color-soft-rule); background: var(--color-paper-2); }
