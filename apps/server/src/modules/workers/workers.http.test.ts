@@ -291,3 +291,17 @@ it('in the full app, the worker channel needs no user sign-in and the registry n
   expect([401, 403]).toContain(anon.statusCode);
   await full.close();
 });
+
+it('a room task sent to a computer revoked since goes to the current computer; an active one never gets it twice', async () => {
+  const a = await app();
+  const old = (await register(a, [])).worker;
+  const current = (await register(a, [])).worker;
+  const at = Date.now();
+  expect(await workersState.registry.appendEvent(TENANT, old.id, 'wake', { projectId: 'p1' }, 'super-agent', at, 'task_5')).not.toBeNull();
+  // Still active: the task stays with the first computer.
+  expect(await workersState.registry.appendEvent(TENANT, current.id, 'wake', { projectId: 'p1' }, 'super-agent', at, 'task_5')).toBeNull();
+  await a.inject({ method: 'POST', url: `/api/v1/workers/${old.id}/revoke` });
+  // Revoked since: the task never ran there, so the current computer can take it — once.
+  expect(await workersState.registry.appendEvent(TENANT, current.id, 'wake', { projectId: 'p1' }, 'super-agent', at, 'task_5')).not.toBeNull();
+  expect(await workersState.registry.appendEvent(TENANT, current.id, 'wake', { projectId: 'p1' }, 'super-agent', at, 'task_5')).toBeNull();
+});

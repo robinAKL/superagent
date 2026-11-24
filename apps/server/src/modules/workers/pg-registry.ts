@@ -96,6 +96,16 @@ ON CONFLICT (tenant_id, room_task_id) DO NOTHING
 RETURNING worker_id, seq, kind, payload, created_by, created_at;
 `.trim();
 
+/**
+ * A room task goes to one computer once. If that computer has since been revoked (re-paired, removed), the task never
+ * ran there: release its dispatch so the employee's current computer can take it.
+ */
+export const RELEASE_REVOKED_DISPATCH_SQL = `
+UPDATE worker_events e SET room_task_id = NULL
+FROM workers w
+WHERE e.tenant_id = $1::uuid AND e.room_task_id = $2 AND w.id = e.worker_id AND w.revoked_at IS NOT NULL
+`.trim();
+
 const FIND_ROOM_DISPATCH_SQL = `
 SELECT seq FROM worker_events
 WHERE tenant_id = $1::uuid AND worker_id = $2::uuid AND room_task_id = $3;
@@ -210,6 +220,7 @@ export class PgWorkerRegistry implements WorkerRegistry {
   }
 
   async appendEvent(tenantId: string, workerId: string, kind: WorkerEventKind, payload: Record<string, unknown>, createdBy: string, at: number, roomTaskId?: string): Promise<WorkerEvent | null> {
+    if (roomTaskId) await this.db.query(RELEASE_REVOKED_DISPATCH_SQL, [tenantId, roomTaskId]);
     for (let tries = 0; ; tries++) {
       try {
         const { rows } = await this.db.query<EventRow>(APPEND_EVENT_SQL, [
