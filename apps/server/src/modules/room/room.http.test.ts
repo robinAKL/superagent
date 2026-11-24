@@ -465,3 +465,20 @@ it('a question about a numbered task is answered from the task, never turned int
   const tasks = (await app.inject({ method: 'GET', url: '/api/v1/room/tasks?roomId=room-1' })).json().tasks;
   expect(tasks).toHaveLength(1);
 });
+
+it('"测试，请忽略", thanks and "收到" get a short fixed reply: the model is not asked, and no earlier task is re-answered', async () => {
+  let asked = 0;
+  bindRoomBrain({ understand: async () => { asked += 1; return { answer: 'T-5 尚未完成。状态：等待。' }; } });
+  const app = Fastify();
+  await app.register(roomModule, { prefix: '/api/v1/room' });
+  const send = async (body: string, id: string) => (await app.inject({ method: 'POST', url: '/api/v1/room/messages', payload: { roomId: 'room-1', body, clientMessageId: id } })).json();
+  for (const [body, reply] of [['测试，请忽略', '好的，这条不用处理。'], ['test', '好的，这条不用处理。'], ['请忽略', '好的，这条不用处理。'], ['谢谢！', '不客气。'], ['收到', '好的。'], ['你好', '你好。']] as const) {
+    const sent = await send(body, `s-${body}`);
+    expect(sent.task).toBeNull();
+    expect(sent.reply.body).toContain(reply);
+  }
+  expect(asked).toBe(0);
+  // Anything with real content still goes to Super Agent.
+  await send('测试一下 CRM 里 SS-1 的状态', 's-real');
+  await expect.poll(() => asked).toBe(1);
+});

@@ -16,6 +16,23 @@ const QUOTED = /[「『“"][^」』”"]+[」』”"]/u;
 /** A document or record number such as Q-1001, INV2024-07 or C-DEMO-002. */
 const RECORD = /[A-Za-z]+(?:-[A-Za-z0-9]+)*-?\d{2,}/u;
 
+const SMALL_TALK: [RegExp, string][] = [
+  [/^(?=.*(测|test|忽略|无视|别管|不用管|不用回|ignore))(测试|测一下|测试一下|test|testing)?[,，。.!！\s]*(请)?(忽略|无视|别管|不用管|不用回|ignore( this| it)?)?[!！。.~\s]*$/iu, '好的，这条不用处理。'],
+  [/^(谢谢|多谢|感谢|谢了|thanks|thank you|thx)[!！。.~\s]*$/iu, '不客气。'],
+  [/^(好的|好|嗯|ok|okay|收到|知道了|明白)[!！。.~\s]*$/iu, '好的。'],
+];
+
+/**
+ * "测试，请忽略", "谢谢", "收到": a fixed short reply, never a model call, so a message that asks for nothing is not
+ * answered with the status of whatever the conversation was about before.
+ */
+export function smallTalkReply(body: string): string | null {
+  const text = body.trim();
+  if (!text || text.length > 24) return null;
+  for (const [pattern, reply] of SMALL_TALK) if (pattern.test(text)) return reply;
+  return null;
+}
+
 export function isGreeting(body: string): boolean {
   return GREETING.test(body.trim());
 }

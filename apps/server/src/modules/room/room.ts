@@ -1,5 +1,5 @@
 import type { TaskStatus } from '@superagent/shared';
-import { asksAvailability, isExternalAction, isGreeting, needsParameters, workText, askedTaskNumber } from './intent.js';
+import { asksAvailability, isExternalAction, isGreeting, needsParameters, workText, askedTaskNumber, smallTalkReply } from './intent.js';
 import {
   acceptSupplement, applyAsyncReport, evidenceFromReport, permissionHold, resultOverview, summaryLabel, verificationOf,
   type ResultEvidence, type ResultHold, type ResultVerification,
@@ -326,6 +326,8 @@ export class CommandRoom {
     const body = input.body.trim();
     if (!employee) {
       if (isGreeting(body)) return noTask('你好。需要派活时直接 @数字员工，并说清楚要做的事。');
+      const small = smallTalkReply(body);
+      if (small) return noTask(small);
       if (asksAvailability(body)) return noTask(this.availability(author));
       if (understood && 'answer' in understood && understood.answer.trim()) return noTask(understood.answer.trim());
       if (isExternalAction(body)) return noTask('这是对外动作。请先补充具体对象（收件人或单号）、内容和依据，再 @数字员工，我才会建任务。');
