@@ -83,4 +83,21 @@ describe('link-desktop Windows installer & tray', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('offers an update instead of installing it unasked: a notification and a menu item, the installer only after a click', () => {
+    const cs = readFileSync(path.join(linkDesktopDir, 'tray', 'LinkTray.cs'), 'utf8');
+    const check = cs.slice(cs.indexOf('private void CheckForUpdatesSafe('), cs.indexOf('private UpdateOffer FetchUpdateOffer('));
+    const begin = cs.slice(cs.indexOf('private void BeginUpdate('), cs.indexOf('private static string ParseSha256('));
+    assert.ok(check.length > 0 && begin.length > 0, 'update check and click handler exist');
+    assert.doesNotMatch(check, /Process\.Start/, 'the periodic check never starts the installer');
+    assert.match(check, /_balloonClick = BeginUpdate/);
+    assert.match(check, /升级到 v/);
+    assert.match(cs, /BalloonTipClicked/);
+    assert.match(cs, /Check for updates \/ 检查更新/);
+    assert.match(begin, /ParseSha256\(/, 'the download is checked against SHA256SUMS before it runs');
+    assert.match(begin, /Arguments = "\/S \/D="/, 'silent install; the installer restarts Link');
+    assert.match(begin, /_updateAfterTask = true/, 'a running task is not cut off');
+    const nsi = readFileSync(path.join(linkDesktopDir, 'installer', 'SuperAgentLink.nsi'), 'utf8');
+    assert.match(nsi, /IfSilent 0 \+2\s+Call LaunchLink/, 'a silent upgrade starts Link again');
+  });
 });
