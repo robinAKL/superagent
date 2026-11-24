@@ -175,7 +175,9 @@ export const roomModule: FastifyPluginAsync = async (app) => {
     const viewer = viewerFrom(req.headers, req.user);
     const tenantId = req.user?.tenantId ?? body.tenantId ?? 't';
     const room = roomState.current;
-    const think = roomBrain !== null && !body.followupTo && !room.hasClientMessage(body.roomId, body.clientMessageId) && !room.namesEmployee(body.body);
+    // A question about a numbered task is answered from the task, not read by the model.
+    const aboutTask = !body.followupTo && !room.namesEmployee(body.body) ? room.answerAboutTask(body.body, viewer, body.roomId) : null;
+    const think = aboutTask === null && roomBrain !== null && !body.followupTo && !room.hasClientMessage(body.roomId, body.clientMessageId) && !room.namesEmployee(body.body);
 
     /** Send a task Super Agent created to the employee's computer, as an @mention would. */
     const dispatch = async (task: import('./room.js').RoomTask | null) => {
@@ -203,6 +205,7 @@ export const roomModule: FastifyPluginAsync = async (app) => {
       followupTo: typeof body.followupTo === 'string' && body.followupTo ? body.followupTo : null,
       // Super Agent may take a while (a model call, perhaps a lookup): the message is stored and confirmed now.
       defer: think,
+      ...(aboutTask ? { understood: { answer: aboutTask } } : {}),
     });
     if (!think || posted.duplicate) {
       await dispatch(posted.task);

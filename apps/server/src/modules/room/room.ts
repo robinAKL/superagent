@@ -1,5 +1,5 @@
 import type { TaskStatus } from '@superagent/shared';
-import { asksAvailability, isExternalAction, isGreeting, needsParameters, workText } from './intent.js';
+import { asksAvailability, isExternalAction, isGreeting, needsParameters, workText, askedTaskNumber } from './intent.js';
 import {
   acceptSupplement, applyAsyncReport, evidenceFromReport, permissionHold, resultOverview, summaryLabel, verificationOf,
   type ResultEvidence, type ResultHold, type ResultVerification,
@@ -788,6 +788,28 @@ export class CommandRoom {
     const projectId = input.projectId ?? original?.projectId ?? null;
     if (!projectId) return false;
     return !(input.authorProjectScopes ?? []).includes(projectId);
+  }
+
+  /**
+   * "T-5是什么任务？" answered from the task itself: its title, state and who has it, plus the start of its report.
+   * Never a model call, so a question about a task can't be mistaken for a request to do it again.
+   */
+  answerAboutTask(body: string, viewer: Viewer, roomId: string): string | null {
+    const number = askedTaskNumber(body);
+    if (number === null) return null;
+    const task = this.listTasks(viewer, roomId).find((item) => item.id === `task_${number}`);
+    if (!task) return `我看不到 T-${number} 这个任务：它不在这个房间，或不在你能看到的范围里。`;
+    const STATE: Record<string, string> = {
+      assigned: '已派出，等电脑领取', running: '进行中', waiting: '等待', reported: '已回报，待复核', outcome_unknown: '结果待确认',
+      completed: '已完成', reviewed: '已复核', cancelled: '已取消',
+    };
+    const employee = this.employees().find((item) => item.id === task.employeeId)?.name ?? '数字员工';
+    const state = `${STATE[task.status] ?? task.status}${task.waitingReason ? `（${task.waitingReason}）` : ''}`;
+    const report = [...this.messages].reverse().find((message) => message.kind === 'report' && message.taskIds.includes(task.id));
+    const summary = report ? `
+回报：${report.body.replace(/\s+/g, ' ').trim().slice(0, 160)}${report.body.length > 160 ? '…' : ''}` : '';
+    return `T-${number}：${task.title}
+状态：${state}；负责：@${employee}。${summary}`;
   }
 
   /** Whether a message names a digital employee with @, so the room can skip reading it with the model. */
