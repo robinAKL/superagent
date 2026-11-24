@@ -46,7 +46,7 @@ test('the room owner allows and denies agent prompts; the Link receives each dec
   await expect(allowItem).toContainText('npm test');
   await expect(allowItem).toContainText('task_e2e');
 
-  await allowItem.getByRole('button', { name: '允许', exact: true }).click();
+  await allowItem.getByRole('button', { name: '允许这一次', exact: true }).click();
   await expect(allowItem).toHaveCount(0);
   expect(await waitResult(request, token, allowId)).toMatchObject({ status: 'allowed', decidedBy: 'e2e-approvals-owner' });
 

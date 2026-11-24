@@ -214,3 +214,17 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 
 /* Form controls use the page's fonts (browsers default buttons and inputs to Arial / system UI). */
 button, input, select, textarea { font-family: inherit; }
+
+/* Authorisation mode (employee drawer): three chips and what the chosen one means. */
+.permission-mode { display: grid; gap: var(--space-2xs); }
+.permission-mode .helper { margin: 0; font-size: 12px; }
+.permission-email { display: inline-flex; align-items: center; gap: var(--space-xs); font-size: 13px; color: var(--color-muted); }
+.permission-email input { width: 16px; height: 16px; min-height: 0; margin: 0; }
+/* Tool list under the authorisation mode: one row per tool, a three-way switch, and what the mode would do. */
+.tool-rules { margin-top: var(--space-xs); }
+.tool-rules h4 { margin: var(--space-sm) 0 var(--space-2xs); font-size: 13px; color: var(--color-muted); display: flex; align-items: center; gap: var(--space-xs); }
+.tool-rules ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.tool-rule { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--space-sm); align-items: center; padding: 4px 0; border-bottom: 1px solid var(--color-soft-rule); }
+.tool-rule-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-rule-note { grid-column: 1 / -1; font-size: 12px; color: var(--color-subtle); }
+.chip.chip-small { height: 26px; padding: 0 10px; font-size: 12px; }

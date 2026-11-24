@@ -31,8 +31,49 @@ export interface LinkProject {
   agent: 'codex' | 'claude-code';
 }
 
+/** How freely an employee's local agent may act on this computer (see apps/link/policy.mjs). */
+export type PermissionMode = 'strict' | 'standard' | 'full';
+export type ToolRule = 'allow' | 'ask' | 'deny';
+export interface PermissionPolicy {
+  mode: PermissionMode;
+  /** Exact tool names ("mcp__vera-crm__approve_order", "Bash") or a whole MCP server ("mcp__vera-crm"). */
+  rules?: Record<string, ToolRule>;
+  /** In full mode, still ask before sending mail. Default true. */
+  askEmail?: boolean;
+  /** Tool names this employee's agent has asked about on this computer, for the tool list (newest last). */
+  seen?: string[];
+}
+/** An MCP server Claude Code has on this computer, as `claude mcp list` reports it. */
+export interface McpServerInfo { name: string; status: 'connected' | 'needs_auth' | 'failed' | 'unknown' }
+const MCP_STATUS = new Set(['connected', 'needs_auth', 'failed', 'unknown']);
+export const PERMISSION_MODES: readonly PermissionMode[] = ['strict', 'standard', 'full'];
+const TOOL_NAME = /^[A-Za-z0-9_.:*-]{1,128}$/;
+
+export function cleanPolicy(value: unknown): PermissionPolicy | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  if (!PERMISSION_MODES.includes(raw.mode as PermissionMode)) return null;
+  const rules: Record<string, ToolRule> = {};
+  if (raw.rules && typeof raw.rules === 'object') {
+    for (const [tool, rule] of Object.entries(raw.rules as Record<string, unknown>).slice(0, 200)) {
+      if (TOOL_NAME.test(tool) && (rule === 'allow' || rule === 'ask' || rule === 'deny')) rules[tool] = rule;
+    }
+  }
+  const seen = Array.isArray(raw.seen) ? [...new Set(raw.seen.filter((tool): tool is string => typeof tool === 'string' && TOOL_NAME.test(tool)))].slice(-200) : [];
+  return {
+    mode: raw.mode as PermissionMode,
+    ...(Object.keys(rules).length ? { rules } : {}),
+    ...(raw.askEmail === false ? { askEmail: false } : {}),
+    ...(seen.length ? { seen } : {}),
+  };
+}
+
 export interface WorkerCapabilities {
   roomAssignments?: RoomAssignment[];
+  /** Per bound employee: the authorisation mode and remembered tool rules for its agent on this computer. */
+  permissions?: Record<string, PermissionPolicy>;
+  /** MCP servers Claude Code has on this computer (reported by Link). */
+  mcpServers?: McpServerInfo[];
   /** Queue kinds this worker may claim. Empty or absent: it claims nothing until an admin grants kinds. */
   kinds?: string[];
   /** Agent CLIs the device can start, e.g. ["claude-code", "codex"]. Reported, not trusted for authorisation. */
@@ -183,6 +224,21 @@ export function cleanCapabilities(value: unknown): WorkerCapabilities {
       return [employeeId, projectId].every((v) => typeof v === 'string' && v.length > 0 && v.length <= 128)
         ? [{ employeeId: employeeId!, projectId: projectId! }]
         : [];
+    }).slice(0, 32);
+  }
+  if (raw.permissions && typeof raw.permissions === 'object') {
+    const permissions: Record<string, PermissionPolicy> = {};
+    for (const [employeeId, policy] of Object.entries(raw.permissions as Record<string, unknown>).slice(0, 32)) {
+      const clean = cleanPolicy(policy);
+      if (clean && employeeId.length > 0 && employeeId.length <= 128) permissions[employeeId] = clean;
+    }
+    out.permissions = permissions;
+  }
+  if (Array.isArray(raw.mcpServers)) {
+    out.mcpServers = raw.mcpServers.flatMap((entry: unknown) => {
+      const { name, status } = (entry && typeof entry === 'object' ? entry : {}) as Partial<McpServerInfo>;
+      return typeof name === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(name) && MCP_STATUS.has(String(status))
+        ? [{ name, status: status as McpServerInfo['status'] }] : [];
     }).slice(0, 32);
   }
   if (kinds) out.kinds = kinds;

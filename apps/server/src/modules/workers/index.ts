@@ -11,6 +11,10 @@ import { MemoryApprovalStore, PgApprovalStore, registerApprovalAdminRoutes, regi
 import {
   authenticateWorker,
   cleanCapabilities,
+  cleanPolicy,
+  PERMISSION_MODES,
+  type PermissionMode,
+  type ToolRule,
   EVENTS_PAGE,
   MemoryWorkerRegistry,
   WORKER_EVENT_KINDS,
@@ -95,10 +99,37 @@ export function resetWorkers(): void {
   resetLinkPresence(Date.now());
 }
 
+/**
+ * Change one employee's authorisation on one computer: its mode, one tool rule (null removes it), or whether full mode
+ * still asks before mail. The whole permissions map is written back, so other employees' settings are kept.
+ */
+export async function updatePermission(tenantId: string, workerId: string, employeeId: string,
+  change: { mode?: PermissionMode; tool?: string; rule?: ToolRule | null; askEmail?: boolean }): Promise<WorkerRecord | null> {
+  const device = await workersState.registry.get(tenantId, workerId);
+  if (!device || device.revokedAt !== null) return null;
+  const all = { ...(device.capabilities.permissions ?? {}) };
+  const current = all[employeeId] ?? { mode: 'standard' as PermissionMode };
+  const rules = { ...(current.rules ?? {}) };
+  if (change.tool) {
+    if (change.rule) rules[change.tool] = change.rule;
+    else delete rules[change.tool];
+  }
+  const next = cleanPolicy({ mode: change.mode ?? current.mode, rules, askEmail: change.askEmail ?? current.askEmail });
+  if (!next) return null;
+  all[employeeId] = next;
+  return workersState.registry.patchCapabilities(tenantId, workerId, { permissions: all });
+}
+
 /** Approval routes read state through these, so tests can swap the clock and store like the rest of the module. */
 const approvalDeps: ApprovalDeps = {
   store: () => workersState.approvals,
   now: () => workersState.now(),
+  // Always-allow: the tool is allowed from now on for the employee whose task asked, on the computer that asked.
+  remember: async (tenantId, record) => {
+    if (!record.roomTaskId || record.tool.startsWith('codex.')) return;
+    const task = roomState.current.listTasks({ userId: 'system', roles: ['owner'], projectScopes: [] }).find((item) => item.id === record.roomTaskId);
+    if (task?.employeeId) await updatePermission(tenantId, record.workerId, task.employeeId, { tool: record.tool, rule: 'allow' });
+  },
   sleep: (ms) => workersState.sleep(ms),
   stepMs: () => (workSignal.listening ? workersState.notifiedScanMs : workersState.pollStepMs),
 };
@@ -296,6 +327,30 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return { worker: toView(updated, workersState.now()) };
   });
 
+  /** An employee's authorisation on this computer: mode (strict | standard | full), a tool rule, or mail in full mode. */
+  app.post('/:id/permissions', SELF, async (req, reply) => {
+    const user = req.user;
+    if (!user?.tenantId) return reply.code(401).send({ error: 'unauthenticated' });
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as { employeeId?: unknown; mode?: unknown; tool?: unknown; rule?: unknown; askEmail?: unknown };
+    if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
+    if (typeof body.employeeId !== 'string' || !body.employeeId || body.employeeId.length > 128) return reply.code(400).send({ error: 'invalid_employee' });
+    if (body.mode !== undefined && !PERMISSION_MODES.includes(body.mode as PermissionMode)) return reply.code(400).send({ error: 'invalid_mode' });
+    if (body.tool !== undefined && (typeof body.tool !== 'string' || !/^[A-Za-z0-9_.:*-]{1,128}$/.test(body.tool))) return reply.code(400).send({ error: 'invalid_tool' });
+    if (body.rule !== undefined && body.rule !== null && body.rule !== 'allow' && body.rule !== 'ask' && body.rule !== 'deny') return reply.code(400).send({ error: 'invalid_rule' });
+    if (body.askEmail !== undefined && typeof body.askEmail !== 'boolean') return reply.code(400).send({ error: 'invalid_ask_email' });
+    const device = await workersState.registry.get(user.tenantId, id);
+    if (!device || device.kind !== 'link' || device.revokedAt !== null || !mayManage(user, device)) return reply.code(404).send({ error: 'not_found' });
+    if (!device.capabilities.roomAssignments?.some((binding) => binding.employeeId === body.employeeId)) return reply.code(409).send({ error: 'not_bound_here' });
+    const updated = await updatePermission(user.tenantId, id, body.employeeId, {
+      ...(body.mode !== undefined ? { mode: body.mode as PermissionMode } : {}),
+      ...(typeof body.tool === 'string' ? { tool: body.tool, rule: (body.rule ?? null) as ToolRule | null } : {}),
+      ...(typeof body.askEmail === 'boolean' ? { askEmail: body.askEmail } : {}),
+    });
+    if (!updated) return reply.code(404).send({ error: 'not_found' });
+    return { worker: toView(updated, workersState.now()) };
+  });
+
   app.post('/:id/revoke', SELF, async (req, reply) => {
     const user = req.user;
     const tenantId = user?.tenantId;
@@ -388,6 +443,51 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
 
   registerApprovalLinkRoutes(app, approvalDeps);
 
+  /** The policy for each project this computer runs, read by Link at the start of every task. */
+  app.post('/permissions', async (req) => {
+    const worker = req.worker!;
+    const fresh = await workersState.registry.get(worker.tenantId, worker.id);
+    const policies: Record<string, unknown> = {};
+    const modes: Record<string, PermissionMode> = {};
+    for (const binding of fresh?.capabilities.roomAssignments ?? []) {
+      const policy = fresh?.capabilities.permissions?.[binding.employeeId] ?? { mode: 'standard' as PermissionMode };
+      policies[binding.projectId] = policy;
+      modes[binding.employeeId] = policy.mode;
+    }
+    return { policies, modes };
+  });
+
+  /** Tool names the agent asked about during a task, so the tool list can show them with a switch each. */
+  app.post('/permissions/seen', async (req, reply) => {
+    const worker = req.worker!;
+    const { projectId, tools } = (req.body ?? {}) as { projectId?: unknown; tools?: unknown };
+    if (typeof projectId !== 'string' || !Array.isArray(tools)) return reply.code(400).send({ error: 'invalid_seen' });
+    const fresh = await workersState.registry.get(worker.tenantId, worker.id);
+    const binding = fresh?.capabilities.roomAssignments?.find((item) => item.projectId === projectId);
+    if (!fresh || !binding) return reply.code(404).send({ error: 'not_bound_here' });
+    const all = { ...(fresh.capabilities.permissions ?? {}) };
+    const current = all[binding.employeeId] ?? { mode: 'standard' as PermissionMode };
+    const named = tools.filter((tool): tool is string => typeof tool === 'string').slice(0, 100);
+    const next = cleanPolicy({ ...current, seen: [...(current.seen ?? []).filter((tool) => !named.includes(tool)), ...named] });
+    if (next) {
+      all[binding.employeeId] = next;
+      await workersState.registry.patchCapabilities(worker.tenantId, worker.id, { permissions: all });
+    }
+    return { ok: true };
+  });
+
+  /** The tray's one-click switch: the same mode for every employee bound to this computer. */
+  app.post('/permissions/mode', async (req, reply) => {
+    const worker = req.worker!;
+    const { mode } = (req.body ?? {}) as { mode?: unknown };
+    if (!PERMISSION_MODES.includes(mode as PermissionMode)) return reply.code(400).send({ error: 'invalid_mode' });
+    const fresh = await workersState.registry.get(worker.tenantId, worker.id);
+    for (const employeeId of new Set((fresh?.capabilities.roomAssignments ?? []).map((binding) => binding.employeeId))) {
+      await updatePermission(worker.tenantId, worker.id, employeeId, { mode: mode as PermissionMode });
+    }
+    return { mode };
+  });
+
   app.post('/heartbeat', async (req, reply) => {
     const body = (req.body ?? {}) as { busy?: unknown; waitingAuthReason?: unknown; capabilities?: unknown };
     const now = workersState.now();
@@ -399,10 +499,11 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     };
     const worker = req.worker!;
     if (body.capabilities && typeof body.capabilities === 'object') {
-      const { agents, projects } = cleanCapabilities(body.capabilities);
-      if (agents || (projects && worker.kind === 'link')) {
+      const { agents, projects, mcpServers } = cleanCapabilities(body.capabilities);
+      if (agents || (projects && worker.kind === 'link') || (mcpServers && worker.kind === 'link')) {
         await workersState.registry.patchCapabilities(worker.tenantId, worker.id, {
           ...(agents ? { agents } : {}), ...(worker.kind === 'link' && projects ? { projects } : {}),
+          ...(worker.kind === 'link' && mcpServers ? { mcpServers } : {}),
         });
       }
     }

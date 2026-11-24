@@ -71,6 +71,8 @@ describe('link-desktop Windows installer & tray', () => {
         `/out:${exePath}`,
         '/r:System.Windows.Forms.dll',
         '/r:System.Drawing.dll',
+        '/r:System.Web.Extensions.dll',
+        '/r:System.Security.dll',
         path.join(linkDesktopDir, 'tray', 'LinkTray.cs'),
         versionPath,
       ], { encoding: 'utf8' });
@@ -99,5 +101,15 @@ describe('link-desktop Windows installer & tray', () => {
     assert.match(begin, /_updateAfterTask = true/, 'a running task is not cut off');
     const nsi = readFileSync(path.join(linkDesktopDir, 'installer', 'SuperAgentLink.nsi'), 'utf8');
     assert.match(nsi, /IfSilent 0 \+2\s+Call LaunchLink/, 'a silent upgrade starts Link again');
+  });
+
+  it('offers the three authorisation modes in the tray and switches them through the worker channel', () => {
+    const cs = readFileSync(path.join(linkDesktopDir, 'tray', 'LinkTray.cs'), 'utf8');
+    assert.match(cs, /Authorisation \/ 授权模式/);
+    assert.match(cs, /new\[\] \{ "strict", "standard", "full" \}/);
+    assert.match(cs, /"\/permissions\/mode"/, 'one click sets the mode for every employee on this computer');
+    assert.match(cs, /ProtectedData\.Unprotect\(/, 'the token Link saved is read with DPAPI, never stored again');
+    const build = readFileSync(path.join(linkDesktopDir, 'scripts', 'build-windows.ps1'), 'utf8');
+    assert.match(build, /System\.Security\.dll/);
   });
 });

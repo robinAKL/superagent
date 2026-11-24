@@ -52,6 +52,7 @@ async function fixture(t, agent = 'codex', options = {}) {
       if (await control.stopAfterPoll?.()) return Response.json({ events: [] });
       return Response.json({ events: events.filter((event) => event.seq > body.since) });
     }
+    if (path.endsWith('/permissions')) return Response.json({ policies: options.policies ?? {} });
     if (path.endsWith('/approvals')) return Response.json({ approval: { id: 'approval-1', expiresAt: Date.now() + 60_000 } }, { status: 201 });
     if (path.endsWith('/approvals/approval-1/wait')) {
       return Response.json({ approval: { status: options.approvalStatus } });
@@ -92,13 +93,27 @@ test('runs Codex and sends a result, then resumes the poll cursor without rerunn
   assert.equal((await f.args()).length, 1);
 });
 
+/** Claude Code's argv with Link's permission hook taken out; the hook itself is asserted separately. */
+function withoutPermissionHook(argv) {
+  const out = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--mcp-config' || argv[i] === '--permission-prompt-tool') { i++; continue; }
+    out.push(argv[i]);
+  }
+  return out;
+}
+
 test('runs Claude Code with a fixed headless adapter', async (t) => {
   const f = await fixture(t, 'claude-code');
   f.wake(1, 'Summarise');
   const link = f.make();
   await link.poll(undefined, 0);
   await link.runNext();
-  assert.deepEqual((await f.args())[0].argv, ['--print', '--output-format', 'stream-json', '--verbose']);
+  const argv = (await f.args())[0].argv;
+  assert.deepEqual(withoutPermissionHook(argv), ['--print', '--output-format', 'stream-json', '--verbose']);
+  // Permission prompts go to Link's own tool, never to a terminal nobody is watching.
+  assert.equal(argv[argv.indexOf('--permission-prompt-tool') + 1], 'mcp__superagent_link__approve');
+  assert.match(argv[argv.indexOf('--mcp-config') + 1], /superagent-link-permissions-.+\.json$/);
   assert.ok(f.requests.some(({ path, body }) => path.endsWith('/report') && body.body === 'Result: Summarise'));
 });
 
@@ -130,7 +145,7 @@ test('restarts an unfinished task through its explicit saved session', async (t)
     await f.save({ cursor: 8, jobs: [{ id: 'task1', projectId: 'p1', prompt: 'Continue', session: 'session-previous', status: 'queued' }] });
     const link = f.make();
     await link.runNext();
-    assert.deepEqual((await f.args())[0].argv, args);
+    assert.deepEqual(withoutPermissionHook((await f.args())[0].argv), args);
   }
 });
 
@@ -262,4 +277,56 @@ test('cancels a running child and persists cancellation without reporting a resu
   assert.equal((await f.state()).jobs[0].status, 'cancelled');
   assert.ok(!f.requests.some(({ path }) => path.endsWith('/report')));
   if (process.platform === 'win32') assert.throws(() => process.kill(grandchild, 0), { code: 'ESRCH' });
+});
+
+test('Claude Code asks Link: the mode lets reads through, the room decides a CRM write, a wrong secret is refused', async (t) => {
+  const asked = [];
+  const launch = (project, prompt, session, notify, approver) => {
+    const call = (toolName, input, secret = approver.secret) => fetch(approver.url, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + secret },
+      body: JSON.stringify({ tool_name: toolName, input }),
+    });
+    const completed = (async () => {
+      asked.push(await (await call('mcp__vera-crm__search_orders', { status: 'open' })).json());
+      asked.push(await (await call('mcp__vera-crm__approve_order', { order: 'SS-1' })).json());
+      asked.push((await call('Bash', { command: 'dir' }, 'wrong')).status);
+      return { result: 'done' };
+    })();
+    return { completed, cancel() {} };
+  };
+  const f = await fixture(t, 'claude-code', { launch, approvalStatus: 'allowed', policies: { p1: { mode: 'standard' } } });
+  f.wake(1, 'Look up orders');
+  const link = f.make();
+  await link.poll(undefined, 0);
+  await link.runNext();
+  assert.deepEqual(asked[0], { behavior: 'allow' }); // read-only MCP tool: no one is asked
+  assert.deepEqual(asked[1], { behavior: 'allow' }); // a write: the room allowed it
+  assert.equal(asked[2], 401);
+  const filed = f.requests.filter(({ path }) => path.endsWith('/approvals'));
+  assert.equal(filed.length, 1);
+  assert.equal(filed[0].body.tool, 'mcp__vera-crm__approve_order');
+  assert.match(filed[0].body.summary, /vera-crm/);
+  assert.ok(f.requests.some(({ path, body }) => path.endsWith('/report') && body.body === 'done'));
+});
+
+test('Claude Code in strict mode: even a read-only MCP tool waits for the room, and a denial reaches the agent', async (t) => {
+  let answer;
+  const launch = (project, prompt, session, notify, approver) => ({
+    completed: (async () => {
+      answer = await (await fetch(approver.url, {
+        method: 'POST', headers: { authorization: 'Bearer ' + approver.secret },
+        body: JSON.stringify({ tool_name: 'mcp__vera-crm__search_orders', input: {} }),
+      })).json();
+      return { result: 'stopped' };
+    })(),
+    cancel() {},
+  });
+  const f = await fixture(t, 'claude-code', { launch, approvalStatus: 'denied', policies: { p1: { mode: 'strict' } } });
+  f.wake(1, 'Look up orders');
+  const link = f.make();
+  await link.poll(undefined, 0);
+  await link.runNext();
+  assert.equal(answer.behavior, 'deny');
+  assert.match(answer.message, /command room/);
+  assert.equal(f.requests.filter(({ path }) => path.endsWith('/approvals')).length, 1);
 });

@@ -1,6 +1,9 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { realpathSync, statSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { dirname, isAbsolute, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { runCodexTurn } from './codex-app-server.mjs';
 
@@ -56,11 +59,35 @@ export function launchCodexWithApprovals(project, prompt, session, notify, appro
   return { completed, cancel: () => controller.abort() };
 }
 
-export function launchAgent(project, prompt, session, notify) {
+const PERMISSION_TOOL = join(dirname(fileURLToPath(import.meta.url)), 'permission-mcp.mjs');
+
+/**
+ * Claude Code's permission hook: a one-off MCP config with Link's permission tool, pointed at this task's loopback
+ * approver. The config file holds no token, only the local address and the task's secret, and is removed afterwards.
+ */
+function permissionArgs(approver) {
+  if (!approver) return { args: [], cleanup: () => {} };
+  const file = join(tmpdir(), `superagent-link-permissions-${randomUUID()}.json`);
+  writeFileSync(file, JSON.stringify({
+    mcpServers: {
+      superagent_link: {
+        command: process.execPath, args: [PERMISSION_TOOL],
+        env: { SUPERAGENT_APPROVER_URL: approver.url, SUPERAGENT_APPROVER_SECRET: approver.secret },
+      },
+    },
+  }), { mode: 0o600 });
+  return {
+    args: ['--mcp-config', file, '--permission-prompt-tool', 'mcp__superagent_link__approve'],
+    cleanup: () => { try { rmSync(file, { force: true }); } catch { /* temp file */ } },
+  };
+}
+
+export function launchAgent(project, prompt, session, notify, approver = null) {
   const codex = project.agent === 'codex';
+  const permissions = codex ? { args: [], cleanup: () => {} } : permissionArgs(approver);
   const args = codex
     ? ['exec', '--json', ...(session ? ['resume', session] : []), '-']
-    : ['--print', '--output-format', 'stream-json', '--verbose', ...(session ? ['--resume', session] : [])];
+    : ['--print', '--output-format', 'stream-json', '--verbose', ...permissions.args, ...(session ? ['--resume', session] : [])];
   const child = spawnAgent(project, args);
   let result = '';
   let errorText = '';
@@ -90,6 +117,7 @@ export function launchAgent(project, prompt, session, notify) {
   child.stdin.on('error', () => {}); // Early CLI exit can close the pipe before the prompt is written.
   child.stdin.end(prompt);
   const completed = new Promise((resolve) => {
+    child.once('close', permissions.cleanup);
     child.once('error', () => resolve({ failure: 'Agent CLI could not be started.' }));
     child.once('close', (code) => {
       if (cancelled) resolve({ cancelled: true });

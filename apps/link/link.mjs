@@ -1,9 +1,24 @@
 import { readFileSync, statSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createServer } from 'node:http';
 import { basename, dirname, isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { launchAgent, launchCodexWithApprovals, projectDirectory } from './agent.mjs';
+import { DEFAULT_POLICY, cleanPolicy, decide, describe, parseMcpList } from './policy.mjs';
+import { execFile } from 'node:child_process';
+
+/** What a person needs to judge a request, within the room's size limit: long strings (a whole file) are cut. */
+function approvalInput(input) {
+  const short = (value, depth = 0) => {
+    if (typeof value === 'string') return value.length > 800 ? value.slice(0, 800) + '…' : value;
+    if (Array.isArray(value)) return depth > 3 ? '…' : value.slice(0, 20).map((item) => short(item, depth + 1));
+    if (value && typeof value === 'object') return depth > 3 ? '…' : Object.fromEntries(Object.entries(value).slice(0, 30).map(([k, v]) => [k, short(v, depth + 1)]));
+    return value;
+  };
+  const trimmed = short(input && typeof input === 'object' ? input : {});
+  return JSON.stringify(trimmed).length <= 12_000 ? trimmed : { note: 'Input too large to show; see the task on the computer.' };
+}
 
 const IDLE_ERROR_DELAY_MS = 2_000;
 const FIRST_POLL_RETRY_MS = 1_000;
@@ -70,6 +85,26 @@ export class WorkerLink {
     };
   }
 
+  /** MCP servers Claude Code has here, refreshed at start and hourly (the health check takes a few seconds). */
+  #mcpServers = null;
+  #mcpCheckedAt = 0;
+
+  #refreshMcpServers() {
+    if (Date.now() - this.#mcpCheckedAt < 60 * 60_000) return;
+    this.#mcpCheckedAt = Date.now();
+    const entry = [...this.#projects.entries()].find(([, project]) => project.agent === 'claude-code');
+    if (!entry) return;
+    let project;
+    try { project = projectDirectory(this.#projects, entry[0]); } catch { return; }
+    const command = project.executable.endsWith('.js') || project.executable.endsWith('.mjs') ? process.execPath : project.executable;
+    const argv = command === process.execPath ? [project.executable, 'mcp', 'list'] : ['mcp', 'list'];
+    const env = { ...process.env };
+    delete env.SUPERAGENT_WORKER_TOKEN;
+    execFile(command, argv, { cwd: project.directory, env, timeout: 60_000, windowsHide: true }, (error, stdout) => {
+      if (!error || stdout) this.#mcpServers = parseMcpList(stdout);
+    });
+  }
+
   #capabilities() {
     const projects = [];
     for (const [id, project] of this.#projects) {
@@ -81,7 +116,8 @@ export class WorkerLink {
         // A moved folder or executable cannot receive new work until it is available again.
       }
     }
-    return { projects, agents: [...new Set(projects.map(project => project.agent))] };
+    this.#refreshMcpServers();
+    return { projects, agents: [...new Set(projects.map(project => project.agent))], ...(this.#mcpServers ? { mcpServers: this.#mcpServers } : {}) };
   }
 
   #save() {
@@ -114,14 +150,16 @@ export class WorkerLink {
     return this.#api('/room-tasks/' + encodeURIComponent(job.id) + '/' + kind, { body }, AbortSignal.timeout(10_000));
   }
 
+  /** A Codex App Server request ({ kind }) or a Claude Code tool call ({ tool, input, summary }) for the room to decide. */
   async #approve(job, request, signal) {
-    const summary = {
+    const codex = typeof request.kind === 'string';
+    const summary = codex ? {
       command: 'Codex requests permission to run a command.',
       file_change: 'Codex requests permission to change files.',
       network_access: 'Codex requests permission to access the network.',
-    }[request.kind];
+    }[request.kind] : request.summary;
     const { approval } = await this.#api('/approvals', {
-      roomTaskId: job.id, tool: 'codex.' + request.kind, input: request, summary,
+      roomTaskId: job.id, tool: codex ? 'codex.' + request.kind : request.tool, input: codex ? request : approvalInput(request.input), summary,
     }, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
     const deadline = typeof approval.expiresAt === 'number' ? approval.expiresAt : Date.parse(approval.expiresAt);
     if (!Number.isFinite(deadline) || typeof approval.id !== 'string') return 'deny';
@@ -139,6 +177,56 @@ export class WorkerLink {
       }
     }
     return 'deny';
+  }
+
+  /** This employee's authorisation on this computer, read fresh for each task; the default when it cannot be read. */
+  async #policy(job) {
+    try {
+      const { policies } = await this.#api('/permissions', {}, AbortSignal.timeout(10_000));
+      return cleanPolicy(policies?.[job.projectId]);
+    } catch {
+      return { ...DEFAULT_POLICY };
+    }
+  }
+
+  /**
+   * The loopback endpoint Claude Code's permission tool calls for this task. It answers from the policy, and passes
+   * the requests the policy says to ask about to the command room. Only this task's secret is accepted.
+   */
+  async #approver(job, policy, signal) {
+    const secret = randomBytes(32).toString('hex');
+    const seen = new Set();
+    const expected = Buffer.from('Bearer ' + secret);
+    const server = createServer(async (req, res) => {
+      const reply = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+      const given = Buffer.from(String(req.headers.authorization ?? ''));
+      if (req.method !== 'POST' || req.url !== '/approve') return reply(404, {});
+      if (given.length !== expected.length || !timingSafeEqual(given, expected)) return reply(401, {});
+      let raw = '';
+      for await (const chunk of req) { raw += chunk; if (raw.length > 256_000) return reply(413, {}); }
+      let body;
+      try { body = JSON.parse(raw); } catch { return reply(400, {}); }
+      const tool = String(body?.tool_name ?? '').slice(0, 128);
+      const input = body?.input && typeof body.input === 'object' ? body.input : {};
+      if (tool) seen.add(tool);
+      const decision = decide(policy, tool);
+      if (decision === 'allow') return reply(200, { behavior: 'allow' });
+      if (decision === 'deny') return reply(200, { behavior: 'deny', message: 'This action is not allowed on this computer (authorisation settings).' });
+      const answer = await this.#approve(job, { tool, input, summary: describe(tool, input) }, signal).catch(() => 'deny');
+      reply(200, answer === 'allow'
+        ? { behavior: 'allow' }
+        : { behavior: 'deny', message: 'Not approved in the command room (denied or timed out). Report this and stop.' });
+    });
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+    const { port } = server.address();
+    return {
+      url: `http://127.0.0.1:${port}/approve`, secret,
+      close: () => {
+        server.close();
+        // The tools this task asked about appear in the room's tool list, each with its own switch.
+        if (seen.size) void this.#api('/permissions/seen', { projectId: job.projectId, tools: [...seen] }, AbortSignal.timeout(10_000)).catch(() => {});
+      },
+    };
   }
 
   #wake(event) {
@@ -202,6 +290,8 @@ export class WorkerLink {
         return;
       }
       if (job.status === 'cancelled' || signal?.aborted) return;
+      let approver = null;
+      let approvals = null;
       try {
         const project = projectDirectory(this.#projects, job.projectId);
         const progressMessages = new Set();
@@ -217,9 +307,14 @@ export class WorkerLink {
             void this.#update(job, 'progress', event.progress).catch(() => {});
           }
         };
+        // Claude Code asks through Link's permission tool: the employee's mode decides, the room answers the rest.
+        if (project.agent === 'claude-code') {
+          approvals = new AbortController();
+          approver = await this.#approver(job, await this.#policy(job), approvals.signal);
+        }
         const process = project.agent === 'codex' && project.approvals === 'room'
           ? this.#launchWithApprovals(project, job.prompt, job.session, notify, (request, signal) => this.#approve(job, request, signal))
-          : this.#launch(project, job.prompt, job.session, notify);
+          : this.#launch(project, job.prompt, job.session, notify, approver);
         this.#active = { job, process };
         this.#onTask(true);
         void this.#api('/heartbeat', { busy: true, waitingAuthReason: null }, AbortSignal.timeout(10_000)).catch(() => {});
@@ -230,6 +325,8 @@ export class WorkerLink {
         if (this.#storageFailure) throw this.#storageFailure;
         job.outcome = { failure: 'Project directory or local agent is unavailable.' };
       } finally {
+        approvals?.abort();
+        approver?.close();
         if (this.#active) this.#onTask(false);
         this.#active = null;
       }
