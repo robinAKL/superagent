@@ -5,6 +5,7 @@ import { employeesState } from '../employees/index.js';
 import { queueRoomDispatch, resolveRoomDispatch, workersState } from '../workers/index.js';
 import { linkMayBeOnline, linkOnline } from '../workers/presence.js';
 import type { PlatformSource, RoomBrain, RoomBrainInput } from './brain.js';
+import { isGreeting, smallTalkReply } from './intent.js';
 import { CommandRoom, roomHooks, type EmployeeRef, type EmployeeSource, type RoomSnapshot, type Viewer } from './room.js';
 
 roomHooks.linkMayBeOnline = (employeeId) => linkMayBeOnline(employeeId, workersState.now());
@@ -177,7 +178,9 @@ export const roomModule: FastifyPluginAsync = async (app) => {
     const room = roomState.current;
     // A question about a numbered task is answered from the task, not read by the model.
     const aboutTask = !body.followupTo && !room.namesEmployee(body.body) ? room.answerAboutTask(body.body, viewer, body.roomId) : null;
-    const think = aboutTask === null && roomBrain !== null && !body.followupTo && !room.hasClientMessage(body.roomId, body.clientMessageId) && !room.namesEmployee(body.body);
+    // Greetings, thanks and "测试，请忽略" get a fixed short reply: the model would answer what came before them.
+    const smallTalk = isGreeting(body.body) || smallTalkReply(body.body) !== null;
+    const think = aboutTask === null && !smallTalk && roomBrain !== null && !body.followupTo && !room.hasClientMessage(body.roomId, body.clientMessageId) && !room.namesEmployee(body.body);
 
     /** Send a task Super Agent created to the employee's computer, as an @mention would. */
     const dispatch = async (task: import('./room.js').RoomTask | null) => {
