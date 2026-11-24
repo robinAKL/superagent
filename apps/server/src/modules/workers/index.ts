@@ -187,7 +187,9 @@ export async function queueRoomDispatch(task: RoomTask, target: { workerId: stri
  * bound computer can take it (it then stays assigned, and the heartbeat re-dispatch picks it up later).
  */
 export async function retryRoomDispatch(task: RoomTask): Promise<boolean> {
-  const target = await resolveRoomDispatch(task, null);
+  // A task made under a binding that has since been replaced still names the old project: the employee's one
+  // current binding is where it works now.
+  const target = await resolveRoomDispatch(task, null) ?? (task.projectId ? await resolveRoomDispatch({ ...task, projectId: null }, null) : undefined);
   if (!target) return false;
   task.projectId = target.projectId;
   await workersState.registry.releaseRoomDispatch(task.tenantId, task.id);
