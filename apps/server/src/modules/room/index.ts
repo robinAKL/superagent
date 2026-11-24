@@ -233,19 +233,21 @@ export const roomModule: FastifyPluginAsync = async (app) => {
 （来自 ${source?.name ?? 'MCP'}）`
               : `我查了 ${source?.name ?? 'MCP'}，没有找到能回答这个问题的数据。` };
           } catch (error) {
-            req.log.warn({ err: error }, 'room lookup failed');
-            understood = { answer: `我去 ${source?.name ?? 'MCP'} 查了，但这次没有拿到结果。可以稍后再试，或到「企业知识 → 知识来源」检查连接。` };
+            const reason = error instanceof Error ? error.message : String(error);
+            const code = (error as { code?: unknown } | null)?.code;
+            console.warn(`room lookup failed (${typeof code === 'string' ? code : 'error'}): ${reason}`);
+            understood = { answer: `我去 ${source?.name ?? 'MCP'} 查了，但这次没有拿到结果（${reason.slice(0, 120)}）。可以再问一次，或到「企业知识 → 知识来源」检查连接。` };
           }
         } else {
           understood = decision;
         }
       } catch (error) {
-        req.log.warn({ err: error }, 'room brain failed; using fixed rules');
+        console.warn(`room brain failed; using fixed rules: ${error instanceof Error ? error.message : String(error)}`);
       }
       // The room in effect now (it may have been reloaded meanwhile) gives the answer, with the same checks as ever.
       const answered = roomState.current.answerDeferred(posted.message.id, understood);
       if (answered) await dispatch(answered.task);
-    })().catch((error: unknown) => req.log.error({ err: error }, 'room deferred answer failed'));
+    })().catch((error: unknown) => console.error(`room deferred answer failed: ${error instanceof Error ? error.message : String(error)}`));
     return { ...posted, awaiting: true };
   });
 

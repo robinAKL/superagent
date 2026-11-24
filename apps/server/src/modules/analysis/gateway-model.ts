@@ -5,7 +5,7 @@ import type { AnalysisModel } from './service.js';
 /** Structural contract with the platform gateway; this module has no provider credentials or direct HTTP fallback. */
 export interface AnalysisGateway {
   check(tenantId: string, tier: 'primary'): Promise<{ ok: true; model: string } | { ok: false; code: string }>;
-  chat(tenantId: string, tier: 'primary', req: { messages: ChatMessage[]; maxOutputTokens: number; taskId?: string }): Promise<ChatResponse>;
+  chat(tenantId: string, tier: 'primary', req: { messages: ChatMessage[]; maxOutputTokens: number; taskId?: string; effort?: 'low' }): Promise<ChatResponse>;
 }
 const setupMessages: Record<string, string> = {
   llm_not_configured: '请在设置中配置模型供应商并选择主模型。',

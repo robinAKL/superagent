@@ -43,6 +43,8 @@ export interface ChatRequest {
   tools?: ToolSpec[];
   maxOutputTokens: number; // required: budget reservation is bounded by this (PRD §3.1)
   taskId?: string;
+  /** 'low' asks a reasoning model to think less (faster, cheaper); models without reasoning ignore it. */
+  effort?: 'low';
 }
 
 export interface ChatResponse {

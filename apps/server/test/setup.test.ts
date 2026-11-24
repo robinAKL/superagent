@@ -4,7 +4,7 @@ import { setupModule } from '../src/modules/setup/index.js';
 import { activateKey, InMemoryConfigRepo, publicView, revokeKey, StaticAllowlist, testKey, type SetupDeps } from '../src/modules/setup/service.js';
 import { InMemorySecretStore, redact } from '../src/modules/setup/secrets.js';
 import { InMemoryBudgetStore, maxBillableMicroUsd, actualMicroUsd, SettlementRefused, type Price } from '../src/modules/setup/budget.js';
-import type { FetchLike } from '../src/modules/setup/providers.js';
+import { createProvider, type FetchLike } from '../src/modules/setup/providers.js';
 
 const GOOD = 'sk-ant-test-GOODKEY1234';
 const BAD = 'sk-ant-test-BADKEY99999';
@@ -209,4 +209,18 @@ describe('redaction', () => {
   it('redacts key-like strings', () => {
     expect(redact(`failed with ${GOOD}`)).not.toContain('GOODKEY1234');
   });
+});
+
+it('asks a reasoning model to think less only when the caller wants it quick, and never sends that to other models', async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const fetchFn: FetchLike = async (_url, init) => {
+    bodies.push(JSON.parse(String(init.body)));
+    return Response.json({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } });
+  };
+  const provider = createProvider({ provider: 'openai', apiKey: 'k' }, fetchFn);
+  const ask = (model: string, effort?: 'low') => provider.chat({ model, maxOutputTokens: 100, messages: [{ role: 'user', content: 'hi' }], ...(effort ? { effort } : {}) });
+  await ask('gpt-5-mini', 'low');
+  await ask('gpt-5-mini');
+  await ask('gpt-4o', 'low');
+  expect(bodies.map((body) => body.reasoning_effort)).toEqual(['low', undefined, undefined]);
 });

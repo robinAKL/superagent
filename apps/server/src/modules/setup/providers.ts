@@ -93,6 +93,8 @@ function openai(cfg: ProviderConfig, fetchFn: FetchLike, base: string, auth: Rec
         model: req.model,
         max_completion_tokens: req.maxOutputTokens,
         ...(setupModelPrice(id, req.model) ? { service_tier: 'default' } : {}),
+        // Only reasoning models accept reasoning_effort; sending it to others is a 400.
+        ...(!cfg.probeReasoningEffort && req.effort && /^(gpt-5|o\d)/i.test(req.model) ? { reasoning_effort: req.effort } : {}),
         ...(cfg.probeReasoningEffort ? {
           reasoning_effort: cfg.probeReasoningEffort,
           ...(req.tools?.length === 1 ? { tool_choice: { type: 'function', function: { name: req.tools[0]!.name } }, parallel_tool_calls: false } : {}),

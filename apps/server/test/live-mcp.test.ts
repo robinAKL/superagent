@@ -9,6 +9,7 @@ import { InMemorySecretStore } from '../src/modules/setup/secrets.js';
 import { tickKnowledge } from '../src/modules/knowledge/worker.js';
 import { GatewayAnalysisModel, type AnalysisGateway } from '../src/modules/analysis/gateway-model.js';
 import type { Evidence } from '../src/modules/knowledge/domain.js';
+import { answerFromMcp } from '../src/modules/knowledge/mcp-answer.js';
 
 const endpoint = 'https://data.example.com/api/mcp';
 const issuer = 'https://authorization.example.com/tenant';
@@ -298,6 +299,19 @@ it('discovers OAuth on a different host and lets the Brain read knowledge under 
     expect(ask.json()).toMatchObject({ answer: 'Verify receipt first. [1]', sources: [{ number: 1, locator: 'get_crm_guide' }] });
     expect(chat.mock.calls[1]?.[2].messages[1].content).toContain('Verify receipt before recording a deposit');
     expect(usedTools).toEqual(['get_crm_guide']);
+
+    // The command room asks quickly; an unusable plan is asked for once more before giving up.
+    const reply = (text: string) => ({ text, toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'end' });
+    chat.mockResolvedValueOnce(reply('Let me look at the catalog first.'))
+      .mockResolvedValueOnce(reply('[{"name":"get_crm_guide","arguments":{}}]'))
+      .mockResolvedValueOnce(reply('Verify receipt first. [1]'));
+    const before = chat.mock.calls.length;
+    const quick = await answerFromMcp({ tenantId: 'test', userId: 'alice', roles: ['employee'], projectScopes: [] }, hash(endpoint), 'How do I record a deposit?', liveMcp, gateway, { quick: true });
+    expect(quick.answer).toBe('Verify receipt first. [1]');
+    const calls = chat.mock.calls.slice(before);
+    expect(calls).toHaveLength(3);
+    expect(calls.every((call) => call[2].effort === 'low')).toBe(true);
+    expect(calls[1]![2].messages[0]!.content).toContain('could not be used');
     const mcp = await send(root + '/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/list' });
     expect(mcp.json().result.tools).toContainEqual(expect.objectContaining({ name: 'read_mcp_knowledge' }));
 
@@ -320,7 +334,7 @@ it('discovers OAuth on a different host and lets the Brain read knowledge under 
     expect(overview.mcpRecommendations[0].evidence[0]).toMatchObject({
       locator: 'VERA CRM / get_crm_guide', quote: expect.stringContaining('Verify receipt before recording a deposit.'),
     });
-    expect(usedTools).toEqual(['get_crm_guide', 'get_crm_guide']);
+    expect(usedTools).toEqual(['get_crm_guide', 'get_crm_guide', 'get_crm_guide']) // ask, quick ask, analysis;
 
     await app.inject({ method: 'DELETE', url: connection, headers: { 'x-dev-user': 'alice|employee|' } });
     expect((await send(connection + '/catalog')).statusCode).toBe(404);

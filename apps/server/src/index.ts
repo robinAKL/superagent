@@ -28,7 +28,7 @@ if (role === 'web') {
   const longwork = createLongWorkDeps(runtime);
   bindRoomBrain(gatewayBrain(runtime.llm, undefined, (why) => console.warn(`room brain: ${why}; using fixed rules`)), knowledge.liveMcp ? {
     sources: async (user) => (await knowledge.liveMcp!.sources(user)).map(({ id, name, endpoint }) => ({ id, name, endpoint })),
-    ask: (user, sourceId, question) => answerFromMcp(user, sourceId, question, knowledge.liveMcp!, runtime.llm),
+    ask: (user, sourceId, question) => answerFromMcp(user, sourceId, question, knowledge.liveMcp!, runtime.llm, { quick: true }),
   } : null);
   let roomHydrated = !runtime.pool;
   let sopHydrated = !runtime.pool;
