@@ -80,3 +80,24 @@ it('"进行中的任务怎么还没完成" is answered from the board, after Sup
   expect(asked).toBe(0);
   bindRoomBrain(null);
 });
+
+it('a resumed task made under an old binding goes to the employee’s current binding', async () => {
+  resetWorkers();
+  bindRoomStore(null);
+  bindRoomBrain(null);
+  const employee: EmployeeRef = { id: employeeId, name: 'Analyst', ownerUserId: 'analyst-user', status: 'paused' };
+  roomState.current = createCommandRoom(() => [employee]);
+  const { token } = await registerWorker(workersState.registry, {
+    tenantId, name: 'Link', kind: 'link', createdBy: 'owner', capabilities: { roomAssignments: [{ projectId: 'project-new', employeeId }] },
+  }, Date.now());
+  const app = Fastify();
+  app.addHook('preHandler', async (request) => { request.user = { tenantId, userId: 'owner', roles: ['owner'], projectScopes: [] }; });
+  await app.register(roomModule, { prefix: '/room' });
+  await app.register(workerLinkModule, { prefix: '/link' });
+  const task = (await app.inject({ method: 'POST', url: '/room/messages', payload: { roomId: 'room-1', body: '@Analyst 列出项目文件', clientMessageId: 'c1' } })).json().task;
+  roomState.current.listTasks({ userId: 'owner', roles: ['owner'], projectScopes: [] }).find((item) => item.id === task.id)!.projectId = 'project-old';
+  employee.status = 'active';
+  await superviseRoom();
+  const events = (await app.inject({ method: 'POST', url: '/link/poll', headers: { authorization: 'Bearer ' + token }, payload: { waitMs: 0 } })).json().events;
+  expect(events.map((event: { payload: Record<string, unknown> }) => event.payload)).toEqual([{ roomTaskId: task.id, projectId: 'project-new', prompt: '列出项目文件', attempt: 1 }]);
+});
