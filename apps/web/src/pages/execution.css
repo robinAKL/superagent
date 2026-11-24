@@ -513,7 +513,7 @@
 .room .room-task-group.is-done .outcome-message-card { font-size: 13px; }
 
 /* The room fits the window: a slim setup line, and the three columns take the rest; only the conversation, the task
-   list and the task detail scroll. Very short windows (under 560px) let the page scroll instead of crushing them. */
+   list and the task detail scroll. */
 .room .getting-started.is-compact { margin-bottom: 0; padding: var(--space-xs) var(--space-md); }
 .room .getting-started.is-compact .getting-started-head h2 { font-size: 14px; }
 .getting-started-next { margin-right: auto; display: inline-flex; align-items: center; gap: var(--space-sm); color: var(--color-muted); font-size: 13px; }
@@ -521,9 +521,11 @@
   .exec-room .exec-grid { flex: 1; min-height: 0; }
   .room .room-tasks.panel, .room .room-chat.panel, .room .room-agents, .room .exec-drawer { min-height: 0; }
 }
-@media (min-width: 801px) and (max-height: 560px) {
-  .exec-room { height: auto; }
-  .exec-room .exec-grid { flex: none; height: 400px; }
+/* Never a page scrollbar on a desktop: the room is exactly the window, however short, and nothing inside it (a hidden
+   label, a long list) can push the page taller. The columns scroll on their own. */
+@media (min-width: 801px) {
+  .exec-room { position: relative; overflow: clip; }
+  .room .room-tasks, .room .exec-pane { position: relative; }
 }
 
 /* Scrolling areas contain what is positioned inside them: a screen-reader-only label (absolute) in a long task list
