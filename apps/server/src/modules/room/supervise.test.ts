@@ -147,7 +147,7 @@ it('"重试" from a person resets the count and sends the open tasks again', () 
   const { retry, skipped } = s.room.retryRequested(owner, 'room-1', [Number(made.id.replace('task_', '')), 999]);
   assert.equal(retry.length, 1);
   assert.deepEqual(skipped, ['T-999']);
-  assert.match(s.room.retried(retry[0]!, true)!.body, /按你的要求/);
+  assert.match(s.room.retried(retry[0]!, true)!.body, /已重新派给 @运营员工/);
   assert.equal(s.task(made.id).watch?.attempts, 1);
   assert.equal(s.room.retryRequested(owner, 'room-1', 'all').retry.length, 1);
 });

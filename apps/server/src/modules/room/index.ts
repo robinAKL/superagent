@@ -75,12 +75,14 @@ async function supervisePass(): Promise<number> {
 async function sendAgain(retry: import('./room.js').RetryRequest[]): Promise<number> {
   let said = 0;
   for (const request of retry) {
-    let sent = false;
-    try { sent = await retryRoomDispatch(request.task); } catch (error) { console.warn(`room retry dispatch failed: ${error instanceof Error ? error.message : String(error)}`); }
-    if (roomState.current.retried(request, sent)) said++;
+    if (roomState.current.retried(request, await dispatchAgain(request))) said++;
   }
   if (retry.length) await flushRoom();
   return said;
+}
+
+async function dispatchAgain(request: import('./room.js').RetryRequest): Promise<boolean> {
+  try { return await retryRoomDispatch(request.task); } catch (error) { console.warn(`room retry dispatch failed: ${error instanceof Error ? error.message : String(error)}`); return false; }
 }
 /** One pass at a time: a call while a pass runs shares it. */
 export function superviseRoom(): Promise<number> {
@@ -225,9 +227,9 @@ export const roomModule: FastifyPluginAsync = async (app) => {
     const retryAsk = !body.followupTo && !room.namesEmployee(body.body) ? asksRetry(body.body) : null;
     if (aboutTask === null && retryAsk && !room.hasClientMessage(body.roomId, body.clientMessageId)) {
       const { retry, skipped } = room.retryRequested(viewer, body.roomId, retryAsk);
-      const before = room.eventsAfter(body.roomId, 0, viewer).length;
-      await sendAgain(retry);
-      const notes = roomState.current.eventsAfter(body.roomId, 0, viewer).slice(before).map((message) => message.body);
+      // Told once, in the reply under the person's message, not as separate lines posted before it.
+      const notes: string[] = [];
+      for (const request of retry) notes.push(roomState.current.retriedForReply(request, await dispatchAgain(request)));
       aboutTask = [
         retry.length ? `好的，开始重试 ${retry.length} 个任务：` : '没有可以重试的未完成任务。',
         ...notes.map((note) => `- ${note}`),

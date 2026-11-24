@@ -742,15 +742,31 @@ export class CommandRoom {
    * hears why, as a reminder (so at most every two hours).
    */
   retried(request: RetryRequest, sent: boolean): RoomMessage | null {
+    const note = this.retryNote(request, sent, false);
+    if (!note) return null;
+    const { task } = request;
+    const employee = this.employees().find((item) => item.id === task.employeeId);
+    return this.push({
+      roomId: task.roomId, tenantId: task.tenantId, authorUserId: 'super-agent', body: note.body,
+      clientMessageId: `watch:${task.id}:${this.seq + 1}`, mentions: employee ? [employee.id] : [], taskIds: [task.id], kind: note.kind,
+    });
+  }
+
+  /**
+   * The same outcome as retried(), told in Super Agent's reply to the person who asked instead of as its own message
+   * (so the room reads: their request, then one answer). Always says why when it could not send.
+   */
+  retriedForReply(request: RetryRequest, sent: boolean): string {
+    return this.retryNote(request, sent, true)!.body;
+  }
+
+  private retryNote(request: RetryRequest, sent: boolean, asked: boolean): { body: string; kind: MessageKind } | null {
     const { task, body } = request;
     const at = this.now().toISOString();
     const employee = this.employees().find((item) => item.id === task.employeeId);
     const watch = task.watch ?? { state: '', since: at, attempts: 0, nudges: 0, lastNudgeAt: null };
     task.watch = watch;
-    const post = (text: string, kind: MessageKind) => this.push({
-      roomId: task.roomId, tenantId: task.tenantId, authorUserId: 'super-agent', body: text,
-      clientMessageId: `watch:${task.id}:${this.seq + 1}`, mentions: employee ? [employee.id] : [], taskIds: [task.id], kind,
-    });
+    const post = (text: string, kind: MessageKind) => ({ body: text, kind });
     if (sent) {
       task.status = 'assigned';
       task.waitingReason = null;
@@ -762,9 +778,11 @@ export class CommandRoom {
       watch.lastNudgeAt = null;
       return post(body, 'resume');
     }
-    if (watch.lastNudgeAt && this.now().getTime() - new Date(watch.lastNudgeAt).getTime() < NUDGE_EVERY) return null;
-    watch.nudges += 1;
-    watch.lastNudgeAt = at;
+    if (!asked) {
+      if (watch.lastNudgeAt && this.now().getTime() - new Date(watch.lastNudgeAt).getTime() < NUDGE_EVERY) return null;
+      watch.nudges += 1;
+      watch.lastNudgeAt = at;
+    }
     return post(`${taskCode(task)}「${task.title}」现在没有电脑能接：@${employee?.name ?? '数字员工'} 没有绑定到唯一的一台电脑和项目。请到「管理设置 → 已连接的电脑」检查绑定，绑好后我会自动派出。`, 'nudge');
   }
 
@@ -784,7 +802,7 @@ export class CommandRoom {
       if (!OPEN.has(task.status) || task.approval !== 'none' || task.hold) continue;
       if (!isOwner(viewer) && task.createdByUserId !== viewer.userId) continue;
       if (task.watch) task.watch.attempts = 0;
-      retry.push({ task, body: `按你的要求，我把 ${taskCode(task)}「${task.title}」重新派给 @${this.employees().find((item) => item.id === task.employeeId)?.name ?? '数字员工'}（同一个任务，没有新建）。` });
+      retry.push({ task, body: `${taskCode(task)}「${task.title}」已重新派给 @${this.employees().find((item) => item.id === task.employeeId)?.name ?? '数字员工'}（同一个任务，没有新建）。` });
     }
     return { retry, skipped };
   }
