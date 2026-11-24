@@ -125,6 +125,8 @@ export async function resolveRoomDispatch(task: RoomTask, projectScopes: readonl
  * Sends every open, undispatched room task of this employee to its now-bound computer. A task already dispatched
  * keeps its device: appendEvent refuses a second dispatch for the same room task.
  */
+const lastRedispatch = new Map<string, number>();
+
 export async function dispatchWaitingRoomTasks(tenantId: string, employeeId: string): Promise<number> {
   let sent = 0;
   for (const task of roomState.current.dispatchableTasks(tenantId, employeeId)) {
@@ -407,7 +409,18 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     if (!(await workersState.registry.heartbeat(worker.id, now, input))) return reply.code(401).send({ error: 'bad_worker_token' });
     const fresh = await workersState.registry.get(worker.tenantId, worker.id);
     // The employees bound to this computer are reachable now (shown as online in the command room).
-    if (fresh && fresh.revokedAt === null) markLinkPresence((fresh.capabilities.roomAssignments ?? []).map(binding => binding.employeeId), now);
+    if (fresh && fresh.revokedAt === null) {
+      const employeeIds = [...new Set((fresh.capabilities.roomAssignments ?? []).map(binding => binding.employeeId))];
+      markLinkPresence(employeeIds, now);
+      // Tasks that waited for this employee's computer (made while it was offline, or sent to one revoked since)
+      // go out now. At most once a minute per employee; a task already with this computer is not sent twice.
+      for (const employeeId of employeeIds) {
+        const key = `${fresh.tenantId}:${employeeId}`;
+        if ((lastRedispatch.get(key) ?? 0) > now - 60_000) continue;
+        lastRedispatch.set(key, now);
+        void dispatchWaitingRoomTasks(fresh.tenantId, employeeId).catch((error: unknown) => req.log.warn({ err: error }, 'room re-dispatch failed'));
+      }
+    }
     return { status: fresh ? workerStatus(fresh, now) : 'revoked', at: now, capabilities: fresh?.capabilities ?? worker.capabilities };
   });
 

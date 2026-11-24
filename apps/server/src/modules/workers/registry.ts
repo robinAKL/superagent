@@ -278,6 +278,9 @@ export class MemoryWorkerRegistry implements WorkerRegistry {
     const row = this.rows.get(workerId);
     if (!row || row.tenantId !== tenantId || row.revokedAt !== null) return null;
     const dispatchKey = roomTaskId ? JSON.stringify([tenantId, roomTaskId]) : null;
+    const earlier = dispatchKey ? this.roomDispatches.get(dispatchKey) : undefined;
+    // A dispatch to a computer revoked since never ran there: the current computer may take the task.
+    if (earlier && this.rows.get(earlier.workerId)?.revokedAt !== null) this.roomDispatches.delete(dispatchKey!);
     if (dispatchKey && this.roomDispatches.has(dispatchKey)) return null;
     const seq = this.events.filter((e) => e.workerId === workerId).length + 1;
     const event: WorkerEvent = { seq, workerId, kind, payload: structuredClone(payload), createdBy, createdAt: at };
