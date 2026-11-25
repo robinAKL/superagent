@@ -42,8 +42,10 @@ input, select { min-height: var(--control); border-radius: var(--radius-sm); bor
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .helper { margin: 0; font-size: 13px; color: var(--color-muted); }
 .warn { margin: 0; color: var(--color-warning); font-size: 14px; }
-.tool-list { list-style: none; display: grid; gap: var(--space-sm); padding: 0; margin: 0 0 var(--space-sm); }
-.tool-list > li { display: grid; gap: var(--space-xs); }
+.tool-list { list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); padding: 0; margin: 0 0 var(--space-sm); }
+.tool-list > li { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-xs); min-width: 0; }
+/* A long tool name wraps inside its button instead of widening the whole list past the screen. */
+.tool-list > li .btn { white-space: normal; overflow-wrap: anywhere; text-align: left; height: auto; min-height: var(--control); }
 .steps { list-style: none; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--space-xs); padding: 0; margin: 0; }
 .steps li { display: grid; gap: 2px; border-top: 3px solid var(--color-rule); padding-top: var(--space-xs); font-size: 13px; color: var(--color-subtle); }
 .steps li.done { border-color: var(--color-success); color: var(--color-ink); }
@@ -288,6 +290,9 @@ button, input, select, textarea { font-family: inherit; }
 /* Phones: the top bar is two rows (brand with language and sign-out, then the menu), and the room puts the
    conversation first: members are the avatars in the room head, so the member strip and its links step aside. */
 @media (max-width: 560px) {
+  .topbar { padding-inline: var(--space-md); column-gap: var(--space-xs); }
+  .topbar .product { padding-left: var(--space-xs); font-size: 13px; }
+  .topnav { margin: 0 calc(-1 * var(--space-md)); padding: 0 var(--space-md) var(--space-2xs); }
   .topbar-end { margin-left: auto; gap: var(--space-2xs); }
   .topbar-end .who > span:first-child { display: none; }
   .topbar-end .who .btn { padding-inline: var(--space-xs); }
@@ -315,3 +320,11 @@ button, input, select, textarea { font-family: inherit; }
 .local-client > p { grid-column: 1 / -1; margin: 0; }
 .local-client-name { font-weight: 600; font-size: 14px; }
 @media (max-width: 560px) { .local-client { grid-template-columns: 1fr auto; } .local-client .btn { grid-column: 1 / -1; } }
+
+/* Phones: the capability list reads as one block per capability (name, then who provides it) instead of a table
+   wider than the screen. */
+@media (max-width: 560px) {
+  .emp-feedback .data-table tr { display: grid; gap: 2px; padding: var(--space-xs) 0; }
+  .emp-feedback .data-table td { display: block; padding: 0; border: 0; }
+  .emp-feedback .data-table td.num { text-align: left; color: var(--color-muted); font-size: 12px; }
+}
