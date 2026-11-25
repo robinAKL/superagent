@@ -32,7 +32,7 @@ export async function startScheduledRun(schedule: Schedule, occurrence: Occurren
   const employee = room.roster(SYSTEM).find((item) => item.id === schedule.employeeId);
   if (!employee) return { taskId: null, note: '负责的数字员工已不存在，请重新指派。', status: 'no_employee' as const };
   const posted = room.post({
-    roomId: SCHEDULE_ROOM_ID, tenantId: schedule.tenantId, authorUserId: SYSTEM.userId, authorRoles: SYSTEM.roles,
+    roomId: SCHEDULE_ROOM_ID, tenantId: schedule.tenantId, authorUserId: SYSTEM.userId, authorRoles: SYSTEM.roles, systemWork: true,
     body: `按日历启动「${schedule.title}」（${describeRule(schedule.rule)}），交给 @${employee.name}。`,
     clientMessageId: `schedule:${schedule.id}:${occurrence.stamp}`,
     understood: { employeeId: employee.id, work: `按日历执行业务流程「${schedule.title}」（${occurrence.stamp.replace('T', ' ')}）：\n${schedule.work}`.slice(0, 4000) },

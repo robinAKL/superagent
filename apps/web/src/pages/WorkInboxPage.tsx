@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { MailDrafts } from './MailDrafts';
 import './execution.css';
 import { api } from '../api';
 import { useT } from '../i18n';
@@ -258,6 +259,7 @@ export function WorkInboxPage() {
   }
 
   // Nothing at all to do: one sentence and one way forward. Filters, counts and toolbars appear once there is work.
+  const [mailDrafts, setMailDrafts] = useState(0);
   const nothing = items !== null && items.length === 0 && !failed;
   const groupLabel = (id: Group) => t(id === 'action' ? 'group_action' : id === 'waiting' ? 'group_waiting' : 'group_internal');
   return (
@@ -271,6 +273,7 @@ export function WorkInboxPage() {
           {t('filtersToggle')}{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
         </button>}
       </header>
+      <MailDrafts onCount={setMailDrafts} />
       {nothing ? null : <div className={`exec-toolbar inbox-toolbar ${filtersOpen ? 'is-open' : ''}`}>
         <div className="inbox-segmented" role="group" aria-label={t('status')}>
           <button type="button" className="chip" aria-pressed={group === 'all'} onClick={() => setGroup('all')}>{t('grouped')}<span className="chip-n" aria-hidden="true">{(items ?? []).length}</span></button>
@@ -318,7 +321,7 @@ export function WorkInboxPage() {
             {items !== null && !nothing ? <div className="work-summary" aria-label={t('summaryAria')}>
               <p>{t('summary', { approvals: approvalCount(items), tools: toolsAwaitingPublish(toolStages), all: items.length })}</p>
             </div> : null}
-            {items !== null && visible.length === 0 ? <div className="room-tasks-empty" role="status">
+            {items !== null && visible.length === 0 && !(nothing && mailDrafts > 0) ? <div className="room-tasks-empty" role="status">
               <strong>{t('emptyTitle')}</strong>
               <p className="helper">{t('emptyBody')}</p>
               {nothing ? <a className="btn" href="#room">{t('openRoom')}</a>

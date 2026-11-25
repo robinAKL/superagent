@@ -9,7 +9,9 @@ import { bindWorkersDb, startPgListener } from './modules/workers/index.js';
 import { bindAccounts } from './modules/accounts/index.js';
 import { bindScheduleStore, startScheduleTimer } from './modules/schedules/index.js';
 import { PgScheduleStore } from './modules/schedules/pg-schedules.js';
-import { PgAccountStore } from './modules/accounts/pg-accounts.js';
+import { PgAccountStore, PgMailDraftStore } from './modules/accounts/pg-accounts.js';
+import { mailState, startMailPoller } from './modules/accounts/mail.js';
+import { accountsState } from './modules/accounts/index.js';
 import { microsoftProvider } from './modules/accounts/microsoft.js';
 import { bindSopStore, hydrateSop } from './modules/sop/index.js';
 import { bindGatewayStore, hydrateGateway } from './modules/gateway/index.js';
@@ -46,7 +48,7 @@ if (role === 'web') {
   let inboxHydrated = !runtime.pool;
   let executionHydrated = !runtime.pool;
   // Super Agent manages the board on a timer; with a database it starts once the room is loaded.
-  if (!runtime.pool) { startRoomSupervisor(); startScheduleTimer(); bindAccounts({ secrets: runtime.app.setupDeps.secrets, provider: accountProvider() }); }
+  if (!runtime.pool) { startRoomSupervisor(); startScheduleTimer(); startMailPoller(() => accountsState.current); bindAccounts({ secrets: runtime.app.setupDeps.secrets, provider: accountProvider() }); }
   if (runtime.pool) {
     // T-41: command-room rows, the task queue, and published SOP versions share one PostgreSQL.
     const pool = runtime.pool;
@@ -54,6 +56,7 @@ if (role === 'web') {
     bindRoomStore(db);
     bindRuntimeDb(db);
     bindScheduleStore(new PgScheduleStore(db));
+    mailState.drafts = new PgMailDraftStore(db);
     bindAccounts({ store: new PgAccountStore(db), secrets: runtime.app.setupDeps.secrets, provider: accountProvider() });
     bindWorkersDb({
       ...db,
@@ -80,7 +83,7 @@ if (role === 'web') {
     bindInboxStore(db);
     bindExecutionStore(db);
     // Never crash the web role on an unreachable database: retry in the background and stay not-ready until done.
-    const hydrate = () => hydrateRoom().then(() => { roomHydrated = true; startRoomSupervisor(); startScheduleTimer(); }, (e: unknown) => {
+    const hydrate = () => hydrateRoom().then(() => { roomHydrated = true; startRoomSupervisor(); startScheduleTimer(); startMailPoller(() => accountsState.current); }, (e: unknown) => {
       console.log(JSON.stringify({ msg: 'room hydration failed; retrying', error: e instanceof Error ? e.message : String(e) }));
       setTimeout(hydrate, 5000).unref();
     });

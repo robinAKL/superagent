@@ -133,6 +133,11 @@ export interface PostInput {
   understood?: { employeeId: string; work: string } | { answer: string } | null;
   /** Store the message now and answer later through answerDeferred() (Super Agent is still reading it). */
   defer?: boolean;
+  /**
+   * Work Super Agent started itself (a scheduled workflow, incoming mail). Anything it sends out is gated where it is
+   * sent (a mailbox's sending rule), so the task needs no approval of its own. Never set from a person's message.
+   */
+  systemWork?: boolean;
 }
 
 const OPEN: ReadonlySet<TaskStatus> = new Set<TaskStatus>(['assigned', 'running', 'waiting']);
@@ -391,7 +396,7 @@ export class CommandRoom {
     if (isGreeting(work) || !/[\p{L}\p{N}]/u.test(work)) {
       return noTask(`已看到 @${mentions.map((item) => item.name).join(' @')}，这条还不是明确的工作请求。`);
     }
-    if (needsParameters(work)) {
+    if (!input.systemWork && needsParameters(work)) {
       return noTask('这是对外动作。请先补充具体对象（收件人或单号）、内容和依据，我再交给数字员工。');
     }
 
@@ -418,10 +423,10 @@ export class CommandRoom {
         modelTier: employee.modelTier ?? null,
         takenAt: this.now().toISOString(),
       },
-      approval: isExternalAction(work) ? 'required' : 'none',
+      approval: !input.systemWork && isExternalAction(work) ? 'required' : 'none',
       reviewedByUserId: null,
       // A draft is unsent from the moment it exists. Nothing is marked done until a person reports it.
-      evidence: work.includes('草稿') ? { fields: { subject: null, body: null }, sent: false } : null,
+      evidence: !input.systemWork && work.includes('草稿') ? { fields: { subject: null, body: null }, sent: false } : null,
       verification: 'none',
       inputSupplement: null,
       hold: null,
@@ -1072,6 +1077,16 @@ export class CommandRoom {
       cursor = index + 1 + match.alias.length;
     }
     return { mentions: [...mentions.values()], work: workText(text + body.slice(cursor)) };
+  }
+
+  /** One message from Super Agent (a note from the mail or calendar automation). Posting the same id again returns the first. */
+  announce(input: { roomId: string; tenantId: string; body: string; clientMessageId: string; taskIds?: string[]; mentions?: string[]; kind?: MessageKind }): RoomMessage {
+    const prior = this.byClientId.get(`${input.roomId}:${input.clientMessageId}`);
+    if (prior) return prior;
+    return this.push({
+      roomId: input.roomId, tenantId: input.tenantId, authorUserId: 'super-agent', body: input.body, clientMessageId: input.clientMessageId,
+      mentions: input.mentions ?? [], taskIds: input.taskIds ?? [], kind: input.kind ?? 'reply',
+    });
   }
 
   private push(input: Omit<RoomMessage, 'id' | 'seq'>): RoomMessage {
