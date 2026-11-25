@@ -39,7 +39,7 @@ async function fixture(t, agent = 'codex', options = {}) {
   if (options.launchWithApprovals) config.projects.p1.approvals = 'room';
   const events = [];
   const requests = [];
-  const control = { refuseDispatch: false, pollFailures: 0, authAgents: [] };
+  const control = { refuseDispatch: false, pollFailures: 0, authAgents: [], mcpLogins: [] };
   const fetcher = async (url, init) => {
     const path = url.pathname;
     const body = JSON.parse(init.body);
@@ -64,6 +64,7 @@ async function fixture(t, agent = 'codex', options = {}) {
     make: () => new WorkerLink(config, 'test-token', {
       fetcher, launch: options.launch, launchWithApprovals: options.launchWithApprovals,
       sleep: options.sleep, renameState: options.renameState, onAuth: (agent) => control.authAgents.push(agent),
+      onMcpLogin: (server) => control.mcpLogins.push(server),
     }),
     args: async () => (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse),
     state: async () => JSON.parse(await readFile(stateFile, 'utf8')),
@@ -72,6 +73,7 @@ async function fixture(t, agent = 'codex', options = {}) {
     requests, control,
     wake: (seq, prompt, projectId = 'p1', attempt) => events.push({ seq, kind: 'wake', payload: { roomTaskId: 'task1', projectId, prompt, ...(attempt ? { attempt } : {}) } }),
     cancel: (seq) => events.push({ seq, kind: 'cancel', payload: { roomTaskId: 'task1' } }),
+    mcpLogin: (seq, server) => events.push({ seq, kind: 'mcp_login', payload: { server } }),
   };
 }
 
@@ -370,4 +372,14 @@ test('Claude Code in strict mode: even a read-only MCP tool waits for the room, 
   assert.equal(answer.behavior, 'deny');
   assert.match(answer.message, /command room/);
   assert.equal(f.requests.filter(({ path }) => path.endsWith('/approvals')).length, 1);
+});
+
+test('an MCP sign-in asked from the command room reaches the tray once, by server name; a malformed name is ignored', async (t) => {
+  const f = await fixture(t);
+  f.mcpLogin(1, 'vera-crm');
+  f.mcpLogin(2, 'bad name; rm -rf');
+  const link = f.make();
+  await link.poll(undefined, 0);
+  await link.poll(undefined, 0);
+  assert.deepEqual(f.control.mcpLogins, ['vera-crm']);
 });

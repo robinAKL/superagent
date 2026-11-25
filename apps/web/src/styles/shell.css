@@ -294,3 +294,13 @@ button, input, select, textarea { font-family: inherit; }
   .room .room-agents { display: none; }
   .room .room-head h1 { font-size: 20px; }
 }
+
+/* An MCP connection that needs signing in: what it blocks, one button, then numbered steps (no command line). */
+.mcp-signin { display: grid; gap: var(--space-xs); margin-bottom: var(--space-sm); }
+.mcp-signin-item { padding: var(--space-sm) var(--space-md); border-radius: 10px; border: 1px solid color-mix(in srgb, var(--color-warning) 45%, var(--color-rule));
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent); display: grid; gap: var(--space-xs); }
+.mcp-signin-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-xs) var(--space-sm); font-size: 14px; }
+.mcp-signin-steps { display: grid; gap: 4px; font-size: 13px; }
+.mcp-signin-steps ol { margin: 0; padding-left: 20px; display: grid; gap: 2px; }
+.mcp-signin-steps p { margin: 0; }
+.mcp-signin-back { margin: 0; color: var(--color-success); font-size: 14px; }

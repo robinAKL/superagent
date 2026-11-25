@@ -465,6 +465,10 @@ namespace SuperAgentLinkTray
             {
                 BeginReauth(line.Substring("LINK_AUTH:".Length).Trim());
             }
+            else if (line.StartsWith("LINK_MCP_LOGIN:", StringComparison.Ordinal))
+            {
+                OpenMcpLogin(line.Substring("LINK_MCP_LOGIN:".Length).Trim());
+            }
         }
 
         private static string AgentLabel(string agent)
@@ -500,6 +504,69 @@ namespace SuperAgentLinkTray
             }
             catch (Exception ex) { Log("Could not read link-runtime.json: " + ex.Message); }
             return null;
+        }
+
+        /** The folder of the first project that uses this agent: project-scoped MCP servers are found from there. */
+        private string AgentDirectory(string agent)
+        {
+            try
+            {
+                var path = Path.Combine(_dataDir, "link-runtime.json");
+                if (!File.Exists(path)) return null;
+                var config = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
+                object raw;
+                var projects = config != null && config.TryGetValue("projects", out raw) ? raw as Dictionary<string, object> : null;
+                if (projects == null) return null;
+                foreach (var entry in projects.Values)
+                {
+                    var project = entry as Dictionary<string, object>;
+                    object configuredAgent, directory;
+                    if (project != null && project.TryGetValue("agent", out configuredAgent) && agent.Equals(configuredAgent)
+                        && project.TryGetValue("directory", out directory) && directory is string && Directory.Exists((string)directory))
+                        return (string)directory;
+                }
+            }
+            catch (Exception ex) { Log("Could not read link-runtime.json: " + ex.Message); }
+            return null;
+        }
+
+        /**
+         * The command room asked to sign an MCP server in again. Open Claude Code's MCP list in a window on this
+         * computer; the person picks the server and signs in in their browser. Accounts and passwords are theirs alone.
+         */
+        private void OpenMcpLogin(string server)
+        {
+            if (_exiting || string.IsNullOrEmpty(server)) return;
+            var executable = AgentExecutable("claude-code");
+            if (string.IsNullOrEmpty(executable) || !File.Exists(executable))
+            {
+                Notify(server + " 需要重新登录", "没有找到 Claude Code。请在托盘菜单选择「配置本地 Agent」。", ToolTipIcon.Warning);
+                return;
+            }
+            try
+            {
+                var start = new ProcessStartInfo { UseShellExecute = true };
+                if (executable.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
+                {
+                    start.FileName = _nodeExe;
+                    start.Arguments = "\"" + executable + "\" /mcp";
+                }
+                else
+                {
+                    start.FileName = executable;
+                    start.Arguments = "/mcp";
+                }
+                var directory = AgentDirectory("claude-code");
+                if (directory != null) start.WorkingDirectory = directory;
+                Process.Start(start);
+                Log("Opened the MCP sign-in for " + server + ".");
+                Notify("请登录 " + server, "已打开 Claude Code 的连接列表：用上下键选中 " + server + "，按回车，选 Authenticate，再在浏览器里登录并同意。", ToolTipIcon.Info);
+            }
+            catch (Exception ex)
+            {
+                Log("Could not open the MCP sign-in: " + ex.Message);
+                Notify(server + " 需要重新登录", "没能自动打开登录窗口。请回到指挥室，按提示操作。", ToolTipIcon.Warning);
+            }
         }
 
         private void Notify(string title, string text, ToolTipIcon icon)

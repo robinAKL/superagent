@@ -8,6 +8,7 @@ import { WorkerApprovals } from './WorkerApprovals';
 import { Icon } from '../components/Icon';
 import { RichText } from '../components/RichText';
 import { GettingStarted } from '../components/GettingStarted';
+import { McpSignIn } from './McpSignIn';
 
 /**
  * Command room (PRD §3.7), layout and copy from the accepted v12 prototype. Everything on the page comes from the
@@ -896,6 +897,8 @@ export function CommandRoomPage() {
       </div>
       {viewer?.owner ? <>
         <GettingStarted compact />
+        {/* A connection on an employee's computer that needs signing in: one click opens it there, steps follow. */}
+        <McpSignIn />
         {flowsOpen ? (
           <div className="room-sheet-backdrop" onClick={(event) => { if (event.target === event.currentTarget) setFlowsOpen(false); }}>
             <aside id="room-flows" className="room-sheet" role="dialog" aria-modal="true" aria-label={t('业务流程')}

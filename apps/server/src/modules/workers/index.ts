@@ -27,6 +27,7 @@ import {
   workerStatus,
   type WorkerKind,
   type WorkerRecord,
+  type McpServerInfo,
   type WorkerRegistry,
 } from './registry.js';
 import {
@@ -158,6 +159,33 @@ export async function resolveRoomDispatch(task: RoomTask, projectScopes: readonl
  * keeps its device: appendEvent refuses a second dispatch for the same room task.
  */
 const lastRedispatch = new Map<string, number>();
+const lastMcpLogin = new Map<string, number>();
+
+/**
+ * An MCP server on a computer that stops or starts working is said once in the command room: when it needs signing
+ * in (tasks that use it cannot run) and when it is back. At most once a day per server and state.
+ */
+export async function announceMcpChanges(device: WorkerRecord, before: McpServerInfo[] | undefined, after: McpServerInfo[] | undefined, now: number): Promise<void> {
+  if (!after || device.kind !== 'link') return;
+  const employees = new Set((device.capabilities.roomAssignments ?? []).map((binding) => binding.employeeId));
+  if (!employees.size) return;
+  const day = new Date(now).toISOString().slice(0, 10);
+  let said = false;
+  for (const server of after) {
+    const was = before?.find((item) => item.name === server.name)?.status;
+    if (server.status === was) continue;
+    const body = server.status === 'needs_auth'
+      ? `${device.name} 上的 ${server.name} 需要重新登录，用到它的任务现在做不了。点指挥室上方提示里的「在电脑上打开登录」，按提示完成登录即可。`
+      : server.status === 'connected' && was === 'needs_auth' ? `${device.name} 上的 ${server.name} 已重新连上。` : null;
+    if (!body) continue;
+    roomState.current.announce({
+      roomId: 'room-1', tenantId: device.tenantId, body, kind: server.status === 'connected' ? 'reply' : 'nudge',
+      clientMessageId: `mcp:${device.id}:${server.name}:${server.status}:${day}`, mentions: [...employees],
+    });
+    said = true;
+  }
+  if (said) await flushRoom();
+}
 
 export async function dispatchWaitingRoomTasks(tenantId: string, employeeId: string): Promise<number> {
   let sent = 0;
@@ -274,6 +302,28 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     const now = workersState.now();
     const workers = (await workersState.registry.list(user.tenantId)).filter(worker => mayManage(user, worker));
     return { workers: workers.map((w) => toView(w, now)) };
+  });
+
+  /**
+   * "在电脑上打开登录": an MCP server on this computer needs signing in again. Link opens the sign-in window there, for
+   * the person at the computer to finish (accounts and passwords are theirs alone). The command room watches the
+   * status come back through the heartbeat.
+   */
+  app.post('/:id/mcp-login', SELF, async (req, reply) => {
+    const user = req.user!;
+    const { id } = req.params as { id: string };
+    if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
+    const device = await workersState.registry.get(user.tenantId, id);
+    if (!device || device.revokedAt !== null || device.kind !== 'link' || !mayManage(user, device)) return reply.code(404).send({ error: 'not_found' });
+    const server = (req.body as { server?: unknown } | undefined)?.server;
+    const known = (device.capabilities.mcpServers ?? []).find((item) => item.name === server);
+    if (typeof server !== 'string' || !known) return reply.code(400).send({ error: 'unknown_server', message: '这台电脑上没有这个连接。' });
+    if (known.status === 'connected') return { opened: false, connected: true };
+    const key = `${id}:${server}`;
+    if ((lastMcpLogin.get(key) ?? 0) > workersState.now() - 60_000) return { opened: true, again: false };
+    lastMcpLogin.set(key, workersState.now());
+    await workersState.registry.appendEvent(user.tenantId, id, 'mcp_login', { server }, user.userId, workersState.now());
+    return { opened: true };
   });
 
   /** Address an instruction to one worker. It is delivered on the worker's next poll, however long it was away. */
@@ -521,6 +571,9 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     const worker = req.worker!;
     if (body.capabilities && typeof body.capabilities === 'object') {
       const { agents, projects, mcpServers } = cleanCapabilities(body.capabilities);
+      if (mcpServers && worker.kind === 'link') {
+        await announceMcpChanges(worker, worker.capabilities.mcpServers, mcpServers, now).catch((error: unknown) => console.warn(`mcp announce failed: ${error instanceof Error ? error.message : String(error)}`));
+      }
       if (agents || (projects && worker.kind === 'link') || (mcpServers && worker.kind === 'link')) {
         await workersState.registry.patchCapabilities(worker.tenantId, worker.id, {
           ...(agents ? { agents } : {}), ...(worker.kind === 'link' && projects ? { projects } : {}),
