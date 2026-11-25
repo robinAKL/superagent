@@ -44,7 +44,7 @@ export interface PermissionPolicy {
   seen?: string[];
 }
 /** An MCP server Claude Code has on this computer, as `claude mcp list` reports it. */
-export interface McpServerInfo { name: string; status: 'connected' | 'needs_auth' | 'failed' | 'unknown' }
+export interface McpServerInfo { name: string; status: 'connected' | 'needs_auth' | 'failed' | 'unknown'; tools?: string[] }
 const MCP_STATUS = new Set(['connected', 'needs_auth', 'failed', 'unknown']);
 export const PERMISSION_MODES: readonly PermissionMode[] = ['strict', 'standard', 'full'];
 const TOOL_NAME = /^[A-Za-z0-9_.:*-]{1,128}$/;
@@ -238,9 +238,10 @@ export function cleanCapabilities(value: unknown): WorkerCapabilities {
   }
   if (Array.isArray(raw.mcpServers)) {
     out.mcpServers = raw.mcpServers.flatMap((entry: unknown) => {
-      const { name, status } = (entry && typeof entry === 'object' ? entry : {}) as Partial<McpServerInfo>;
+      const { name, status, tools } = (entry && typeof entry === 'object' ? entry : {}) as Partial<McpServerInfo>;
+      const names = Array.isArray(tools) ? [...new Set(tools.filter((tool): tool is string => typeof tool === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(tool)))].slice(0, 200) : null;
       return typeof name === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(name) && MCP_STATUS.has(String(status))
-        ? [{ name, status: status as McpServerInfo['status'] }] : [];
+        ? [{ name, status: status as McpServerInfo['status'], ...(names ? { tools: names } : {}) }] : [];
     }).slice(0, 32);
   }
   if (kinds) out.kinds = kinds;

@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { decide, describe, mcpKind } from './policy.mjs';
+import { decide, describe, mcpKind, mcpToolsByServer } from './policy.mjs';
 
 test('three modes: what runs, what asks', () => {
   const table = {
@@ -97,4 +97,11 @@ test('a switch on Bash or Edit covers the whole group', () => {
   assert.equal(decide(policy, 'PowerShell'), 'allow');
   assert.equal(decide(policy, 'Write'), 'deny');
   assert.equal(decide({ mode: 'standard', rules: { Bash: 'allow', PowerShell: 'ask' } }, 'PowerShell'), 'ask');
+});
+
+test('MCP tools by server: names cleaned, duplicates once, Link’s own permission tool left out', () => {
+  assert.deepEqual(mcpToolsByServer(['Read', 'mcp__vera-crm__list_invoices', 'mcp__vera-crm__list_invoices', 'mcp__vera-crm__approve_order', 'mcp__superagent_link__approve', 'mcp__a b__c/d', 42]), {
+    'vera-crm': ['list_invoices', 'approve_order'], a_b: ['c_d'],
+  });
+  assert.deepEqual(mcpToolsByServer(undefined), {});
 });

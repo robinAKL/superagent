@@ -99,6 +99,8 @@ export function launchAgent(project, prompt, session, notify, approver = null) {
     if (item.type === 'thread.started' || (item.type === 'system' && item.subtype === 'init')) {
       const id = item.thread_id ?? item.session_id;
       if (typeof id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(id)) notify({ session: id });
+      // The tools this agent has here, MCP tools included ("mcp__vera-crm__approve_order"): reported to the room.
+      if (Array.isArray(item.tools)) notify({ tools: item.tools.filter((tool) => typeof tool === 'string') });
     }
     if (item.type === 'item.completed' && item.item?.type === 'agent_message' && typeof item.item.text === 'string') {
       result = item.item.text.slice(0, RESULT_LIMIT);

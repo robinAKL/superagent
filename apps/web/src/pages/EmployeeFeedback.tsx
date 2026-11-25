@@ -118,27 +118,32 @@ export function groupCapabilities(tools: readonly { name: string }[]): { name: s
 }
 
 /** The MCP servers connected on these employees' computers, with the tools their tasks have already used there. */
-export function mcpSources(devices: readonly LinkDevice[], employees: ReadonlySet<string>): { server: string; device: string; used: Set<string> }[] {
-  const result: { server: string; device: string; used: Set<string> }[] = [];
+export interface McpSource { server: string; device: string; used: Set<string>; tools: string[] | null }
+
+export function mcpSources(devices: readonly LinkDevice[], employees: ReadonlySet<string>): McpSource[] {
+  const result: McpSource[] = [];
   for (const device of devices) {
     if (!(device.capabilities.roomAssignments ?? []).some(assignment => employees.has(assignment.employeeId))) continue;
     const used = new Set(Object.entries(device.capabilities.permissions ?? {}).filter(([id]) => employees.has(id)).flatMap(([, policy]) => policy.seen ?? []));
     for (const server of device.capabilities.mcpServers ?? []) {
-      if (server.status === 'connected') result.push({ server: server.name, device: device.name, used });
+      if (server.status === 'connected') result.push({ server: server.name, device: device.name, used, tools: server.tools ?? null });
     }
   }
   return result;
 }
 
 /**
- * Which connected MCP server provides a requested capability: one whose tool of that name a task already used, or
- * else one named for the capability's system ("CRM" -> "vera-crm").
+ * Which connected MCP server provides a requested capability. A server whose tool list the computer reported is
+ * matched by tool name only. Without a list: a tool of that name a task already used there, or else a server named
+ * for the capability's system ("CRM" -> "vera-crm").
  */
-export function providerOf(group: { name: string; systems: string[] }, sources: readonly { server: string; device: string; used: Set<string> }[]): { server: string; device: string } | null {
+export function providerOf(group: { name: string; systems: string[] }, sources: readonly McpSource[]): { server: string; device: string } | null {
   const tool = group.name.trim().toLowerCase();
+  const listed = sources.find(source => source.tools?.some(name => name.toLowerCase() === tool));
+  if (listed) return { server: listed.server, device: listed.device };
   const used = sources.find(source => [...source.used].some(name => name.toLowerCase() === `mcp__${source.server.toLowerCase()}__${tool}`));
   if (used) return { server: used.server, device: used.device };
-  const named = sources.find(source => group.systems.some(system => system.trim().length >= 2 && source.server.toLowerCase().includes(system.trim().toLowerCase())));
+  const named = sources.find(source => !source.tools && group.systems.some(system => system.trim().length >= 2 && source.server.toLowerCase().includes(system.trim().toLowerCase())));
   return named ? { server: named.server, device: named.device } : null;
 }
 

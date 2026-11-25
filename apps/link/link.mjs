@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { basename, dirname, isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { launchAgent, launchCodexWithApprovals, projectDirectory } from './agent.mjs';
-import { DEFAULT_POLICY, cleanPolicy, decide, describe, parseMcpList } from './policy.mjs';
+import { DEFAULT_POLICY, cleanPolicy, decide, describe, mcpToolsByServer, parseMcpList } from './policy.mjs';
 import { execFile } from 'node:child_process';
 
 /** What a person needs to judge a request, within the room's size limit: long strings (a whole file) are cut. */
@@ -18,6 +18,19 @@ function approvalInput(input) {
   };
   const trimmed = short(input && typeof input === 'object' ? input : {});
   return JSON.stringify(trimmed).length <= 12_000 ? trimmed : { note: 'Input too large to show; see the task on the computer.' };
+}
+
+/**
+ * `claude mcp list` (name and health) joined with the tools the last run actually had. A server that served tools in
+ * that run but is missing from the list (a claude.ai connector) was connected then.
+ */
+export function withMcpTools(servers, tools) {
+  if (!servers && !tools) return null;
+  const out = (servers ?? []).map((server) => (tools?.[server.name] ? { ...server, tools: tools[server.name] } : server));
+  for (const [name, list] of Object.entries(tools ?? {})) {
+    if (!out.some((server) => server.name === name) && out.length < 32) out.push({ name, status: 'connected', tools: list });
+  }
+  return out;
 }
 
 const IDLE_ERROR_DELAY_MS = 2_000;
@@ -117,7 +130,8 @@ export class WorkerLink {
       }
     }
     this.#refreshMcpServers();
-    return { projects, agents: [...new Set(projects.map(project => project.agent))], ...(this.#mcpServers ? { mcpServers: this.#mcpServers } : {}) };
+    const mcpServers = withMcpTools(this.#mcpServers, this.#state.mcpTools);
+    return { projects, agents: [...new Set(projects.map(project => project.agent))], ...(mcpServers ? { mcpServers } : {}) };
   }
 
   #save() {
@@ -311,6 +325,11 @@ export class WorkerLink {
             job.session = event.session;
             sessionWrite = this.#save();
             void sessionWrite.catch(() => this.#active?.process.cancel());
+          }
+          if (event.tools) {
+            // The latest run's tool list is what this computer offers its employees now.
+            this.#state.mcpTools = mcpToolsByServer(event.tools);
+            void this.#save().catch(() => {});
           }
           if (event.progress && !progressMessages.has(event.progress)) {
             progressMessages.add(event.progress);
