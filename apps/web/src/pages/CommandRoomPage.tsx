@@ -869,7 +869,7 @@ export function CommandRoomPage() {
         {/* The conversation's filters sit on the title row, so the conversation keeps that height. */}
         {messages.length > 0 ? (
           <div className="room-filters" role="toolbar" aria-label={t('筛选对话')}>
-            {([['all', '全部'], ['tasks', '任务'], ['reports', '交付'], ['progress', '进度'], ['mine', '我发的']] as const).map(([key, label]) => (
+            {([['all', '全部'], ['tasks', '任务消息'], ['reports', '交付'], ['progress', '进度'], ['mine', '我发的']] as const).map(([key, label]) => (
               key !== 'all' && streamCounts[key] === 0 ? null : (
                 <button key={key} type="button" className="room-chip" aria-pressed={streamFilter === key} data-filter={key} onClick={() => setStreamFilter(key)}>
                   {t(label)}{key !== 'all' ? <span>{streamCounts[key]}</span> : null}
