@@ -331,7 +331,7 @@ test('an employee sees and assigns only their own digital employee; drafts stay 
 
   // the owner leaves an unsent draft
   await as(page, OWNER);
-  await expect(page.locator('.topnav a')).toHaveCount(5);
+  await expect(page.locator('.topnav a')).toHaveCount(6);
   // UX plan step 5: the owner's header has 业务流程; super agent setup moved under 管理设置.
   await expect(page.locator('.room-head-actions').getByRole('button', { name: '业务流程' })).toBeVisible();
   await draft(page).fill('负责人私有草稿');
@@ -340,7 +340,7 @@ test('an employee sees and assigns only their own digital employee; drafts stay 
   await as(page, staffHeader(staff));
   await expect(draft(page)).toHaveValue(''); // the owner's draft does not follow the identity
   await expect(page.locator('a[href="#brain"]')).toHaveCount(0); // no super-agent configuration for an employee
-  await expect(page.locator('.topnav a')).toHaveCount(2); // 指挥室 and 待我处理 only
+  await expect(page.locator('.topnav a')).toHaveCount(3); // 指挥室, 待我处理 and 日历 only
   await expect(page.locator('.page-head h1')).toHaveText('指挥室');
 
   // their own task is there; the other employee's work is nowhere on the page

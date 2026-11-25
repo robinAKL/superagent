@@ -26,7 +26,7 @@ const TEXT = {
   en: {
     title: 'Settings', lead: 'The company, the model and its budget, computers and the audit trail, in the order they are set up.', companyLink: 'Company profile and boundaries',
     tabRun: 'Runtime settings', tabAudit: 'Audit log', tabArch: 'Architecture',
-    sectionsNav: 'Settings sections', secCompany: 'Company', secModel: 'Model and usage', secComputers: 'Computers', secAccounts: 'My mail and calendar', secDanger: 'Danger zone',
+    sectionsNav: 'Settings sections', secCompany: 'Company', secModel: 'Model and usage', secComputers: 'Computers', secAccounts: 'My mailbox', secDanger: 'Danger zone',
     auditLead: 'Append-only events. Secrets and source text are never shown.',
     auditEmpty: 'No model-configuration events on this page yet. Status above is the current runtime setting.',
     auditStatus: 'Current model status',
@@ -77,7 +77,7 @@ const TEXT = {
   zh: {
     title: '管理设置', lead: '企业信息、模型与用量、电脑和审计，按设置的先后排列。', companyLink: '企业信息与工作边界',
     tabRun: '运行设置', tabAudit: '审计记录', tabArch: '架构说明',
-    sectionsNav: '设置分区', secCompany: '企业', secModel: '模型与用量', secComputers: '电脑', secAccounts: '我的邮件与日历', secDanger: '危险区',
+    sectionsNav: '设置分区', secCompany: '企业', secModel: '模型与用量', secComputers: '电脑', secAccounts: '我的邮箱', secDanger: '危险区',
     auditLead: '只追加、不可改。密钥和原文不会出现在这里。',
     auditEmpty: '本页还没有列出模型配置事件。上方状态就是当前运行设置。',
     auditStatus: '当前模型状态',

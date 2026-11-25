@@ -106,3 +106,37 @@ it('retries a confirmed output limit once through the budget gateway with fewer 
   {maxOutputTokens:16384,limit:'at most 8 distinct drafts',taskId:'r'},
  ]);
 });
+
+it('a cadence the sources state becomes the workflow’s schedule, cited; an uncited or malformed one is dropped and the workflow kept', async () => {
+  const excerpts = [
+    { sourceId: 'manual', version: 'v1', start: 0, end: 10, locator: 'Ops#L1', quote: '每周一上午 9 点汇总上周订单' },
+    { sourceId: 'manual', version: 'v1', start: 11, end: 20, locator: 'Ops#L2', quote: '销售经理审阅周报' },
+  ];
+  const workflow: Record<string, unknown> = {
+    steps: [
+      { key: 'monday', kind: 'trigger', label: '每周一 9 点', after: [], citations: [1] },
+      { key: 'report', kind: 'employee', label: '汇总上周订单写周报', after: ['monday'], citations: [2] },
+      { key: 'review', kind: 'human_review', label: '销售经理审阅', after: ['report'], citations: [2] },
+    ],
+    schedule: { freq: 'weekly', weekdays: [1], time: '09:00', citation: 1 },
+  };
+  const proposal = { key: 'weekly-report', kind: 'sop', name: '周报', description: '每周一汇总上周订单。', evidence: [2, 1], workflow };
+  const model = new GatewayAnalysisModel({
+    check: async () => ({ ok: true, model: 'test' }),
+    chat: async (_t, _tier, req) => {
+      expect(req.messages[0]!.content).toContain('workflow.schedule');
+      return { text: JSON.stringify([proposal]), toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'end' };
+    },
+  });
+  const input = { tenantId: 't', runId: 'r', evidence: excerpts, maxOutputTokens: 4096 };
+  let [draft] = validateProposals(await model.recommend(input));
+  // Excerpt 1 is the draft's second piece of evidence.
+  expect(draft?.workflow?.schedule).toEqual({ freq: 'weekly', weekdays: [1], hour: 9, minute: 0, timezone: 'Pacific/Auckland', citation: 2 });
+  workflow.schedule = { freq: 'weekly', weekdays: [1], time: '09:00' };
+  [draft] = validateProposals(await model.recommend(input));
+  expect(draft?.workflow?.schedule).toBeUndefined();
+  expect(draft?.workflow?.steps).toHaveLength(3);
+  workflow.schedule = { freq: 'hourly', citation: 1 };
+  [draft] = validateProposals(await model.recommend(input));
+  expect(draft?.workflow?.schedule).toBeUndefined();
+});

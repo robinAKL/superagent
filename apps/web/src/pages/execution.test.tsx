@@ -143,12 +143,12 @@ describe('execution pages reuse the v12 copy', () => {
     expect(taskActions(task({ status: 'waiting', waitingReason: '等待模型' }), OWNER).resume).toBe(false);
   });
 
-  it('gives an employee-only sign-in the two daily pages and everyone else the full menu', () => {
+  it('gives an employee-only sign-in the daily pages (with the calendar) and everyone else the full menu', () => {
     const ids = (roles: string[] | null) => navFor(roles).flatMap((group) => group.items.map((item) => item.id));
-    expect(ids(['employee'])).toEqual(['room', 'work']);
-    expect(ids(['owner'])).toHaveLength(5);
-    expect(ids(['employee', 'reviewer'])).toHaveLength(5);
-    expect(ids(null)).toHaveLength(5);
+    expect(ids(['employee'])).toEqual(['room', 'work', 'calendar']);
+    expect(ids(['owner'])).toHaveLength(6);
+    expect(ids(['employee', 'reviewer'])).toHaveLength(6);
+    expect(ids(null)).toHaveLength(6);
   });
 
   it('replaces the offline sample with the server list, including an empty inbox', () => {

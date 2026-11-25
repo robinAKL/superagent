@@ -7,12 +7,13 @@ import { authHeaders } from './api';
 import { SuperAgentPage } from './pages/SuperAgentPage';
 import { CommandRoomPage } from './pages/CommandRoomPage';
 import { WorkInboxPage } from './pages/WorkInboxPage';
+import { CalendarPage } from './pages/CalendarPage';
 import { EmployeesPage } from './pages/EmployeesPage';
 import { ConnectComputerPage } from './pages/ConnectComputerPage';
 import { LangSwitch, useT, type Dict } from './i18n';
 
 type NavGroupId = 'daily' | 'build';
-type NavItemId = 'room' | 'work' | 'employees' | 'knowledge' | 'settings';
+type NavItemId = 'room' | 'work' | 'calendar' | 'employees' | 'knowledge' | 'settings';
 type PageId = NavItemId | 'tools' | 'brain' | 'connect';
 type NavItem = { id: NavItemId };
 
@@ -21,14 +22,14 @@ type NavItem = { id: NavItemId };
  * Daily work for everyone; building the team for administrators. The server still decides what each role may call.
  */
 const NAV: { group: NavGroupId; items: NavItem[] }[] = [
-  { group: 'daily', items: [{ id: 'room' }, { id: 'work' }] },
+  { group: 'daily', items: [{ id: 'room' }, { id: 'work' }, { id: 'calendar' }] },
   { group: 'build', items: [{ id: 'employees' }, { id: 'knowledge' }, { id: 'settings' }] },
 ];
 
 /** Pages that left the menu keep their routes and light up the destination they now belong to. */
 // The super agent page now holds workflows, which belong to the team (UX plan step 6); its company profile moved to settings.
 const PARENT: Partial<Record<PageId, NavItemId>> = { tools: 'employees', brain: 'employees' };
-const PAGES: readonly PageId[] = ['room', 'work', 'employees', 'knowledge', 'settings', 'tools', 'brain', 'connect'];
+const PAGES: readonly PageId[] = ['room', 'work', 'calendar', 'employees', 'knowledge', 'settings', 'tools', 'brain', 'connect'];
 
 type ShellKey = `group.${NavGroupId}` | `nav.${NavItemId}` | 'menu' | 'signOut' | 'language' | 'noRole';
 
@@ -38,6 +39,7 @@ const TEXT: Dict<ShellKey> = {
     'group.build': 'Team and setup',
     'nav.room': 'Command room',
     'nav.work': 'My work',
+    'nav.calendar': 'Calendar',
     'nav.employees': 'Digital employees',
     'nav.knowledge': 'Company knowledge',
     'nav.settings': 'Admin settings',
@@ -51,6 +53,7 @@ const TEXT: Dict<ShellKey> = {
     'group.build': '团队与配置',
     'nav.room': '指挥室',
     'nav.work': '待我处理',
+    'nav.calendar': '日历',
     'nav.employees': '数字员工',
     'nav.knowledge': '企业知识',
     'nav.settings': '管理设置',
@@ -123,6 +126,7 @@ export function App({ user = { mode: 'dev' } }: { user?: SignedIn }) {
   const pages: Record<PageId, () => ReactNode> = {
     room: () => <CommandRoomPage />,
     work: () => <WorkInboxPage />,
+    calendar: () => <CalendarPage />,
     employees: () => <EmployeesPage />,
     knowledge: () => <KnowledgePage />,
     settings: () => <SetupPage />,

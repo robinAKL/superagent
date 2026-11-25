@@ -1,10 +1,10 @@
 /** App shell — maps prototype QA: qa-room-header, primary navigation (qa-outcomes "Primary navigation changed"). */
 import { test, expect } from './fixtures.js';
 
-test('owner navigation has 5 entries in 2 groups in the top bar, routed by hash (UX plan step 2)', async ({ page }) => {
+test('owner navigation has 6 entries in 2 groups in the top bar, routed by hash (UX plan step 2)', async ({ page }) => {
   await page.goto('/');
   const nav = page.getByRole('navigation', { name: '主菜单' });
-  await expect(nav.getByRole('group', { name: '日常工作' }).locator('.nav-item')).toHaveText(['指挥室', '待我处理']);
+  await expect(nav.getByRole('group', { name: '日常工作' }).locator('.nav-item')).toHaveText(['指挥室', '待我处理', '日历']);
   await expect(nav.getByRole('group', { name: '团队与配置' }).locator('.nav-item')).toHaveText(['数字员工', '企业知识', '管理设置']);
   await expect(nav.locator('[aria-current="page"]')).toHaveText('指挥室');
   await nav.getByText('管理设置').click();
@@ -18,7 +18,7 @@ test('owner navigation has 5 entries in 2 groups in the top bar, routed by hash 
   await expect(nav.locator('[aria-current="page"]')).toHaveText('数字员工');
 });
 
-const PAGES = ['room', 'work', 'knowledge', 'employees', 'tools', 'brain', 'settings'];
+const PAGES = ['room', 'work', 'calendar', 'knowledge', 'employees', 'tools', 'brain', 'settings'];
 
 test('every page has the same head: title, subtitle under it (not the room), actions top-right', async ({ page, isMobile }) => {
   test.skip(isMobile, 'desktop rule; phones stack the actions under the title');

@@ -24,32 +24,30 @@ export interface Account {
 
 const TEXT = {
   en: {
-    adminTitle: 'My mail and calendar', adminLead: 'Your own Microsoft 365 account. It is how you direct Super Agent: mail you file under “Super Agent” and events in the “Super Agent” calendar become instructions. Digital employees never use it.',
-    employeeTitle: 'Mail and calendar', employeeLead: '{name}’s own mailbox and calendar. Only {name} uses them: new mail becomes its tasks, and events in its “Super Agent” calendar start its scheduled work.',
+    adminTitle: 'My mailbox', adminLead: 'Your own Microsoft 365 account. It is how you direct Super Agent by mail: mail you file under “Super Agent” becomes an instruction. Digital employees never use it. Scheduled workflows are in the Calendar.',
+    employeeTitle: 'Mailbox', employeeLead: '{name}’s own mailbox. Only {name} uses it: new mail can become its tasks, and it sends mail from here. Its scheduled workflows are in the Calendar.',
     connect: 'Connect Microsoft 365', google: 'Google (coming soon)', reconnect: 'Sign in again', disconnect: 'Disconnect',
     adminWho: 'Sign in with your own work account.', employeeWho: 'Sign in with {name}’s own account (for example ops@yourcompany.com), not yours. A shared mailbox cannot sign in; use a licensed mailbox.',
     empty: 'No mailbox connected yet.', notConfigured: 'Microsoft 365 sign-in is not set up on this platform yet. Ask the platform administrator to add the app registration.',
     connected: 'Connected', reauthorize: 'Sign-in expired',
     mailTriggerAdmin: 'Mail in my “Super Agent” folder goes to Super Agent', mailTriggerEmployee: 'New mail becomes a task for {name}',
-    calendarTriggerAdmin: 'Events in my “Super Agent” calendar instruct Super Agent', calendarTriggerEmployee: 'Events in its “Super Agent” calendar start its work',
     sendRule: 'Sending mail', ask: 'Ask me first', allow: 'Send directly', deny: 'Never send',
-    triggersNote: 'Mail and calendar triggers are being rolled out. What you set here takes effect as they arrive.',
+    triggersNote: 'Mail automation is being rolled out. What you set here takes effect when it arrives.',
     confirmDisconnect: 'Disconnect {address}? Super Agent stops using this account, and its sign-in is deleted.',
     working: 'Working…', error: 'That did not work. Try again.', cancelled: 'Sign-in was cancelled.',
     doneAdmin: 'Connected {address}. It belongs to you and controls Super Agent.', doneEmployee: 'Connected {address} for {name}. Only {name} uses it.',
     openEmployees: 'Back to digital employees',
   },
   zh: {
-    adminTitle: '我的邮件与日历', adminLead: '你自己的 Microsoft 365 账号，用来指挥 Super Agent：放进「Super Agent」文件夹的邮件、「Super Agent」日历里的日程，会成为给它的指令。数字员工不会使用它。',
-    employeeTitle: '邮件与日历', employeeLead: '{name} 自己的邮箱和日历，只给 {name} 用：新邮件变成它的任务，它的「Super Agent」日历里的日程会按时启动它的工作。',
+    adminTitle: '我的邮箱', adminLead: '你自己的 Microsoft 365 账号，用邮件指挥 Super Agent：放进「Super Agent」文件夹的邮件会成为给它的指令。数字员工不会使用它。定时流程在「日历」里管理。',
+    employeeTitle: '邮箱', employeeLead: '{name} 自己的邮箱，只给 {name} 用：新邮件可以变成它的任务，它也从这里发邮件。它的定时流程在「日历」里。',
     connect: '连接 Microsoft 365', google: 'Google（即将支持）', reconnect: '重新登录', disconnect: '断开',
     adminWho: '用你自己的工作账号登录。', employeeWho: '用 {name} 自己的账号登录（例如 ops@你的公司.com），不要用你自己的。共享邮箱不能登录，请用有许可证的邮箱。',
     empty: '还没有连接邮箱。', notConfigured: '平台还没有配置 Microsoft 365 登录。请联系平台管理员添加应用注册。',
     connected: '已连接', reauthorize: '登录已失效',
     mailTriggerAdmin: '「Super Agent」文件夹里的邮件交给 Super Agent', mailTriggerEmployee: '新邮件自动变成 {name} 的任务',
-    calendarTriggerAdmin: '「Super Agent」日历里的日程作为给 Super Agent 的指令', calendarTriggerEmployee: '它的「Super Agent」日历里的日程按时启动工作',
     sendRule: '发邮件', ask: '先问我', allow: '直接发', deny: '不允许',
-    triggersNote: '邮件触发和日程触发正在陆续上线，这里的设置会在上线时生效。',
+    triggersNote: '邮件自动化正在陆续上线，这里的设置会在上线时生效。',
     confirmDisconnect: '断开 {address}？Super Agent 将不再使用这个账号，它的登录授权会被删除。',
     working: '处理中…', error: '没有成功，请重试。', cancelled: '登录已取消。',
     doneAdmin: '已连接 {address}。它属于你，用来指挥 Super Agent。', doneEmployee: '已为 {name} 连接 {address}。只有 {name} 会使用它。',
@@ -156,9 +154,6 @@ export function AccountConnections({ employee }: { employee?: { id: string; name
           <label className="account-check"><input type="checkbox" checked={account.mailTrigger} disabled={busy !== null}
             onChange={(event) => void change(account, { mailTrigger: event.target.checked })} />
             <span>{forAdmin ? t('mailTriggerAdmin') : t('mailTriggerEmployee', { name })}</span></label>
-          <label className="account-check"><input type="checkbox" checked={account.calendarTrigger} disabled={busy !== null}
-            onChange={(event) => void change(account, { calendarTrigger: event.target.checked })} />
-            <span>{forAdmin ? t('calendarTriggerAdmin') : t('calendarTriggerEmployee')}</span></label>
           <div className="account-send">
             <span>{t('sendRule')}</span>
             <span className="chip-row" role="group" aria-label={t('sendRule')}>

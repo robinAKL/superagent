@@ -11,6 +11,8 @@ export interface Evidence { sourceId: string; version: string; start: number; en
 export interface McpAnalysisSource { id: string; name: string; revision: string }
 export interface RecommendedWorkflow {
   completion?: string;
+  /** When the sources say the workflow runs on a calendar cadence; citation is the 1-based index into evidence. */
+  schedule?: import('../schedules/rule.js').ScheduleRule & { citation?: number };
   steps: {
     key: string; kind: SopNodeKind; label: string; detail?: string; after: string[];
     employeeKey?: string; toolKey?: string; citations: number[];

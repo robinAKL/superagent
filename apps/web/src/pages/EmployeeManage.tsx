@@ -5,6 +5,7 @@ import type { WallEmployee } from './EmployeeWall';
 import { agentLabel, getEmployeeLink, LINK_INSTALLER_URL, useLinkDevices } from './link-devices';
 import { PermissionMode, ToolRules } from './PermissionMode';
 import { AccountConnections, employeeAccountsTitle } from './AccountConnections';
+import { EmployeeSchedule } from './CalendarPage';
 
 interface CatalogTool {
   toolId: string;
@@ -117,6 +118,10 @@ export function EmployeeManage({ employee, lang, onClose, onChanged }: {
       <p className="helper">{t('promptHint')}</p>
       <button className="btn" disabled={busy || !prompt.trim()}>{busy ? t('saving') : t('promptSave')}</button>
     </form>
+    <section aria-labelledby="emp-manage-schedule">
+      <h3 id="emp-manage-schedule">{lang === 'zh' ? '日程' : 'Schedule'}</h3>
+      <EmployeeSchedule employeeId={employee.id} />
+    </section>
     <section aria-labelledby="emp-manage-accounts">
       <h3 id="emp-manage-accounts">{employeeAccountsTitle(lang)}</h3>
       <AccountConnections employee={{ id: employee.id, name: employee.name }} />

@@ -1,0 +1,66 @@
+/* The workflow calendar: employees on the left, a month or week grid on the right, one colour per employee. */
+.cal-page { display: grid; gap: var(--space-md); }
+.cal-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-sm); }
+.cal-head p { margin: 0; }
+.cal-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); }
+.cal-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-sm); margin: 0;
+  padding: var(--space-sm) var(--space-md); border-radius: 10px; border: 1px solid color-mix(in srgb, var(--color-accent) 40%, var(--color-rule));
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+.cal-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--space-md); align-items: start; }
+.cal-side { position: sticky; top: var(--space-md); display: grid; gap: var(--space-xs); padding: var(--space-sm); border: 1px solid var(--color-rule); border-radius: 10px; }
+.cal-side ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.cal-side-title { margin: 0; font-size: 13px; color: var(--color-muted); font-weight: 600; }
+.cal-filter { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 2px; font-size: 13px; cursor: pointer; }
+.cal-filter input { margin: 0; width: 14px; height: 14px; }
+.cal-filter-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-filter small { color: var(--color-subtle); font-variant-numeric: tabular-nums; }
+.cal-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--cal-color); }
+.cal-main { display: grid; gap: var(--space-xs); min-width: 0; }
+.cal-heading { margin: 0; font-size: 16px; }
+.cal-empty { margin: 0; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border: 1px solid var(--color-rule); border-radius: 10px; overflow: hidden; }
+.cal-weekday { padding: 6px 8px; font-size: 12px; color: var(--color-subtle); border-bottom: 1px solid var(--color-rule); background: var(--color-paper-2); }
+.cal-day { min-height: 104px; padding: 4px; display: flex; flex-direction: column; gap: 3px; border-right: 1px solid var(--color-soft-rule); border-bottom: 1px solid var(--color-soft-rule); min-width: 0; }
+.cal-grid.week .cal-day { min-height: 320px; }
+.cal-day:nth-child(7n) { border-right: 0; }
+.cal-day.outside { background: color-mix(in srgb, var(--color-paper-2) 60%, transparent); }
+.cal-day.outside .cal-date { color: var(--color-subtle); opacity: .6; }
+.cal-date { font-size: 12px; color: var(--color-muted); padding: 2px 4px; align-self: flex-start; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.cal-day.today .cal-date { background: var(--color-accent); color: var(--color-accent-ink); font-weight: 600; }
+.cal-entry { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 6px; align-items: baseline; width: 100%; text-align: left; cursor: pointer;
+  font: inherit; font-size: 12px; color: var(--color-ink); padding: 3px 6px; border-radius: 6px; border: 1px solid transparent; border-left: 3px solid var(--cal-color);
+  background: color-mix(in srgb, var(--cal-color) 14%, transparent); }
+.cal-entry:hover, .cal-entry:focus-visible { background: color-mix(in srgb, var(--cal-color) 26%, transparent); }
+.cal-entry-time { color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.cal-entry-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-entry-who { grid-column: 2; color: var(--color-subtle); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-entry[data-state="suggested"] { background: transparent; border: 1px dashed color-mix(in srgb, var(--cal-color) 70%, transparent); border-left-width: 3px; }
+.cal-entry[data-state="skipped"], .cal-entry[data-state="paused"], .cal-entry[data-state="missed"] { opacity: .55; }
+.cal-entry[data-state="skipped"] .cal-entry-title { text-decoration: line-through; }
+.cal-entry[data-state="failed"] { border-color: var(--color-error); }
+.cal-entry[data-state="ran"] .cal-entry-time::after { content: ' ✓'; color: var(--color-success); }
+.cal-more { font-size: 11px; color: var(--color-subtle); padding: 0 6px; }
+.c0 { --cal-color: var(--color-type-tool); } .c1 { --cal-color: var(--color-type-employee); } .c2 { --cal-color: var(--color-type-process); }
+.c3 { --cal-color: var(--color-type-object); } .c4 { --cal-color: var(--color-type-rule); } .c5 { --cal-color: var(--color-success); }
+.cnone { --cal-color: var(--color-type-source); }
+.cal-drawer { width: min(32rem, calc(100% - 2rem)); }
+.cal-drawer-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: var(--space-xs) 0; }
+.cal-quote { margin: 0 0 4px; padding-left: 10px; border-left: 2px solid var(--color-rule); color: var(--color-muted); font-size: 13px; }
+.cal-next { margin: 0; padding-left: 18px; font-size: 13px; }
+.cal-actions { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin-top: var(--space-sm); }
+.cal-rule { display: grid; gap: var(--space-xs); margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid var(--color-soft-rule); }
+.cal-rule-row { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.cal-rule-row .field { min-width: 96px; }
+.emp-schedule { display: grid; gap: 4px; font-size: 13px; }
+.emp-schedule p { margin: 0; }
+/* Phone: employees become a row of filters; the week view reads as a list of days. */
+@media (max-width: 720px) {
+  .cal-layout { grid-template-columns: minmax(0, 1fr); }
+  .cal-side { position: static; }
+  .cal-side ul { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .cal-grid.week { grid-template-columns: minmax(0, 1fr); }
+  .cal-grid.week .cal-weekday { display: none; }
+  .cal-grid.week .cal-day { min-height: 0; border-right: 0; }
+  .cal-grid.month .cal-day { min-height: 64px; }
+  .cal-grid.month .cal-entry-title { display: none; }
+}

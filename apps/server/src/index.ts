@@ -7,6 +7,8 @@ import { gatewayBrain } from './modules/room/brain.js';
 import { answerFromMcp } from './modules/knowledge/mcp-answer.js';
 import { bindWorkersDb, startPgListener } from './modules/workers/index.js';
 import { bindAccounts } from './modules/accounts/index.js';
+import { bindScheduleStore, startScheduleTimer } from './modules/schedules/index.js';
+import { PgScheduleStore } from './modules/schedules/pg-schedules.js';
 import { PgAccountStore } from './modules/accounts/pg-accounts.js';
 import { microsoftProvider } from './modules/accounts/microsoft.js';
 import { bindSopStore, hydrateSop } from './modules/sop/index.js';
@@ -44,13 +46,14 @@ if (role === 'web') {
   let inboxHydrated = !runtime.pool;
   let executionHydrated = !runtime.pool;
   // Super Agent manages the board on a timer; with a database it starts once the room is loaded.
-  if (!runtime.pool) { startRoomSupervisor(); bindAccounts({ secrets: runtime.app.setupDeps.secrets, provider: accountProvider() }); }
+  if (!runtime.pool) { startRoomSupervisor(); startScheduleTimer(); bindAccounts({ secrets: runtime.app.setupDeps.secrets, provider: accountProvider() }); }
   if (runtime.pool) {
     // T-41: command-room rows, the task queue, and published SOP versions share one PostgreSQL.
     const pool = runtime.pool;
     const db = { query: async <T>(text: string, params: readonly unknown[]) => ({ rows: (await pool.query(text, params as unknown[])).rows as T[] }) };
     bindRoomStore(db);
     bindRuntimeDb(db);
+    bindScheduleStore(new PgScheduleStore(db));
     bindAccounts({ store: new PgAccountStore(db), secrets: runtime.app.setupDeps.secrets, provider: accountProvider() });
     bindWorkersDb({
       ...db,
@@ -77,7 +80,7 @@ if (role === 'web') {
     bindInboxStore(db);
     bindExecutionStore(db);
     // Never crash the web role on an unreachable database: retry in the background and stay not-ready until done.
-    const hydrate = () => hydrateRoom().then(() => { roomHydrated = true; startRoomSupervisor(); }, (e: unknown) => {
+    const hydrate = () => hydrateRoom().then(() => { roomHydrated = true; startRoomSupervisor(); startScheduleTimer(); }, (e: unknown) => {
       console.log(JSON.stringify({ msg: 'room hydration failed; retrying', error: e instanceof Error ? e.message : String(e) }));
       setTimeout(hydrate, 5000).unref();
     });
