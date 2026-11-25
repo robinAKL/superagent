@@ -1040,9 +1040,10 @@ export function CommandRoomPage() {
                   {employees.length === 0 ? (
                     <p>{t('还没有可以指派的数字员工。')}</p>
                   ) : employees.map((employee) => (
-                    <button type="button" role="option" aria-selected="false" key={employee.id} data-mention={employee.id} onClick={() => pickMention(employee.name)}>
+                    <button type="button" role="option" aria-selected="false" key={employee.id} data-mention={employee.id} title={employee.duty || undefined} onClick={() => pickMention(employee.name)}>
+                      {/* Name and state only: the full duty is long, and shows on hover. */}
                       <strong>@{employee.name}</strong>
-                      <span>{[employee.duty, t(EMPLOYEE_STATE[employee.status])].filter(Boolean).join(' · ')}</span>
+                      <span>{t(EMPLOYEE_STATE[employee.status])}</span>
                     </button>
                   ))}
                 </div>

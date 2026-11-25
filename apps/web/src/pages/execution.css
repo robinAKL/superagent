@@ -172,11 +172,12 @@
 .room-send { display: inline-grid; place-items: center; width: 40px; height: 40px; min-height: 0 !important; padding: 0 !important; border-radius: 12px !important; border: 0 !important;
   background: var(--color-accent) !important; color: var(--color-accent-ink) !important; cursor: pointer; }
 .room-send:disabled { opacity: .45; cursor: not-allowed; }
-.room .exec-mentions { position: absolute; left: var(--space-sm); right: var(--space-sm); bottom: calc(100% + 6px); z-index: 5; max-height: 260px; overflow: auto;
+.room .exec-mentions { position: absolute; left: var(--space-sm); width: min(320px, calc(100% - 2 * var(--space-sm))); bottom: calc(100% + 6px); z-index: 5; max-height: 260px; overflow: auto;
   border: 1px solid var(--color-rule); border-radius: 12px; background: var(--color-paper-2); box-shadow: 0 12px 32px var(--color-shadow); padding: var(--space-2xs); display: grid; }
-.room .exec-mentions button { display: grid; gap: 2px; text-align: left; border: 0; background: transparent; color: var(--color-ink); border-radius: 8px; padding: var(--space-xs) var(--space-sm); cursor: pointer; font: inherit; }
+.room .exec-mentions button { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-sm); text-align: left; border: 0; background: transparent; color: var(--color-ink); border-radius: 8px; padding: var(--space-xs) var(--space-sm); cursor: pointer; font: inherit; }
 .room .exec-mentions button:hover { background: var(--color-well); }
-.room .exec-mentions span { font-size: 12.5px; color: var(--color-muted); }
+.room .exec-mentions strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room .exec-mentions span { font-size: 12.5px; color: var(--color-muted); white-space: nowrap; }
 .room .exec-followup { display: flex; justify-content: space-between; gap: var(--space-sm); margin: 0 0 var(--space-xs); font-size: 13px; color: var(--color-accent); }
 
 /* Tasks column */
