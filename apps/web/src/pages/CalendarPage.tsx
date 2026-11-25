@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { useLang, useT } from '../i18n';
 import './CalendarPage.css';
@@ -93,8 +93,12 @@ export function CalendarPage() {
     return { from, to: new Date(from.getTime() + 42 * DAY), days: 42 };
   }, [view, anchor]);
 
+  // Only the newest request may paint: switching view and stepping quickly must not let an older range land last.
+  const latest = useRef(0);
   const load = useCallback(async () => {
+    const ticket = ++latest.current;
     const r = await api<CalendarData>(`/api/v1/schedules?from=${encodeURIComponent(range.from.toISOString())}&to=${encodeURIComponent(range.to.toISOString())}`);
+    if (ticket !== latest.current) return;
     if (r.status !== 200) { setFailed(true); return; }
     setFailed(false);
     setData(r.body);

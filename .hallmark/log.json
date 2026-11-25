@@ -1,0 +1,29 @@
+[
+ {
+  "shape": "Narrative Workflow",
+  "theme": "lumen",
+  "axes": "dark/grotesk-sans/warm",
+  "hero": "Stage",
+  "nav": "edge-aligned, mark and quiet sign-in",
+  "footer": "mast",
+  "imagery": "screenshots 4 (Playwright, sample data)",
+  "photos": [],
+  "entry": "apps/web/src/pages/landing/Landing.tsx",
+  "fingerprint": "stage/showcase-proof/rows/calendar-showcase/statement/offer-band/qa-rows/mast",
+  "sections": [
+   "hero",
+   "proof",
+   "fit",
+   "calendar",
+   "safety",
+   "pilot",
+   "questions",
+   "footer"
+  ],
+  "signature": "the real command room, one sentence turned into a task and a report",
+  "waived": [],
+  "prompt": "INNOPRO Super Agent landing page, NZ SMB free pilot, sign in",
+  "date": "2026-11-25",
+  "mode": "build"
+ }
+]
