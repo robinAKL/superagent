@@ -90,6 +90,8 @@ async function main() {
         onTask: (active) => console.log(active ? 'LINK_TASK:start' : 'LINK_TASK:end'),
         // The desktop tray reacts by opening that CLI's sign-in for the person at the computer.
         onAuth: (agent) => console.log(`LINK_AUTH:${agent}`),
+        // The tray opens Claude Code's MCP sign-in for this server, for the person at the computer to finish.
+        onMcpLogin: (server) => console.log(`LINK_MCP_LOGIN:${server}`),
       }).start(shutdown.signal);
     } catch (error) {
       if (error.status !== 401) throw error;

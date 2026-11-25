@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useLang, useT } from '../i18n';
 import { useLinkDevices, type LinkDevice } from './link-devices';
+import { McpSignIn } from './McpSignIn';
 import type { WallEmployee } from './EmployeeWall';
 import { mentionsEmployee } from './EmployeeManage';
 
@@ -20,7 +21,6 @@ const TEXT = {
     providedBy: 'Provided by {server} on {device}',
     signIn: '{n} capabilities are in an MCP on the employee’s computer that needs signing in again',
     signInBy: '{server} on {device} needs signing in',
-    signInHow: 'On that computer, open Claude Code and run /mcp, then sign in to {servers}. Until then these tasks cannot use it.',
   },
   zh: {
     title: '员工反馈与能力申请（{n}）',
@@ -33,7 +33,6 @@ const TEXT = {
     providedBy: '已由 {device} 上的 {server} 提供',
     signIn: '{n} 项能力在员工电脑上的 MCP 里，但需要重新登录授权',
     signInBy: '{device} 上的 {server} 需要重新登录',
-    signInHow: '在那台电脑上打开 Claude Code，运行 /mcp，重新登录 {servers}。登录前，用到它的任务都做不了。',
   },
 };
 
@@ -93,7 +92,7 @@ export function EmployeeFeedback({ employees }: { employees: WallEmployee[] }) {
       </details> : null}
       {signIn.length ? <details className="disclosure" data-sign-in open>
         <summary>{t('signIn', { n: signIn.length })}</summary>
-        <p className="warn">{t('signInHow', { servers: [...new Set(signIn.map(group => group.signIn!.server))].join('、') })}</p>
+        <McpSignIn employees={ids} />
         <div className="data-table-wrap">
           <table className="data-table">
             <tbody>{signIn.map(group => <tr key={group.name}>

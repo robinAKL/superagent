@@ -51,13 +51,16 @@ export class WorkerLink {
   #onStatus;
   #onTask;
   #onAuth;
+  #onMcpLogin;
+  /** While a person signs an MCP server in, its status is checked every minute instead of every hour. */
+  #mcpWatchUntil = 0;
   #renameState;
   #stateWrite = Promise.resolve();
   #storageFailure;
 
   constructor(config, token, {
     fetcher = fetch, launch = launchAgent, launchWithApprovals = launchCodexWithApprovals,
-    sleep = delay, onStatus = () => {}, onTask = () => {}, onAuth = () => {}, renameState = rename,
+    sleep = delay, onStatus = () => {}, onTask = () => {}, onAuth = () => {}, onMcpLogin = () => {}, renameState = rename,
   } = {}) {
     const endpoint = new URL(config.endpoint);
     if ((endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(endpoint.hostname)))
@@ -76,6 +79,7 @@ export class WorkerLink {
     this.#onStatus = onStatus;
     this.#onTask = onTask;
     this.#onAuth = onAuth;
+    this.#onMcpLogin = onMcpLogin;
     this.#renameState = renameState;
     try { this.#state = JSON.parse(readFileSync(config.stateFile, 'utf8')); }
     catch (error) {
@@ -103,7 +107,7 @@ export class WorkerLink {
   #mcpCheckedAt = 0;
 
   #refreshMcpServers() {
-    if (Date.now() - this.#mcpCheckedAt < 60 * 60_000) return;
+    if (Date.now() - this.#mcpCheckedAt < (Date.now() < this.#mcpWatchUntil ? 60_000 : 60 * 60_000)) return;
     this.#mcpCheckedAt = Date.now();
     const entry = [...this.#projects.entries()].find(([, project]) => project.agent === 'claude-code');
     if (!entry) return;
@@ -260,6 +264,18 @@ export class WorkerLink {
     delete known.outcome;
   }
 
+  /**
+   * The command room asks to sign an MCP server in again. The desktop tray opens Claude Code's MCP sign-in for the
+   * person at this computer (Link never types or sees their account); meanwhile the status is checked every minute.
+   */
+  #mcpLogin(event) {
+    const server = event.payload?.server;
+    if (typeof server !== 'string' || !/^[A-Za-z0-9_.-]{1,64}$/.test(server)) return;
+    this.#mcpWatchUntil = Date.now() + 20 * 60_000;
+    this.#mcpCheckedAt = 0;
+    this.#onMcpLogin(server);
+  }
+
   #cancel(event) {
     const job = this.#state.jobs.find((item) => item.id === event.payload?.roomTaskId);
     if (!job || job.status === 'done') return;
@@ -275,6 +291,7 @@ export class WorkerLink {
       if (!Number.isSafeInteger(event.seq) || event.seq <= this.#state.cursor) continue;
       if (event.kind === 'wake') this.#wake(event);
       if (event.kind === 'cancel') this.#cancel(event);
+      if (event.kind === 'mcp_login') this.#mcpLogin(event);
       this.#state.cursor = event.seq;
       await this.#save();
     }

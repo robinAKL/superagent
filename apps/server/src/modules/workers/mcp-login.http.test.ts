@@ -1,0 +1,71 @@
+import Fastify, { type FastifyInstance } from 'fastify';
+import { beforeEach, expect, it } from 'vitest';
+import type { Role } from '@superagent/shared';
+import { createCommandRoom, roomState } from '../room/index.js';
+import { registerWorker, resetWorkers, workerLinkModule, workersModule, workersState } from './index.js';
+
+const TENANT = '11111111-1111-4111-8111-111111111111';
+const OWNER = { userId: 'owner', roles: ['owner' as const], projectScopes: [] as string[] };
+
+async function app(): Promise<FastifyInstance> {
+  const a = Fastify();
+  a.addHook('preHandler', async (req) => {
+    const raw = typeof req.headers['x-test-user'] === 'string' ? req.headers['x-test-user'] : 'owner|owner';
+    const [userId, role] = raw.split('|');
+    req.user = { userId: userId!, roles: [role as Role], tenantId: TENANT, projectScopes: [] };
+  });
+  await a.register(workersModule, { prefix: '/api/v1/workers' });
+  await a.register(workerLinkModule, { prefix: '/api/v1/worker-link' });
+  return a;
+}
+
+let a: FastifyInstance;
+let id: string;
+let token: string;
+const heartbeat = (status: string) => a.inject({
+  method: 'POST', url: '/api/v1/worker-link/heartbeat', headers: { authorization: 'Bearer ' + token },
+  payload: { capabilities: { projects: [{ id: 'p1', name: 'super agent', agent: 'claude-code' }], mcpServers: [{ name: 'vera-crm', status }, { name: 'gmail', status: 'connected' }] } },
+});
+const roomNotes = () => roomState.current.eventsAfter('room-1', 0, OWNER).map((message) => message.body);
+let cursor = 0;
+const events = async () => {
+  const list = (await a.inject({ method: 'POST', url: '/api/v1/worker-link/poll', headers: { authorization: 'Bearer ' + token }, payload: { since: cursor, waitMs: 0 } })).json().events as { seq: number; kind: string; payload: Record<string, unknown> }[];
+  cursor = list.at(-1)?.seq ?? cursor;
+  return list;
+};
+
+beforeEach(async () => {
+  cursor = 0;
+  resetWorkers();
+  roomState.current = createCommandRoom(() => [{ id: 'emp-wo', name: 'Wholesale Operations', ownerUserId: 'owner', status: 'active' }]);
+  ({ worker: { id }, token } = await registerWorker(workersState.registry, {
+    tenantId: TENANT, name: 'WIN-RLDG3T479VI', kind: 'link', createdBy: 'owner', capabilities: { roomAssignments: [{ projectId: 'p1', employeeId: 'emp-wo' }] },
+  }, Date.now()) as unknown as { worker: { id: string }; token: string });
+  a = await app();
+});
+
+it('when an MCP server on the computer needs signing in, the room is told once, and again when it is back', async () => {
+  await heartbeat('connected');
+  expect(roomNotes()).toEqual([]);
+  await heartbeat('needs_auth');
+  await heartbeat('needs_auth');
+  expect(roomNotes()).toEqual(['WIN-RLDG3T479VI 上的 vera-crm 需要重新登录，用到它的任务现在做不了。点指挥室上方提示里的「在电脑上打开登录」，按提示完成登录即可。']);
+  await heartbeat('connected');
+  expect(roomNotes().at(-1)).toBe('WIN-RLDG3T479VI 上的 vera-crm 已重新连上。');
+  expect(roomNotes()).toHaveLength(2);
+});
+
+it('"open the sign-in" sends the computer one instruction for that server; strangers and unknown servers are refused', async () => {
+  await heartbeat('needs_auth');
+  const opened = await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/mcp-login`, payload: { server: 'vera-crm' } });
+  expect(opened.json()).toEqual({ opened: true });
+  expect((await events()).filter((event) => event.kind === 'mcp_login')).toEqual([expect.objectContaining({ kind: 'mcp_login', payload: { server: 'vera-crm' } })]);
+  // A second click within a minute does not pile up instructions.
+  await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/mcp-login`, payload: { server: 'vera-crm' } });
+  expect((await events()).filter((event) => event.kind === 'mcp_login')).toEqual([]);
+
+  expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/mcp-login`, payload: { server: 'not-there' } })).statusCode).toBe(400);
+  expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/mcp-login`, headers: { 'x-test-user': 'someone|employee' }, payload: { server: 'vera-crm' } })).statusCode).toBe(404);
+  // Already connected: nothing to open.
+  expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/mcp-login`, payload: { server: 'gmail' } })).json()).toEqual({ opened: false, connected: true });
+});
