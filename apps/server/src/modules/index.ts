@@ -11,6 +11,7 @@ import { humanworkModule } from './humanwork/index.js';
 import { sopModule } from './sop/index.js';
 import { executionModule } from './execution/index.js';
 import { workersModule } from './workers/index.js';
+import { accountsModule } from './accounts/index.js';
 
 export interface ModuleDef {
   prefix: string;
@@ -37,4 +38,6 @@ export const modules: ModuleDef[] = [
   // Worker registry. Admin/owner except the self-service routes (pairing and the member's own computers), which the
   // module checks per route. The worker's own channel is /api/v1/worker-link, outside sign-in.
   { prefix: 'workers', plugin: workersModule }, // room T-03
+  // Mail and calendar accounts: an administrator's own (controls Super Agent) and each digital employee's own.
+  { prefix: 'accounts', plugin: accountsModule, roles: ['admin', 'owner'] },
 ];

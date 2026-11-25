@@ -6,6 +6,9 @@ import { bindRoomBrain, bindRoomStore, hydrateRoom, startRoomSupervisor } from '
 import { gatewayBrain } from './modules/room/brain.js';
 import { answerFromMcp } from './modules/knowledge/mcp-answer.js';
 import { bindWorkersDb, startPgListener } from './modules/workers/index.js';
+import { bindAccounts } from './modules/accounts/index.js';
+import { PgAccountStore } from './modules/accounts/pg-accounts.js';
+import { microsoftProvider } from './modules/accounts/microsoft.js';
 import { bindSopStore, hydrateSop } from './modules/sop/index.js';
 import { bindGatewayStore, hydrateGateway } from './modules/gateway/index.js';
 import { bindInboxStore, hydrateInbox } from './modules/humanwork/index.js';
@@ -14,6 +17,12 @@ import { createKnowledgeDeps, knowledgeReady, restoreConfirmedOrganizations } fr
 import { tickKnowledge } from './modules/knowledge/worker.js';
 import { createLongWorkDeps } from './modules/longwork/runtime.js';
 import { pgMailSopConsumer } from './modules/longwork/execution-adapter.js';
+
+/** Microsoft 365 mailbox sign-in, when the platform app registration is configured. */
+function accountProvider() {
+  const clientId = process.env.MS_ACCOUNTS_CLIENT_ID, clientSecret = process.env.MS_ACCOUNTS_CLIENT_SECRET;
+  return clientId && clientSecret ? microsoftProvider({ clientId, clientSecret }) : null;
+}
 
 const role = (process.env.APP_ROLE ?? 'web') as AppRole;
 if (!APP_ROLES.includes(role)) {
@@ -35,13 +44,14 @@ if (role === 'web') {
   let inboxHydrated = !runtime.pool;
   let executionHydrated = !runtime.pool;
   // Super Agent manages the board on a timer; with a database it starts once the room is loaded.
-  if (!runtime.pool) startRoomSupervisor();
+  if (!runtime.pool) { startRoomSupervisor(); bindAccounts({ secrets: runtime.app.setupDeps.secrets, provider: accountProvider() }); }
   if (runtime.pool) {
     // T-41: command-room rows, the task queue, and published SOP versions share one PostgreSQL.
     const pool = runtime.pool;
     const db = { query: async <T>(text: string, params: readonly unknown[]) => ({ rows: (await pool.query(text, params as unknown[])).rows as T[] }) };
     bindRoomStore(db);
     bindRuntimeDb(db);
+    bindAccounts({ store: new PgAccountStore(db), secrets: runtime.app.setupDeps.secrets, provider: accountProvider() });
     bindWorkersDb({
       ...db,
       // Room-binding changes run several statements on one connection under a per-tenant lock.
