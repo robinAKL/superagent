@@ -47,6 +47,16 @@ param enableFrontDoor bool = false
 param pgTier string = 'Burstable'
 param pgSku string = 'Standard_B1ms'
 
+@description('Public host name of the web app (e.g. super.innopro.co.nz). Empty: only the Container Apps address.')
+param customDomain string = ''
+@description('Managed certificate resource id for customDomain (created once with az containerapp hostname bind).')
+param customDomainCertificateId string = ''
+
+// Kept on every deployment, so a redeploy never drops the custom domain.
+var webCustomDomains = empty(customDomain) ? [] : [
+  union({ name: customDomain, bindingType: 'Disabled' }, empty(customDomainCertificateId) ? {} : { certificateId: customDomainCertificateId, bindingType: 'SniEnabled' })
+]
+
 var prefix = 'sa-${env}'
 var uniq = uniqueString(resourceGroup().id)
 
@@ -309,7 +319,7 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
   properties: {
     managedEnvironmentId: containerAppsEnvironmentId
     configuration: {
-      ingress: { external: true, targetPort: 8080, transport: 'auto' }
+      ingress: { external: true, targetPort: 8080, transport: 'auto', customDomains: webCustomDomains }
       registries: [{ server: acr.properties.loginServer, identity: appIdentity.id }]
     }
     template: {

@@ -75,6 +75,10 @@ jobs:
           if [ -n "${{ vars.EXISTING_CONTAINERAPPS_ENVIRONMENT_ID }}" ]; then
             REGION_ARGS+=(existingContainerAppsEnvironmentId="${{ vars.EXISTING_CONTAINERAPPS_ENVIRONMENT_ID }}")
           fi
+          # The web app's public host name and its managed certificate, kept on every deployment.
+          if [ -n "${{ vars.CUSTOM_DOMAIN }}" ]; then
+            REGION_ARGS+=(customDomain="${{ vars.CUSTOM_DOMAIN }}" customDomainCertificateId="${{ vars.CUSTOM_DOMAIN_CERTIFICATE_ID }}")
+          fi
           out=$(az deployment group create -g "$RG" -f infra/main.bicep \
             -p @source-parameters.json env="$ENV_NAME" image="$IMAGE_PLACEHOLDER" browserImage="$IMAGE_PLACEHOLDER" \
                entraTenantId="${{ vars.ENTRA_TENANT_ID }}" entraClientId="${{ vars.ENTRA_CLIENT_ID }}" \
@@ -107,6 +111,10 @@ jobs:
           fi
           if [ -n "${{ vars.EXISTING_CONTAINERAPPS_ENVIRONMENT_ID }}" ]; then
             REGION_ARGS+=(existingContainerAppsEnvironmentId="${{ vars.EXISTING_CONTAINERAPPS_ENVIRONMENT_ID }}")
+          fi
+          # The web app's public host name and its managed certificate, kept on every deployment.
+          if [ -n "${{ vars.CUSTOM_DOMAIN }}" ]; then
+            REGION_ARGS+=(customDomain="${{ vars.CUSTOM_DOMAIN }}" customDomainCertificateId="${{ vars.CUSTOM_DOMAIN_CERTIFICATE_ID }}")
           fi
           out=$(az deployment group create -g "$RG" -f infra/main.bicep \
             -p @source-parameters.json env="$ENV_NAME" image="$IMAGE" \
