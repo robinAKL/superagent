@@ -352,10 +352,16 @@
 @media (max-width: 1200px) and (min-width: 801px) {
   .room .exec-grid, .room .exec-grid:has(.exec-drawer) { grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr); }
   .room .exec-grid:has(.exec-drawer) { grid-template-columns: minmax(0, 1fr) 260px minmax(260px, 300px); }
-  .room-agents { grid-column: 1 / -1; overflow: visible; }
+  .room-agents { grid-column: 1 / -1; overflow: visible; flex-direction: row; align-items: center; gap: var(--space-sm); }
   .room-agents-title { display: none; }
-  .room-agents ul { display: flex; gap: var(--space-xs); overflow-x: auto; padding-bottom: 2px; }
+  .room-agents ul { display: flex; gap: var(--space-xs); overflow-x: auto; padding-bottom: 2px; flex: 1; min-width: 0; }
   .room-agent { flex: 0 0 210px; }
+  /* The two links sit at the end of the member strip, not as two full-width rows above the conversation. */
+  .room-agents-foot { margin-top: 0; padding-top: 0; flex: 0 0 auto; }
+  .room-agents-foot a { min-height: 30px; font-size: 12px; white-space: nowrap; }
+  /* With a task open, its details take the task board's place: the conversation keeps its width. */
+  .room .exec-grid:has(.exec-drawer) { grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); }
+  .room .exec-grid:has(.exec-drawer) .room-tasks { display: none; }
 }
 @media (max-width: 800px) {
   .room .exec-grid, .room .exec-grid:has(.exec-drawer) { grid-template-columns: minmax(0, 1fr); }

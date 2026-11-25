@@ -61,6 +61,8 @@
   .cal-grid.week { grid-template-columns: minmax(0, 1fr); }
   .cal-grid.week .cal-weekday { display: none; }
   .cal-grid.week .cal-day { min-height: 0; border-right: 0; }
+  /* A phone shows the days that have something on, and today. */
+  .cal-grid.week .cal-day:not(:has(.cal-entry)):not(.today) { display: none; }
   .cal-grid.month .cal-day { min-height: 64px; }
   .cal-grid.month .cal-entry-title { display: none; }
 }

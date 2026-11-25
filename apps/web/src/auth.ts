@@ -43,11 +43,18 @@ export async function initAuth(fetchFn: typeof fetch = fetch): Promise<SignedIn>
   scopes = cfg.scopes;
   account = result?.account ?? pca.getAllAccounts()[0] ?? null;
   client = pca;
+  // A new tab has no tokens (they stay in each tab's session). The account it last signed in with (a name, not a
+  // credential) lets it sign in quietly with the Microsoft session it already has, instead of the account picker.
+  const hint = rememberedAccount();
+  if (!account && hint) {
+    try { account = (await pca.ssoSilent({ scopes, loginHint: hint })).account; } catch { /* the redirect below asks */ }
+  }
   if (!account) {
-    await pca.loginRedirect({ scopes });
+    await pca.loginRedirect({ scopes, ...(hint ? { loginHint: hint } : {}) });
     return new Promise<SignedIn>(() => undefined); // the page is navigating to the sign-in page
   }
   pca.setActiveAccount(account);
+  rememberAccount(account.username);
   return { mode: 'entra', name: account.name, username: account.username };
 }
 
@@ -64,5 +71,14 @@ export async function bearerToken(): Promise<string | null> {
 }
 
 export async function signOut(): Promise<void> {
+  rememberAccount(null);
   if (client) await client.logoutRedirect({ account: account ?? undefined });
+}
+
+const HINT_KEY = 'superagent.signin-hint';
+function rememberedAccount(): string | null {
+  try { return localStorage.getItem(HINT_KEY); } catch { return null; }
+}
+function rememberAccount(username: string | null): void {
+  try { if (username) localStorage.setItem(HINT_KEY, username); else localStorage.removeItem(HINT_KEY); } catch { /* private mode */ }
 }

@@ -23,7 +23,7 @@ const TEXT = {
   en: {
     title: 'Company information and work boundaries', name: 'Company name', goal: 'Work to hand to the digital team',
     boundaries: 'Boundaries that must be followed', boundaryHint: 'Name the decisions that still need a person, and the limits the digital team must not cross.',
-    save: 'Save configuration', saving: 'Saving…', saved: 'Saved configuration v{version}.',
+    save: 'Save configuration', required: '(required)', needFields: 'Fill in the company name and the work to hand over to save.', saving: 'Saving…', saved: 'Saved configuration v{version}.',
     loading: 'Loading company setup…', loadError: 'Could not load the company setup.',
     conflict: 'The configuration changed while you were editing. Reload to see the latest version.',
     saveError: 'Could not save the configuration. Try again.',
@@ -37,7 +37,7 @@ const TEXT = {
   zh: {
     title: '企业信息与工作边界', name: '企业名称', goal: '希望交给数字团队的工作',
     boundaries: '必须遵守的边界', boundaryHint: '写清哪些事需要人决定，以及数字团队不得越过的限制。',
-    save: '保存配置', saving: '保存中…', saved: '已保存配置 v{version}。',
+    save: '保存配置', required: '（必填）', needFields: '填好企业名称和希望交给数字团队的工作，才能保存。', saving: '保存中…', saved: '已保存配置 v{version}。',
     loading: '正在读取企业配置…', loadError: '无法读取企业配置。',
     conflict: '编辑期间配置已更新，请重新读取最新版本。',
     saveError: '无法保存配置，请重试。',
@@ -120,9 +120,9 @@ export function CompanyContextPanel({ fromOrganization, guide = true }: { fromOr
       <h2 className="h2" id="company-context-heading">{t('title')}</h2>
       {state === 'error' ? <p className="warn" role="alert">{t('loadError')}</p> : <form className="stack" onSubmit={event => void save(event)}>
           {state === 'loading' ? <p className="helper" role="status">{t('loading')}</p> : null}
-          <label className="field"><span>{t('name')}</span><input required maxLength={160} disabled={state === 'saving' || state === 'loading'} value={fields.name}
+          <label className="field"><span>{t('name')} <small className="helper">{t('required')}</small></span><input required maxLength={160} disabled={state === 'saving' || state === 'loading'} value={fields.name}
             onChange={event => setFields({ ...fields, name: event.target.value })} /></label>
-          <label className="field"><span>{t('goal')}</span><textarea required maxLength={4000} rows={3} disabled={state === 'saving' || state === 'loading'} value={fields.goal}
+          <label className="field"><span>{t('goal')} <small className="helper">{t('required')}</small></span><textarea required maxLength={4000} rows={3} disabled={state === 'saving' || state === 'loading'} value={fields.goal}
             onChange={event => setFields({ ...fields, goal: event.target.value })} /></label>
           <label className="field"><span>{t('boundaries')}</span><textarea maxLength={4000} rows={3} disabled={state === 'saving' || state === 'loading'} value={fields.boundaries}
             aria-describedby="company-context-boundary-hint" onChange={event => setFields({ ...fields, boundaries: event.target.value })} /></label>
@@ -132,6 +132,7 @@ export function CompanyContextPanel({ fromOrganization, guide = true }: { fromOr
             <button className="btn primary" disabled={state === 'saving' || state === 'loading' || state === 'conflict' || !fields.name.trim() || !fields.goal.trim()}>
               {state === 'saving' ? t('saving') : t('save')}
             </button>
+            {state === 'ready' && dirty && (!fields.name.trim() || !fields.goal.trim()) ? <span className="helper">{t('needFields')}</span> : null}
           </div>
           {state === 'ready' && saved && context && !dirty ? <p className="helper" role="status">{t('saved', { version: context.version })}</p> : null}
         </form>}

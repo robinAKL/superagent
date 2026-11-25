@@ -1157,8 +1157,8 @@ export function CommandRoomPage() {
                 <dd data-snapshot>
                   {openTask.promptSnapshot
                     ? lang === 'en'
-                    ? 'Prompt version ' + (openTask.promptSnapshot.promptVersion ?? '?') + ' · Model tier ' + (openTask.promptSnapshot.modelTier ?? 'Unknown') + ' · Assigned ' + openTask.promptSnapshot.takenAt
-                    : `提示词第 ${openTask.promptSnapshot.promptVersion ?? '?'} 版 · 模型档位 ${openTask.promptSnapshot.modelTier ?? '未记录'} · 交办于 ${openTask.promptSnapshot.takenAt}`
+                    ? 'Prompt version ' + (openTask.promptSnapshot.promptVersion ?? '?') + ' · Model tier ' + (openTask.promptSnapshot.modelTier ?? 'Unknown') + ' · Assigned ' + new Date(openTask.promptSnapshot.takenAt).toLocaleString('en-NZ', { dateStyle: 'medium', timeStyle: 'short' })
+                    : `提示词第 ${openTask.promptSnapshot.promptVersion ?? '?'} 版 · 模型档位 ${({ default: '默认', primary: '主力', economy: '经济' } as Record<string, string>)[openTask.promptSnapshot.modelTier ?? ''] ?? openTask.promptSnapshot.modelTier ?? '未记录'} · 交办于 ${new Date(openTask.promptSnapshot.takenAt).toLocaleString('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })}`
                     : t('这条任务没有记录提示词快照。')}
                 </dd>
               </div>

@@ -70,7 +70,8 @@ test('the language switch fits inside the top bar (desktop and phone width)', as
 });
 
 test('digital employees without an analysed draft say how to start instead of showing invented roles', async ({ page }) => {
-  await page.goto('/#employees');
+  // Employees other specs added are on the wall; the draft view is where a missing analysis shows.
+  await page.goto('/#employees?view=draft');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('数字员工');
   await expect(page.getByRole('heading', { name: '还没有组织草案' })).toBeVisible();
   await expect(page.getByRole('link', { name: '去企业知识', exact: true })).toHaveAttribute('href', '#knowledge');

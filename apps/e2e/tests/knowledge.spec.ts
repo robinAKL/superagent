@@ -497,7 +497,7 @@ test('one team size submission leaves one employee and that employee can be boun
   } }));
   try {
     await page.goto('/#employees');
-    await page.locator(`[data-employee="${team[0]!.id}"]`).getByRole('link', { name: '管理 Link' }).click();
+    await page.locator(`[data-employee="${team[0]!.id}"]`).getByRole('link', { name: '绑定电脑' }).click(); // not bound yet: the wall offers to bind it
     const card = page.locator('[data-worker]').filter({ hasText: 'E2E Link' });
     await expect(card.getByText('在线', { exact: true })).toBeVisible();
     await expect(card.getByLabel('本地项目')).toHaveValue(projectId);
