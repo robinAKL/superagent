@@ -31,6 +31,25 @@ export interface AccountConnection {
   connectedBy: string;
   createdAt: string;
   updatedAt: string;
+  /** Mail automation's place in this mailbox; absent until mail is turned on. */
+  mailState?: MailState;
+}
+
+/** Where mail automation has read up to in one mailbox, and which mail became which task. */
+export interface MailState {
+  /** Mail received at or after this time is read next. Set when mail is turned on: earlier mail is never processed. */
+  cursor?: string;
+  /** Ids of the most recent messages already handled (the cursor is inclusive). */
+  seen?: string[];
+  /** The "Super Agent" folder of an administrator's mailbox. */
+  folderId?: string;
+  /** Conversation id → the task it became, so a reply in the same thread goes to the same task. */
+  threads?: Record<string, string>;
+  /** Task id → the mail it came from, to reply to once the employee reports. */
+  tasks?: Record<string, { messageId: string; from: string; subject: string; drafted?: boolean }>;
+  checkedAt?: string;
+  received?: number;
+  error?: string | null;
 }
 
 export interface OAuthAttempt {
@@ -49,6 +68,8 @@ export interface AccountStore {
   /** Insert, or replace the row with the same owner, provider and address (keeping its id and settings). */
   save(connection: AccountConnection): Promise<AccountConnection>;
   remove(tenantId: string, id: string): Promise<void>;
+  /** Every connected account with mail automation on, across tenants: what the mail poller reads. */
+  mailEnabled(): Promise<AccountConnection[]>;
   putAttempt(attempt: OAuthAttempt): Promise<void>;
   /** Returns and deletes the attempt: a state is good for one callback. */
   takeAttempt(stateHash: string): Promise<OAuthAttempt | null>;
@@ -78,6 +99,7 @@ export class MemoryAccountStore implements AccountStore {
   async remove(tenantId: string, id: string) {
     if (this.rows.get(id)?.tenantId === tenantId) this.rows.delete(id);
   }
+  async mailEnabled() { return [...this.rows.values()].filter((row) => row.mailTrigger && row.status === 'connected').map((row) => structuredClone(row)); }
   async putAttempt(attempt: OAuthAttempt) { this.attempts.set(attempt.stateHash, attempt); }
   async takeAttempt(stateHash: string) {
     const attempt = this.attempts.get(stateHash) ?? null;
@@ -116,6 +138,7 @@ export function accountView(row: AccountConnection) {
     id: row.id, owner: row.owner, provider: row.provider, address: row.address, displayName: row.displayName,
     mailTrigger: row.mailTrigger, calendarTrigger: row.calendarTrigger, sendRule: row.sendRule, status: row.status,
     connectedAt: row.createdAt, updatedAt: row.updatedAt,
+    mail: { checkedAt: row.mailState?.checkedAt ?? null, received: row.mailState?.received ?? 0, error: row.mailState?.error ?? null },
   };
 }
 
@@ -128,6 +151,16 @@ export class AccountService {
   list(tenantId: string, owner: Owner) { return this.deps.store.list(tenantId, owner); }
 
   find(tenantId: string, id: string) { return this.deps.store.get(tenantId, id); }
+
+  /** Accounts the mail poller reads. */
+  mailAccounts() { return this.deps.store.mailEnabled(); }
+
+  /** Records where mail automation is in this mailbox (re-read first: settings may have changed meanwhile). */
+  async saveMailState(tenantId: string, id: string, change: (state: MailState) => MailState): Promise<void> {
+    const row = await this.deps.store.get(tenantId, id);
+    if (!row) return;
+    await this.deps.store.save({ ...row, mailState: change(row.mailState ?? {}) });
+  }
 
   /** Starts a sign-in for this owner. The person comes back through finish() with the same state. */
   async start(tenantId: string, userId: string, owner: Owner, redirectUri: string): Promise<{ authorizationUrl: string }> {
@@ -162,7 +195,7 @@ export class AccountService {
       id: existing?.id ?? randomUUID(), tenantId, owner: attempt.owner, provider: provider.id, address: who.address, displayName: who.displayName,
       scopes: tokens.scope, mailTrigger: existing?.mailTrigger ?? false, calendarTrigger: existing?.calendarTrigger ?? false,
       sendRule: existing?.sendRule ?? 'ask', status: 'connected', grant, grantDeadline: tokens.expiresIn ? this.now() + tokens.expiresIn * 1000 : null,
-      connectedBy: userId, createdAt: existing?.createdAt ?? at, updatedAt: at,
+      connectedBy: userId, createdAt: existing?.createdAt ?? at, updatedAt: at, ...(existing?.mailState ? { mailState: existing.mailState } : {}),
     });
     if (existing?.grant) await this.disable(existing.grant);
     return saved;
@@ -176,6 +209,8 @@ export class AccountService {
     return this.deps.store.save({
       ...row,
       ...(typeof patch.mailTrigger === 'boolean' ? { mailTrigger: patch.mailTrigger } : {}),
+      // Turning mail on reads mail from now on; nothing already in the mailbox becomes work.
+      ...(patch.mailTrigger === true && !row.mailTrigger ? { mailState: { ...row.mailState, cursor: new Date(this.now()).toISOString(), seen: [], error: null } } : {}),
       ...(typeof patch.calendarTrigger === 'boolean' ? { calendarTrigger: patch.calendarTrigger } : {}),
       ...(patch.sendRule !== undefined ? { sendRule: patch.sendRule as SendRule } : {}),
       updatedAt: new Date(this.now()).toISOString(),

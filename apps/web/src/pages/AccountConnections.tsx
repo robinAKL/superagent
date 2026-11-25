@@ -20,6 +20,7 @@ export interface Account {
   sendRule: SendRule;
   status: 'connected' | 'reauthorize';
   connectedAt: string;
+  mail?: { checkedAt: string | null; received: number; error: string | null };
 }
 
 const TEXT = {
@@ -32,11 +33,12 @@ const TEXT = {
     connected: 'Connected', reauthorize: 'Sign-in expired',
     mailTriggerAdmin: 'Mail in my “Super Agent” folder goes to Super Agent', mailTriggerEmployee: 'New mail becomes a task for {name}',
     sendRule: 'Sending mail', ask: 'Ask me first', allow: 'Send directly', deny: 'Never send',
-    triggersNote: 'Mail automation is being rolled out. What you set here takes effect when it arrives.',
+    triggersNote: 'Replies follow the sending rule: “Ask me first” puts them in My work for you to send.',
     confirmDisconnect: 'Disconnect {address}? Super Agent stops using this account, and its sign-in is deleted.',
     working: 'Working…', error: 'That did not work. Try again.', cancelled: 'Sign-in was cancelled.',
     doneAdmin: 'Connected {address}. It belongs to you and controls Super Agent.', doneEmployee: 'Connected {address} for {name}. Only {name} uses it.',
     openEmployees: 'Back to digital employees',
+    mailChecked: 'Checked {time} · {n} handled', mailWaiting: 'The first check runs within a minute.',
   },
   zh: {
     adminTitle: '我的邮箱', adminLead: '你自己的 Microsoft 365 账号，用邮件指挥 Super Agent：放进「Super Agent」文件夹的邮件会成为给它的指令。数字员工不会使用它。定时流程在「日历」里管理。',
@@ -47,11 +49,12 @@ const TEXT = {
     connected: '已连接', reauthorize: '登录已失效',
     mailTriggerAdmin: '「Super Agent」文件夹里的邮件交给 Super Agent', mailTriggerEmployee: '新邮件自动变成 {name} 的任务',
     sendRule: '发邮件', ask: '先问我', allow: '直接发', deny: '不允许',
-    triggersNote: '邮件自动化正在陆续上线，这里的设置会在上线时生效。',
+    triggersNote: '回复按「发邮件」的设置处理：选「先问我」时，回复会放进「待我处理」，由你确认后发出。',
     confirmDisconnect: '断开 {address}？Super Agent 将不再使用这个账号，它的登录授权会被删除。',
     working: '处理中…', error: '没有成功，请重试。', cancelled: '登录已取消。',
     doneAdmin: '已连接 {address}。它属于你，用来指挥 Super Agent。', doneEmployee: '已为 {name} 连接 {address}。只有 {name} 会使用它。',
     openEmployees: '回到数字员工',
+    mailChecked: '{time} 检查过 · 已处理 {n} 封', mailWaiting: '一分钟内开始第一次检查。',
   },
 };
 
@@ -154,6 +157,11 @@ export function AccountConnections({ employee }: { employee?: { id: string; name
           <label className="account-check"><input type="checkbox" checked={account.mailTrigger} disabled={busy !== null}
             onChange={(event) => void change(account, { mailTrigger: event.target.checked })} />
             <span>{forAdmin ? t('mailTriggerAdmin') : t('mailTriggerEmployee', { name })}</span></label>
+          {account.mailTrigger ? (account.mail?.error
+            ? <p className="warn account-mail">{account.mail.error}</p>
+            : <p className="helper account-mail">{account.mail?.checkedAt
+              ? t('mailChecked', { time: new Date(account.mail.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), n: account.mail.received })
+              : t('mailWaiting')}</p>) : null}
           <div className="account-send">
             <span>{t('sendRule')}</span>
             <span className="chip-row" role="group" aria-label={t('sendRule')}>

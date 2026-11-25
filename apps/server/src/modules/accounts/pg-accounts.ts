@@ -1,3 +1,4 @@
+import type { MailDraft, MailDraftStore } from './mail.js';
 import type { AccountConnection, AccountStore, OAuthAttempt, Owner } from './accounts.js';
 
 export interface AccountsDb {
@@ -8,6 +9,7 @@ interface Row {
   id: string; tenant_id: string; owner_kind: Owner['kind']; owner_id: string; provider: 'microsoft'; address: string; display_name: string;
   scopes: string; mail_trigger: boolean; calendar_trigger: boolean; send_rule: AccountConnection['sendRule']; status: AccountConnection['status'];
   grant_ref: AccountConnection['grant']; grant_deadline: Date | string | null; connected_by: string; created_at: Date | string; updated_at: Date | string;
+  mail_state?: AccountConnection['mailState'] | null;
 }
 
 const iso = (value: Date | string) => new Date(value).toISOString();
@@ -15,17 +17,18 @@ const fromRow = (r: Row): AccountConnection => ({
   id: r.id, tenantId: r.tenant_id, owner: { kind: r.owner_kind, id: r.owner_id }, provider: r.provider, address: r.address, displayName: r.display_name,
   scopes: r.scopes, mailTrigger: r.mail_trigger, calendarTrigger: r.calendar_trigger, sendRule: r.send_rule, status: r.status, grant: r.grant_ref,
   grantDeadline: r.grant_deadline === null ? null : new Date(r.grant_deadline).getTime(), connectedBy: r.connected_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
+  ...(r.mail_state && Object.keys(r.mail_state).length ? { mailState: r.mail_state } : {}),
 });
 
 export const SAVE_ACCOUNT_SQL = `
 INSERT INTO account_connections (id, tenant_id, owner_kind, owner_id, provider, address, display_name, scopes, mail_trigger,
-  calendar_trigger, send_rule, status, grant_ref, grant_deadline, connected_by, created_at, updated_at)
-VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17)
+  calendar_trigger, send_rule, status, grant_ref, grant_deadline, connected_by, created_at, updated_at, mail_state)
+VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18::jsonb)
 ON CONFLICT (tenant_id, owner_kind, owner_id, provider, lower(address)) DO UPDATE SET
   display_name = EXCLUDED.display_name, scopes = EXCLUDED.scopes, mail_trigger = EXCLUDED.mail_trigger,
   calendar_trigger = EXCLUDED.calendar_trigger, send_rule = EXCLUDED.send_rule, status = EXCLUDED.status,
   grant_ref = EXCLUDED.grant_ref, grant_deadline = EXCLUDED.grant_deadline, connected_by = EXCLUDED.connected_by,
-  updated_at = EXCLUDED.updated_at
+  updated_at = EXCLUDED.updated_at, mail_state = EXCLUDED.mail_state
 RETURNING *`.trim();
 
 export class PgAccountStore implements AccountStore {
@@ -43,8 +46,13 @@ export class PgAccountStore implements AccountStore {
     const { rows } = await this.db.query<Row>(SAVE_ACCOUNT_SQL, [
       c.id, c.tenantId, c.owner.kind, c.owner.id, c.provider, c.address, c.displayName, c.scopes, c.mailTrigger, c.calendarTrigger, c.sendRule,
       c.status, c.grant ? JSON.stringify(c.grant) : null, c.grantDeadline === null ? null : new Date(c.grantDeadline).toISOString(), c.connectedBy, c.createdAt, c.updatedAt,
+      JSON.stringify(c.mailState ?? {}),
     ]);
     return fromRow(rows[0]!);
+  }
+  async mailEnabled() {
+    const { rows } = await this.db.query<Row>("SELECT * FROM account_connections WHERE mail_trigger AND status = 'connected'", []);
+    return rows.map(fromRow);
   }
   async remove(tenantId: string, id: string) {
     await this.db.query('DELETE FROM account_connections WHERE tenant_id = $1::uuid AND id = $2::uuid', [tenantId, id]);
@@ -62,5 +70,29 @@ export class PgAccountStore implements AccountStore {
     );
     const r = rows[0];
     return r ? { stateHash: r.state_hash, tenantId: r.tenant_id, userId: r.user_id, owner: { kind: r.owner_kind, id: r.owner_id }, verifier: r.verifier_ref, redirectUri: r.redirect_uri, expiresAt: new Date(r.expires_at).getTime() } : null;
+  }
+}
+
+/** Reply drafts mail automation keeps until a person decides. */
+export class PgMailDraftStore implements MailDraftStore {
+  constructor(private readonly db: AccountsDb) {}
+  async pending(tenantId: string) {
+    const { rows } = await this.db.query<{ doc: MailDraft }>("SELECT doc FROM mail_drafts WHERE tenant_id = $1::uuid AND status = 'pending' ORDER BY created_at", [tenantId]);
+    return rows.map((row) => row.doc);
+  }
+  async get(tenantId: string, id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+    const { rows } = await this.db.query<{ doc: MailDraft }>('SELECT doc FROM mail_drafts WHERE tenant_id = $1::uuid AND id = $2::uuid', [tenantId, id]);
+    return rows[0]?.doc ?? null;
+  }
+  async add(d: MailDraft) {
+    const { rows } = await this.db.query<{ id: string }>(
+      'INSERT INTO mail_drafts (id, tenant_id, account_id, status, doc) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::jsonb) ON CONFLICT DO NOTHING RETURNING id',
+      [d.id, d.tenantId, d.accountId, d.status, JSON.stringify(d)],
+    );
+    return rows.length === 1;
+  }
+  async save(d: MailDraft) {
+    await this.db.query('UPDATE mail_drafts SET status = $3, doc = $4::jsonb, updated_at = now() WHERE tenant_id = $1::uuid AND id = $2::uuid', [d.tenantId, d.id, d.status, JSON.stringify(d)]);
   }
 }

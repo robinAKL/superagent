@@ -224,6 +224,125 @@ function refusal(error: unknown): { code: number; body: { error: string } } {
 }
 
 /** Command room HTTP surface (PRD §5.6). Under /api/v1 the caller is always the signed-in user. */
+/** The parts of a request posting a room message: an HTTP request, or mail Super Agent reads on a person's behalf. */
+export interface RoomMessageRequest { body: unknown; headers: Record<string, unknown>; user?: import('@superagent/shared').UserContext }
+interface RoomMessageReply { code(status: number): { send(payload: unknown): unknown } }
+
+/** POST /room/messages: a person's message, read by Super Agent (and the model, when it is bound). */
+export async function receiveRoomMessage(req: RoomMessageRequest, reply: RoomMessageReply) {
+  const body = (req.body ?? {}) as MessageBody;
+  if (!body.roomId || !body.body || !body.clientMessageId) return reply.code(400).send({ error: 'missing_fields' });
+  const viewer = viewerFrom(req.headers, req.user);
+  const tenantId = req.user?.tenantId ?? body.tenantId ?? 't';
+  const room = roomState.current;
+  // A question about a numbered task is answered from the task, not read by the model.
+  let aboutTask = !body.followupTo && !room.namesEmployee(body.body) ? room.answerAboutTask(body.body, viewer, body.roomId) : null;
+  // "重试 T-5", "全部重试": a person tells Super Agent to start tasks over; it does, and says what happened.
+  const retryAsk = !body.followupTo && !room.namesEmployee(body.body) ? asksRetry(body.body) : null;
+  if (aboutTask === null && retryAsk && !room.hasClientMessage(body.roomId, body.clientMessageId)) {
+    aboutTask = (await retryAndSay(viewer, body.roomId, retryAsk)) ?? '没有可以重试的未完成任务。';
+  }
+  // "进行中的任务怎么还没完成", "看板": Super Agent acts on the board first, then reads it out.
+  if (aboutTask === null && !body.followupTo && !room.namesEmployee(body.body) && !room.hasClientMessage(body.roomId, body.clientMessageId) && asksBoard(body.body)) {
+    await superviseRoom();
+    aboutTask = roomState.current.boardSummary(viewer, body.roomId);
+  }
+  // Greetings, thanks and "测试，请忽略" get a fixed short reply: the model would answer what came before them.
+  const smallTalk = isGreeting(body.body) || smallTalkReply(body.body) !== null;
+  const think = aboutTask === null && !smallTalk && roomBrain !== null && !body.followupTo && !room.hasClientMessage(body.roomId, body.clientMessageId) && !room.namesEmployee(body.body);
+
+  /** Send a task Super Agent created to the employee's computer, as an @mention would. */
+  const dispatch = async (task: import('./room.js').RoomTask | null) => {
+    const scopes = viewer.roles.includes('owner') || viewer.roles.includes('admin') ? null : viewer.projectScopes;
+    const target = req.user && task && task.tenantId === req.user.tenantId && task.createdByUserId === viewer.userId
+      && roomState.current.roster(viewer).some((employee) => employee.id === task.employeeId && employee.status !== 'paused')
+      ? await resolveRoomDispatch(task, scopes)
+      : undefined;
+    if (task && target) task.projectId = target.projectId;
+    await flushRoom();
+    if (task && target) await queueRoomDispatch(task, target);
+  };
+
+  const posted = room.post({
+    roomId: body.roomId,
+    // The signed-in user's tenant wins; the body value is only read where no auth hook is mounted (unit tests).
+    tenantId,
+    projectId: body.projectId ?? null,
+    authorUserId: viewer.userId,
+    authorRoles: viewer.roles,
+    authorProjectScopes: viewer.projectScopes,
+    modelAvailable: header(req.headers, 'x-model-available') === 'false' ? false : undefined,
+    body: body.body,
+    clientMessageId: body.clientMessageId,
+    followupTo: typeof body.followupTo === 'string' && body.followupTo ? body.followupTo : null,
+    // Super Agent may take a while (a model call, perhaps a lookup): the message is stored and confirmed now.
+    defer: think,
+    ...(aboutTask ? { understood: { answer: aboutTask } } : {}),
+  });
+  if (!think || posted.duplicate) {
+    await dispatch(posted.task);
+    return posted;
+  }
+  await flushRoom();
+
+  // Reports and progress from a computer are posted under the employee's owner; they are the employee speaking.
+  const history: RoomBrainInput['history'] = room.eventsAfter(body.roomId, 0, viewer).filter((message) => message.id !== posted.message.id).slice(-12).map((message) => ({
+    from: message.authorUserId === 'super-agent' ? 'super-agent'
+      : message.kind === 'report' || message.clientMessageId.startsWith('worker-') || message.authorUserId !== viewer.userId ? 'employee' : 'user',
+    text: message.body.slice(0, 1500),
+  }));
+  const text = body.body;
+  const roomId = body.roomId;
+  void (async () => {
+    let understood: import('./brain.js').Understood | null = null;
+    try {
+      const sources = req.user && roomLookups ? await roomLookups.sources(req.user).catch(() => []) : [];
+      const roster = room.roster(viewer);
+      const now = Date.now();
+      const tasks = room.listTasks(viewer, body.roomId).map((task) => ({
+        code: taskCode(task),
+        title: task.title.slice(0, 200),
+        status: stateText(task),
+        employee: roster.find((employee) => employee.id === task.employeeId)?.name ?? '',
+        ...(task.watch ? { minutesInState: Math.max(0, Math.round((now - new Date(task.watch.since).getTime()) / 60_000)), retries: task.watch.attempts } : {}),
+      }));
+      const decision = await roomBrain!.understand({ tenantId, body: text, roster, sources, tasks, history });
+      if (decision && 'ask' in decision) {
+        // Super Agent looks it up itself through the person's own connection, then answers in the room.
+        const source = sources.find((item) => item.id === decision.ask.sourceId);
+        try {
+          const found = await roomLookups!.ask(req.user!, decision.ask.sourceId, decision.ask.question);
+          understood = { answer: found.answer.trim()
+            ? `${found.answer.trim()}
+
+（来自 ${source?.name ?? 'MCP'}）`
+            : `我查了 ${source?.name ?? 'MCP'}，没有找到能回答这个问题的数据。` };
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          const code = (error as { code?: unknown } | null)?.code;
+          console.warn(`room lookup failed (${typeof code === 'string' ? code : 'error'}): ${reason}`);
+          understood = { answer: `我去 ${source?.name ?? 'MCP'} 查了，但这次没有拿到结果（${reason.slice(0, 120)}）。可以再问一次，或到「企业知识 → 知识来源」检查连接。` };
+        }
+      } else {
+        understood = decision;
+      }
+      // The model may "assign" a new task whose work is to do an open one (「去完成 T-16」). That would leave T-16
+      // open beside a duplicate: Super Agent retries T-16 itself instead.
+      if (understood && 'work' in understood) {
+        const codes = [...understood.work.matchAll(/(?:^|[^A-Za-z0-9])[Tt]-(\d{1,6})(?!\d)/gu)].map((match) => Number(match[1]));
+        const said = codes.length ? await retryAndSay(viewer, roomId, [...new Set(codes)]) : null;
+        if (said) understood = { answer: said };
+      }
+    } catch (error) {
+      console.warn(`room brain failed; using fixed rules: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    // The room in effect now (it may have been reloaded meanwhile) gives the answer, with the same checks as ever.
+    const answered = roomState.current.answerDeferred(posted.message.id, understood);
+    if (answered) await dispatch(answered.task);
+  })().catch((error: unknown) => console.error(`room deferred answer failed: ${error instanceof Error ? error.message : String(error)}`));
+  return { ...posted, awaiting: true };
+}
+
 export const roomModule: FastifyPluginAsync = async (app) => {
   app.get('/status', async () => ({ module: 'room', implemented: true }));
 
@@ -232,119 +351,7 @@ export const roomModule: FastifyPluginAsync = async (app) => {
     if (roomState.current.holdDisconnected().length > 0) await flushRoom();
   });
 
-  app.post('/messages', async (req, reply) => {
-    const body = (req.body ?? {}) as MessageBody;
-    if (!body.roomId || !body.body || !body.clientMessageId) return reply.code(400).send({ error: 'missing_fields' });
-    const viewer = viewerFrom(req.headers, req.user);
-    const tenantId = req.user?.tenantId ?? body.tenantId ?? 't';
-    const room = roomState.current;
-    // A question about a numbered task is answered from the task, not read by the model.
-    let aboutTask = !body.followupTo && !room.namesEmployee(body.body) ? room.answerAboutTask(body.body, viewer, body.roomId) : null;
-    // "重试 T-5", "全部重试": a person tells Super Agent to start tasks over; it does, and says what happened.
-    const retryAsk = !body.followupTo && !room.namesEmployee(body.body) ? asksRetry(body.body) : null;
-    if (aboutTask === null && retryAsk && !room.hasClientMessage(body.roomId, body.clientMessageId)) {
-      aboutTask = (await retryAndSay(viewer, body.roomId, retryAsk)) ?? '没有可以重试的未完成任务。';
-    }
-    // "进行中的任务怎么还没完成", "看板": Super Agent acts on the board first, then reads it out.
-    if (aboutTask === null && !body.followupTo && !room.namesEmployee(body.body) && !room.hasClientMessage(body.roomId, body.clientMessageId) && asksBoard(body.body)) {
-      await superviseRoom();
-      aboutTask = roomState.current.boardSummary(viewer, body.roomId);
-    }
-    // Greetings, thanks and "测试，请忽略" get a fixed short reply: the model would answer what came before them.
-    const smallTalk = isGreeting(body.body) || smallTalkReply(body.body) !== null;
-    const think = aboutTask === null && !smallTalk && roomBrain !== null && !body.followupTo && !room.hasClientMessage(body.roomId, body.clientMessageId) && !room.namesEmployee(body.body);
-
-    /** Send a task Super Agent created to the employee's computer, as an @mention would. */
-    const dispatch = async (task: import('./room.js').RoomTask | null) => {
-      const scopes = viewer.roles.includes('owner') || viewer.roles.includes('admin') ? null : viewer.projectScopes;
-      const target = req.user && task && task.tenantId === req.user.tenantId && task.createdByUserId === viewer.userId
-        && roomState.current.roster(viewer).some((employee) => employee.id === task.employeeId && employee.status !== 'paused')
-        ? await resolveRoomDispatch(task, scopes)
-        : undefined;
-      if (task && target) task.projectId = target.projectId;
-      await flushRoom();
-      if (task && target) await queueRoomDispatch(task, target);
-    };
-
-    const posted = room.post({
-      roomId: body.roomId,
-      // The signed-in user's tenant wins; the body value is only read where no auth hook is mounted (unit tests).
-      tenantId,
-      projectId: body.projectId ?? null,
-      authorUserId: viewer.userId,
-      authorRoles: viewer.roles,
-      authorProjectScopes: viewer.projectScopes,
-      modelAvailable: header(req.headers, 'x-model-available') === 'false' ? false : undefined,
-      body: body.body,
-      clientMessageId: body.clientMessageId,
-      followupTo: typeof body.followupTo === 'string' && body.followupTo ? body.followupTo : null,
-      // Super Agent may take a while (a model call, perhaps a lookup): the message is stored and confirmed now.
-      defer: think,
-      ...(aboutTask ? { understood: { answer: aboutTask } } : {}),
-    });
-    if (!think || posted.duplicate) {
-      await dispatch(posted.task);
-      return posted;
-    }
-    await flushRoom();
-
-    // Reports and progress from a computer are posted under the employee's owner; they are the employee speaking.
-    const history: RoomBrainInput['history'] = room.eventsAfter(body.roomId, 0, viewer).filter((message) => message.id !== posted.message.id).slice(-12).map((message) => ({
-      from: message.authorUserId === 'super-agent' ? 'super-agent'
-        : message.kind === 'report' || message.clientMessageId.startsWith('worker-') || message.authorUserId !== viewer.userId ? 'employee' : 'user',
-      text: message.body.slice(0, 1500),
-    }));
-    const text = body.body;
-    const roomId = body.roomId;
-    void (async () => {
-      let understood: import('./brain.js').Understood | null = null;
-      try {
-        const sources = req.user && roomLookups ? await roomLookups.sources(req.user).catch(() => []) : [];
-        const roster = room.roster(viewer);
-        const now = Date.now();
-        const tasks = room.listTasks(viewer, body.roomId).map((task) => ({
-          code: taskCode(task),
-          title: task.title.slice(0, 200),
-          status: stateText(task),
-          employee: roster.find((employee) => employee.id === task.employeeId)?.name ?? '',
-          ...(task.watch ? { minutesInState: Math.max(0, Math.round((now - new Date(task.watch.since).getTime()) / 60_000)), retries: task.watch.attempts } : {}),
-        }));
-        const decision = await roomBrain!.understand({ tenantId, body: text, roster, sources, tasks, history });
-        if (decision && 'ask' in decision) {
-          // Super Agent looks it up itself through the person's own connection, then answers in the room.
-          const source = sources.find((item) => item.id === decision.ask.sourceId);
-          try {
-            const found = await roomLookups!.ask(req.user!, decision.ask.sourceId, decision.ask.question);
-            understood = { answer: found.answer.trim()
-              ? `${found.answer.trim()}
-
-（来自 ${source?.name ?? 'MCP'}）`
-              : `我查了 ${source?.name ?? 'MCP'}，没有找到能回答这个问题的数据。` };
-          } catch (error) {
-            const reason = error instanceof Error ? error.message : String(error);
-            const code = (error as { code?: unknown } | null)?.code;
-            console.warn(`room lookup failed (${typeof code === 'string' ? code : 'error'}): ${reason}`);
-            understood = { answer: `我去 ${source?.name ?? 'MCP'} 查了，但这次没有拿到结果（${reason.slice(0, 120)}）。可以再问一次，或到「企业知识 → 知识来源」检查连接。` };
-          }
-        } else {
-          understood = decision;
-        }
-        // The model may "assign" a new task whose work is to do an open one (「去完成 T-16」). That would leave T-16
-        // open beside a duplicate: Super Agent retries T-16 itself instead.
-        if (understood && 'work' in understood) {
-          const codes = [...understood.work.matchAll(/(?:^|[^A-Za-z0-9])[Tt]-(\d{1,6})(?!\d)/gu)].map((match) => Number(match[1]));
-          const said = codes.length ? await retryAndSay(viewer, roomId, [...new Set(codes)]) : null;
-          if (said) understood = { answer: said };
-        }
-      } catch (error) {
-        console.warn(`room brain failed; using fixed rules: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      // The room in effect now (it may have been reloaded meanwhile) gives the answer, with the same checks as ever.
-      const answered = roomState.current.answerDeferred(posted.message.id, understood);
-      if (answered) await dispatch(answered.task);
-    })().catch((error: unknown) => console.error(`room deferred answer failed: ${error instanceof Error ? error.message : String(error)}`));
-    return { ...posted, awaiting: true };
-  });
+  app.post('/messages', async (req, reply) => receiveRoomMessage(req, reply));
 
   /** Who is looking, and which digital employees they may name. Read from the employee module on every call. */
   app.get('/roster', async (req) => {

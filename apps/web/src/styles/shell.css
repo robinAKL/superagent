@@ -250,3 +250,17 @@ button, input, select, textarea { font-family: inherit; }
 .account-check input { flex: none; width: 16px; height: 16px; margin: 0; }
 .account-send { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-xs); font-size: 13px; }
 .account-actions, .account-connect { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+
+/* Mail automation: last check under a mailbox, and replies waiting in My work. */
+.account-mail { margin: -2px 0 0 24px; font-size: 12px; }
+.mail-drafts { display: grid; gap: var(--space-sm); margin-bottom: var(--space-md); }
+.mail-drafts header { display: grid; gap: 2px; }
+.mail-drafts h2, .mail-drafts header p { margin: 0; }
+.mail-drafts ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-sm); }
+.mail-draft { display: grid; gap: var(--space-xs); padding: var(--space-sm); border: 1px solid var(--color-rule); border-radius: 10px; }
+.mail-draft-head { display: grid; gap: 2px; min-width: 0; }
+.mail-draft-head .helper { font-size: 12px; overflow-wrap: anywhere; }
+.mail-draft-body { margin: 0; white-space: pre-wrap; font: inherit; font-size: 13px; max-height: 14rem; overflow: auto; padding: var(--space-xs) var(--space-sm);
+  background: var(--color-paper-2); border-radius: 8px; }
+.mail-draft textarea { width: 100%; font: inherit; font-size: 13px; }
+.mail-draft-actions { display: flex; flex-wrap: wrap; gap: var(--space-xs); }

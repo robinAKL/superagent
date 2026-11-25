@@ -13,6 +13,7 @@ import { executionModule } from './execution/index.js';
 import { workersModule } from './workers/index.js';
 import { accountsModule } from './accounts/index.js';
 import { schedulesModule } from './schedules/index.js';
+import { mailModule } from './accounts/mail.js';
 
 export interface ModuleDef {
   prefix: string;
@@ -43,4 +44,6 @@ export const modules: ModuleDef[] = [
   { prefix: 'accounts', plugin: accountsModule, roles: ['admin', 'owner'] },
   // The workflow calendar: every signed-in member; the module shows each role only what it may see.
   { prefix: 'schedules', plugin: schedulesModule },
+  // Reply drafts from mail automation: admins, and the person responsible for the employee (checked per draft).
+  { prefix: 'mail', plugin: mailModule },
 ];
