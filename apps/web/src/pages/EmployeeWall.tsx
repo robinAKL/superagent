@@ -49,8 +49,9 @@ export function EmployeeWall({ employees, hasDraft, onManage }: { employees: Wal
   useEffect(() => {
     let cancelled = false;
     void Promise.all(employees.map(async employee => {
-      const response = await api<unknown[]>(`/api/v1/tools/?employeeId=${encodeURIComponent(employee.id)}`).catch(() => null);
-      return [employee.id, response?.status === 200 && Array.isArray(response.body) ? response.body.length : -1] as const;
+      const response = await api<{ stage?: string; state?: string }[]>(`/api/v1/tools/?employeeId=${encodeURIComponent(employee.id)}`).catch(() => null);
+      // A placeholder is a capability still missing, not a tool the employee can use.
+      return [employee.id, response?.status === 200 && Array.isArray(response.body) ? response.body.filter(tool => tool.stage !== 'placeholder' && tool.state !== 'placeholder').length : -1] as const;
     })).then(entries => { if (!cancelled) setToolCounts(Object.fromEntries(entries.filter(([, n]) => n >= 0))); });
     return () => { cancelled = true; };
   }, [employees]);
