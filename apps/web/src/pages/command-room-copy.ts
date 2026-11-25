@@ -171,6 +171,7 @@ const ENGLISH: Readonly<Record<string, string>> = {
   "筛选对话": "Filter the conversation",
   "交付": "Delivered",
   "我发的": "Mine",
+  "任务消息": "Task messages",
   "搜索对话": "Search the conversation",
   "完成进度": "Progress",
   "收起": "Show less",

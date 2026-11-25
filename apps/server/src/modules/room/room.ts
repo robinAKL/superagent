@@ -207,6 +207,12 @@ const MAX_NUDGES = 3;
 const NUDGE_EVERY = 120 * MINUTE;
 
 /** "task_153" → "T-153". */
+/** A task's title as Super Agent's notes quote it: short enough to read in one line (the task holds the full text). */
+export function shortTitle(title: string, max = 28): string {
+  const line = title.replace(/\s+/g, ' ').trim();
+  return line.length > max ? line.slice(0, max) + '…' : line;
+}
+
 export function taskCode(task: Pick<RoomTask, 'id'>): string {
   return `T-${/(\d+)$/.exec(task.id)?.[1] ?? task.id}`;
 }
@@ -664,7 +670,7 @@ export class CommandRoom {
         roomId: task.roomId,
         tenantId: task.tenantId,
         authorUserId: 'super-agent',
-        body: `@${employee?.name ?? '数字员工'} 已断开，任务「${task.title}」保留为等待连接，没有重建或转交。`,
+        body: `@${employee?.name ?? '数字员工'} 已断开，任务「${shortTitle(task.title)}」保留为等待连接，没有重建或转交。`,
         clientMessageId: `hold:${task.id}:${this.seq + 1}`,
         mentions: employee ? [employee.id] : [],
         taskIds: [task.id],
@@ -716,26 +722,26 @@ export class CommandRoom {
         say(body, 'nudge');
       };
       if (task.approval !== 'none' || task.hold) {
-        if (task.hold) remind(30, `${code}「${task.title}」在等企业负责人授权工具 ${task.hold.toolId}，授权后我会让 @${name} 继续。`);
+        if (task.hold) remind(30, `${code}「${shortTitle(task.title)}」在等企业负责人授权工具 ${task.hold.toolId}，授权后我会让 @${name} 继续。`);
         continue;
       }
       if (task.status === 'waiting' && task.waitingReason === WAITING_CONNECTION) {
-        if (online) again(`@${name} 的电脑已在线，我把 ${code}「${task.title}」重新派给它继续做（同一个任务，没有新建）。`);
-        else remind(30, `${code}「${task.title}」在等 @${name} 的电脑上线，已经 ${age} 分钟。请打开那台电脑上的 Link，上线后我会自动继续。`);
+        if (online) again(`@${name} 的电脑已在线，我把 ${code}「${shortTitle(task.title)}」重新派给它继续做（同一个任务，没有新建）。`);
+        else remind(30, `${code}「${shortTitle(task.title)}」在等 @${name} 的电脑上线，已经 ${age} 分钟。请打开那台电脑上的 Link，上线后我会自动继续。`);
       } else if (task.status === 'waiting' && task.waitingReason === WAITING_FAILED) {
-        if (online && watch.attempts < MAX_ATTEMPTS && age >= 1) again(`${code}「${task.title}」上次执行失败，我已让 @${name} 自动重试（第 ${watch.attempts + 1} 次）。`);
-        else if (watch.attempts >= MAX_ATTEMPTS) remind(0, `${code}「${task.title}」已自动重试 ${watch.attempts} 次仍然失败，需要你决定：补充说明后重试、改派给别人，或取消。`);
+        if (online && watch.attempts < MAX_ATTEMPTS && age >= 1) again(`${code}「${shortTitle(task.title)}」上次执行失败，我已让 @${name} 自动重试（第 ${watch.attempts + 1} 次）。`);
+        else if (watch.attempts >= MAX_ATTEMPTS) remind(0, `${code}「${shortTitle(task.title)}」已自动重试 ${watch.attempts} 次仍然失败，需要你决定：补充说明后重试、改派给别人，或取消。`);
       } else if (task.status === 'waiting' && task.waitingReason === WAITING_SIGN_IN) {
-        remind(5, `${code}「${task.title}」在等 @${name} 的电脑完成本地登录（Claude Code / Codex）。登录后我会自动继续。`);
+        remind(5, `${code}「${shortTitle(task.title)}」在等 @${name} 的电脑完成本地登录（Claude Code / Codex）。登录后我会自动继续。`);
       } else if (task.status === 'waiting' && task.waitingReason === '等待补充') {
-        remind(10, `${code}「${task.title}」还在等你补充信息，补充后 @${name} 会继续。`);
+        remind(10, `${code}「${shortTitle(task.title)}」还在等你补充信息，补充后 @${name} 会继续。`);
       } else if (task.status === 'waiting' && task.waitingReason === '等待模型') {
-        remind(10, `${code}「${task.title}」在等模型恢复。请到「管理设置」检查模型连接和额度。`);
+        remind(10, `${code}「${shortTitle(task.title)}」在等模型恢复。请到「管理设置」检查模型连接和额度。`);
       } else if (task.status === 'assigned' && online) {
-        if (age >= 10 && watch.attempts < MAX_ATTEMPTS) again(`${code}「${task.title}」派出 ${age} 分钟还没被 @${name} 的电脑领取，我已重新派发。`);
-        else if (watch.attempts >= MAX_ATTEMPTS) remind(10, `${code}「${task.title}」重新派发 ${watch.attempts} 次仍没被领取。请检查 @${name} 那台电脑的 Link 是否在运行、项目是否已绑定。`);
+        if (age >= 10 && watch.attempts < MAX_ATTEMPTS) again(`${code}「${shortTitle(task.title)}」派出 ${age} 分钟还没被 @${name} 的电脑领取，我已重新派发。`);
+        else if (watch.attempts >= MAX_ATTEMPTS) remind(10, `${code}「${shortTitle(task.title)}」重新派发 ${watch.attempts} 次仍没被领取。请检查 @${name} 那台电脑的 Link 是否在运行、项目是否已绑定。`);
       } else if (task.status === 'running') {
-        remind(30, `${code}「${task.title}」@${name} 已经 ${age} 分钟没有新进展，我在盯着。如果卡住了，可以在任务上取消，或告诉我重试。`);
+        remind(30, `${code}「${shortTitle(task.title)}」@${name} 已经 ${age} 分钟没有新进展，我在盯着。如果卡住了，可以在任务上取消，或告诉我重试。`);
       }
     }
     return { messages, retry };
@@ -788,7 +794,7 @@ export class CommandRoom {
       watch.nudges += 1;
       watch.lastNudgeAt = at;
     }
-    return post(`${taskCode(task)}「${task.title}」现在没有电脑能接：@${employee?.name ?? '数字员工'} 没有绑定到唯一的一台电脑和项目。请到「管理设置 → 已连接的电脑」检查绑定，绑好后我会自动派出。`, 'nudge');
+    return post(`${taskCode(task)}「${shortTitle(task.title)}」现在没有电脑能接：@${employee?.name ?? '数字员工'} 没有绑定到唯一的一台电脑和项目。请到「管理设置 → 已连接的电脑」检查绑定，绑好后我会自动派出。`, 'nudge');
   }
 
   /**
@@ -807,7 +813,7 @@ export class CommandRoom {
       if (!OPEN.has(task.status) || task.approval !== 'none' || task.hold) continue;
       if (!isOwner(viewer) && task.createdByUserId !== viewer.userId) continue;
       if (task.watch) task.watch.attempts = 0;
-      retry.push({ task, body: `${taskCode(task)}「${task.title}」已重新派给 @${this.employees().find((item) => item.id === task.employeeId)?.name ?? '数字员工'}（同一个任务，没有新建）。` });
+      retry.push({ task, body: `${taskCode(task)}「${shortTitle(task.title)}」已重新派给 @${this.employees().find((item) => item.id === task.employeeId)?.name ?? '数字员工'}（同一个任务，没有新建）。` });
     }
     return { retry, skipped };
   }
@@ -878,7 +884,7 @@ export class CommandRoom {
       roomId: task.roomId,
       tenantId: task.tenantId,
       authorUserId: 'super-agent',
-      body: `@${employee!.name} 已重新连接，同一任务「${task.title}」继续进行，没有重建。`,
+      body: `@${employee!.name} 已重新连接，同一任务「${shortTitle(task.title)}」继续进行，没有重建。`,
       clientMessageId,
       mentions: [employee!.id],
       taskIds: [task.id],

@@ -1,4 +1,4 @@
-.knowledge-page { max-width: 1280px; margin: 0 auto; }
+.knowledge-page { max-width: 1280px; margin: 0; } /* left-aligned like every other page: titles do not jump when switching */
 .knowledge-page, .knowledge-page * { box-sizing: border-box; }
 .knowledge-page [hidden] { display: none !important; }
 .knowledge-workspace-nav { margin: var(--space-sm) 0 var(--space-md); }

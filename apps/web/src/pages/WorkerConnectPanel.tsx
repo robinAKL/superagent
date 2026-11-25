@@ -28,7 +28,7 @@ const TEXT = {
     download: 'Download Link for Windows',
     downloadLatest: 'Download the latest Link (Windows)',
     downloadHint: 'This link always gets the newest version. A computer that already has Link offers the upgrade in its tray menu.',
-    allBound: 'Every digital employee is already bound. To put this computer to work, add people in Team or remove a binding elsewhere.', bindRemoved: 'Binding removed.',
+    allBound: 'Every digital employee is already bound. To put this computer to work, add people in Team or remove a binding elsewhere.', allBoundMore: 'Every digital employee is already bound to a computer. To add another one here, add people in Team first.', bindRemoved: 'Binding removed.',
   },
   zh: {
     title: '已连接的电脑',
@@ -55,6 +55,7 @@ const TEXT = {
     downloadLatest: '下载最新版 Link（Windows）',
     downloadHint: '这个链接始终下载最新版本。已经装了 Link 的电脑，会在托盘菜单里提示升级。',
     allBound: '所有数字员工都已绑定。要让这台电脑干活，请在「数字员工」里增加人数，或先移除其他电脑上的绑定。',
+    allBoundMore: '所有数字员工都已绑定电脑。要在这台电脑上再加一位，请先在「数字员工」里增加人数。',
   },
 } satisfies Dict<string>;
 
@@ -199,7 +200,8 @@ function DeviceBindings({ worker, employees, employeesLoaded, boundEmployees, de
         <button className="btn" type="button" disabled={busy} onClick={() => void onSave(worker.id, binding, true)}>{t('unbind')}</button>
       </li>;
     })}</ul> : <p className="helper">{t('unbound')}</p>}
-    {projects.length && employeesLoaded && choices.length === 0 ? <p className="helper">{t('allBound')}</p> : null}
+    {/* A computer already working is told how to add another employee; an idle one, why it has nobody. */}
+    {projects.length && employeesLoaded && choices.length === 0 ? <p className="helper">{t(roomAssignments.length ? 'allBoundMore' : 'allBound')}</p> : null}
     {projects.length && !(employeesLoaded && choices.length === 0) ? <form className="link-device-form" onSubmit={event => {
       event.preventDefault();
       if (projectId && employeeId) void onSave(worker.id, { projectId, employeeId });
