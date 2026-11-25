@@ -30,6 +30,8 @@ export interface LinkDevice {
     permissions?: Record<string, { mode: 'strict' | 'standard' | 'full'; rules?: Record<string, 'allow' | 'ask' | 'deny'>; askEmail?: boolean; seen?: string[] }>;
     /** MCP servers Claude Code has on the computer, as `claude mcp list` reports them. */
     mcpServers?: { name: string; status: 'connected' | 'needs_auth' | 'failed' | 'unknown'; tools?: string[] }[];
+    /** Local clients (agent CLIs) Link found here, from Link 0.1.8. */
+    clients?: { agent: 'claude-code' | 'codex'; state: 'missing' | 'signed-out' | 'ready'; connected: boolean }[];
   };
 }
 

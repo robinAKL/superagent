@@ -1,0 +1,76 @@
+import { useState } from 'react';
+import { api } from '../api';
+import { useT } from '../i18n';
+import type { LinkDevice } from './link-devices';
+
+/**
+ * The local clients on one computer (Claude Code, Codex): where each stands and the one step that comes next. A click
+ * opens the step on that computer (the tray's local clients window); installing, signing in and choosing a folder
+ * happen there, by the person at the computer. Several clients can be connected at once.
+ */
+export type ClientState = 'missing' | 'signed-out' | 'ready';
+export interface LocalClient { agent: 'claude-code' | 'codex'; state: ClientState; connected: boolean }
+
+const TEXT = {
+  en: {
+    title: 'Local clients', unknown: 'Link has not reported its clients yet (needs Link 0.1.8 or later; update it from the tray).',
+    missing: 'Not installed', signedOut: 'Installed, not signed in', ready: 'Signed in, not connected to a project folder', connected: 'Connected',
+    install: 'Install and sign in', login: 'Sign in', connect: 'Choose a project folder', more: 'Add a folder',
+    sent: 'Opened on {device}. Follow the window there: click the button, sign in in the browser, then choose a folder. This page updates by itself.',
+    failed: 'The computer could not be reached. Check that Link is running on it, then try again.',
+    none: 'No client is connected yet: Super Agent cannot run work on this computer until one is.',
+  },
+  zh: {
+    title: '本地客户端', unknown: 'Link 还没有上报客户端情况（需要 Link 0.1.8 或更新版本，请在托盘里检查更新）。',
+    missing: '未安装', signedOut: '已安装，还没登录', ready: '已登录，还没连接项目文件夹', connected: '已连接',
+    install: '安装并登录', login: '登录', connect: '选择项目文件夹', more: '再连接一个文件夹',
+    sent: '已在 {device} 上打开。请在那台电脑弹出的窗口里点按钮、在浏览器里登录，最后选一个文件夹。这里会自动更新。',
+    failed: '没能联系到那台电脑。请确认那台电脑上的 Link 在运行，再试一次。',
+    none: '还没有连接任何客户端：连接之前，Super Agent 没法在这台电脑上干活。',
+  },
+};
+
+export const CLIENT_LABEL: Record<LocalClient['agent'], string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+
+/** The step a client needs next. */
+export function nextStep(client: LocalClient): 'install' | 'login' | 'connect' | 'more' {
+  return client.state === 'missing' ? 'install' : client.state === 'signed-out' ? 'login' : client.connected ? 'more' : 'connect';
+}
+
+export function LocalClients({ device, onChanged }: { device: LinkDevice; onChanged: () => void }) {
+  const t = useT(TEXT);
+  const clients = device.capabilities.clients;
+  const [state, setState] = useState<{ agent: string; result: 'sent' | 'failed' } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function open(client: LocalClient) {
+    setBusy(true);
+    const step = nextStep(client);
+    const r = await api(`/api/v1/workers/${device.id}/client-setup`, {
+      method: 'POST', body: JSON.stringify({ agent: client.agent, action: step === 'more' ? 'connect' : step }),
+    }).catch(() => null);
+    setBusy(false);
+    setState({ agent: client.agent, result: r && r.status === 200 ? 'sent' : 'failed' });
+    onChanged();
+  }
+
+  return <section className="local-clients" aria-label={t('title')}>
+    <h4>{t('title')}</h4>
+    {!clients ? <p className="helper">{t('unknown')}</p> : <>
+      {clients.every((client) => !client.connected) ? <p className="warn">{t('none')}</p> : null}
+      <ul>{clients.map((client) => {
+        const step = nextStep(client);
+        return <li key={client.agent} className="local-client" data-agent={client.agent} data-state={client.connected ? 'connected' : client.state}>
+          <span className="local-client-name">{CLIENT_LABEL[client.agent]}</span>
+          <span className={`tag ${client.connected ? 'is-good' : client.state === 'ready' ? 'is-accent' : 'is-warn'}`}>
+            {client.connected ? t('connected') : client.state === 'missing' ? t('missing') : client.state === 'signed-out' ? t('signedOut') : t('ready')}
+          </span>
+          <button type="button" className={`btn ${step === 'more' ? 'quiet' : 'primary'}`} disabled={busy || device.status === 'offline' || device.status === 'revoked'} onClick={() => void open(client)}>
+            {t(step)}
+          </button>
+          {state?.agent === client.agent ? <p className={state.result === 'sent' ? 'helper' : 'warn'} role="status">{state.result === 'sent' ? t('sent', { device: device.name }) : t('failed')}</p> : null}
+        </li>;
+      })}</ul>
+    </>}
+  </section>;
+}

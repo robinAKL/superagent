@@ -8,6 +8,28 @@ import { launchAgent, launchCodexWithApprovals, projectDirectory } from './agent
 import { DEFAULT_POLICY, cleanPolicy, decide, describe, mcpToolsByServer, parseMcpList } from './policy.mjs';
 import { execFile } from 'node:child_process';
 
+/** The local clients Link can run work with. */
+export const CLIENTS = ['claude-code', 'codex'];
+const CLIENT_ACTIONS = new Set(['install', 'login', 'connect']);
+
+/**
+ * Where each local client stands on this computer: missing, installed but signed out, or ready (signed in).
+ * Windows finds installed clients too; elsewhere only signed-in ones are known.
+ */
+async function discoverClients() {
+  // Loaded when used: detect-agents.mjs is also a command-line script.
+  const { discoverWindowsAgents, detectAgents } = await import('./detect-agents.mjs');
+  if (process.platform === 'win32') {
+    const found = await discoverWindowsAgents();
+    return CLIENTS.map((agent) => {
+      const item = found.find((entry) => entry.agent === agent);
+      return { agent, state: !item ? 'missing' : item.signedIn ? 'ready' : 'signed-out' };
+    });
+  }
+  const signedIn = await detectAgents();
+  return CLIENTS.map((agent) => ({ agent, state: signedIn.includes(agent) ? 'ready' : 'missing' }));
+}
+
 /** What a person needs to judge a request, within the room's size limit: long strings (a whole file) are cut. */
 function approvalInput(input) {
   const short = (value, depth = 0) => {
@@ -52,6 +74,12 @@ export class WorkerLink {
   #onTask;
   #onAuth;
   #onMcpLogin;
+  #onClientSetup;
+  #discoverClients;
+  /** Local clients as last checked, refreshed hourly (every minute while a person sets one up). */
+  #clients = null;
+  #clientsCheckedAt = 0;
+  #clientsWatchUntil = 0;
   /** While a person signs an MCP server in, its status is checked every minute instead of every hour. */
   #mcpWatchUntil = 0;
   #renameState;
@@ -60,7 +88,7 @@ export class WorkerLink {
 
   constructor(config, token, {
     fetcher = fetch, launch = launchAgent, launchWithApprovals = launchCodexWithApprovals,
-    sleep = delay, onStatus = () => {}, onTask = () => {}, onAuth = () => {}, onMcpLogin = () => {}, renameState = rename,
+    sleep = delay, onStatus = () => {}, onTask = () => {}, onAuth = () => {}, onMcpLogin = () => {}, onClientSetup = () => {}, discover = discoverClients, renameState = rename,
   } = {}) {
     const endpoint = new URL(config.endpoint);
     if ((endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(endpoint.hostname)))
@@ -80,6 +108,8 @@ export class WorkerLink {
     this.#onTask = onTask;
     this.#onAuth = onAuth;
     this.#onMcpLogin = onMcpLogin;
+    this.#onClientSetup = onClientSetup;
+    this.#discoverClients = discover;
     this.#renameState = renameState;
     try { this.#state = JSON.parse(readFileSync(config.stateFile, 'utf8')); }
     catch (error) {
@@ -134,8 +164,11 @@ export class WorkerLink {
       }
     }
     this.#refreshMcpServers();
+    this.#refreshClients();
     const mcpServers = withMcpTools(this.#mcpServers, this.#state.mcpTools);
-    return { projects, agents: [...new Set(projects.map(project => project.agent))], ...(mcpServers ? { mcpServers } : {}) };
+    // Each client with where it stands and whether a project folder here uses it (several can be connected).
+    const clients = this.#clients?.map((client) => ({ ...client, connected: projects.some((project) => project.agent === client.agent) }));
+    return { projects, agents: [...new Set(projects.map(project => project.agent))], ...(mcpServers ? { mcpServers } : {}), ...(clients ? { clients } : {}) };
   }
 
   #save() {
@@ -276,6 +309,24 @@ export class WorkerLink {
     this.#onMcpLogin(server);
   }
 
+  /**
+   * The web page asks to install, sign in or connect a local client here. The desktop tray opens its local clients
+   * window at that step for the person at this computer; meanwhile the clients are rechecked every minute.
+   */
+  #clientSetup(event) {
+    const { agent, action } = event.payload ?? {};
+    if (!CLIENTS.includes(agent) || !CLIENT_ACTIONS.has(action)) return;
+    this.#clientsWatchUntil = Date.now() + 30 * 60_000;
+    this.#clientsCheckedAt = 0;
+    this.#onClientSetup(agent, action);
+  }
+
+  #refreshClients() {
+    if (Date.now() - this.#clientsCheckedAt < (Date.now() < this.#clientsWatchUntil ? 60_000 : 60 * 60_000)) return;
+    this.#clientsCheckedAt = Date.now();
+    void Promise.resolve().then(() => this.#discoverClients()).then((clients) => { this.#clients = clients; }, () => {});
+  }
+
   #cancel(event) {
     const job = this.#state.jobs.find((item) => item.id === event.payload?.roomTaskId);
     if (!job || job.status === 'done') return;
@@ -292,6 +343,7 @@ export class WorkerLink {
       if (event.kind === 'wake') this.#wake(event);
       if (event.kind === 'cancel') this.#cancel(event);
       if (event.kind === 'mcp_login') this.#mcpLogin(event);
+      if (event.kind === 'client_setup') this.#clientSetup(event);
       this.#state.cursor = event.seq;
       await this.#save();
     }
@@ -403,6 +455,9 @@ export class WorkerLink {
     let retryMs = FIRST_POLL_RETRY_MS;
     let lastStatus;
     let publishAfter = 0;
+    // The first heartbeat already says which local clients this computer has (the page shows what to do next).
+    this.#clientsCheckedAt = Date.now();
+    this.#clients = await Promise.race([this.#discoverClients(), delay(15_000).then(() => null)]).catch(() => null);
     const markStatus = (status) => {
       if (status === lastStatus) return;
       lastStatus = status;

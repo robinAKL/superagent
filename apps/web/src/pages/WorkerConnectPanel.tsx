@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { LocalClients } from './LocalClients';
 import { api } from '../api';
 import { useT, type Dict } from '../i18n';
 import { agentLabel, allowsBinding, LINK_INSTALLER_URL, useLinkDevices, type LinkBinding, type LinkDevice } from './link-devices';
@@ -156,6 +157,7 @@ export function WorkerConnectPanel() {
             <span className={`link-device-status is-${w.status}`}>{t(w.status)}</span>
           </div>
           {w.capabilities.agents?.length ? <p className="helper">{t('agents')} · {w.capabilities.agents.map(agentLabel).join(' · ')}</p> : null}
+          {w.kind === 'link' && w.status !== 'revoked' ? <LocalClients device={w} onChanged={() => void load()} /> : null}
           {w.status !== 'revoked' ? <>
             <DeviceBindings key={requestedEmployee} worker={w} employees={employees ?? []} employeesLoaded={employees !== null} boundEmployees={boundEmployees}
               defaultEmployee={requestedEmployee} busy={busy} t={t} onSave={saveBinding} />
