@@ -38,3 +38,14 @@ describe('employee capability requests', () => {
     expect(mcpToolCount(device({ mcpServers: [{ name: 'vera-crm', status: 'connected', tools: ['a', 'b'] }, { name: 'gmail', status: 'needs_auth', tools: ['c'] }] }))).toBe(2);
   });
 });
+
+describe('a provider that is not signed in', () => {
+  it('a capability its server would provide, while that server needs signing in on the computer, is named as such', () => {
+    const d = { id: 'w1', name: 'WIN-RLDG3T479VI', kind: 'link', capabilities: { roomAssignments: [{ projectId: 'p', employeeId: 'emp-wo' }], mcpServers: [{ name: 'vera-crm', status: 'needs_auth' }] } } as unknown as LinkDevice;
+    const connected = mcpSources([d], new Set(['emp-wo']));
+    const any = mcpSources([d], new Set(['emp-wo']), true).filter((s) => s.status !== 'connected');
+    const group = { name: 'approve_order', systems: ['CRM'] };
+    expect(providerOf(group, connected)).toBeNull();
+    expect(providerOf(group, any)).toEqual({ server: 'vera-crm', device: 'WIN-RLDG3T479VI' });
+  });
+});

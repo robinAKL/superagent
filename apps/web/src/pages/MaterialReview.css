@@ -41,5 +41,5 @@
 /* Denser rows (UX plan step 4): the title, one line of summary, the file. */
 .mr-item { padding: var(--space-xs) 0; }
 .mr-summary { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
-.mr-title-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mr-title-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 100%; } /* a long title ends in … inside the row, never past its edge */
 .mr-meta { font-size: 12px; }

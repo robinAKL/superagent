@@ -810,7 +810,8 @@ export function CommandRoomPage() {
     .sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running'));
   const cancelledTasks = tasks.filter((task) => task.status === 'cancelled');
   // Short lists show whole; a long one folds to the latest three until asked.
-  const doneShown = showAllTasks || doneTasks.length <= 5 ? [...doneTasks].reverse() : doneTasks.slice(-3).reverse();
+  // The board shows the latest dozen at once (the column scrolls); the rest are one click away.
+  const doneShown = showAllTasks || doneTasks.length <= 12 ? [...doneTasks].reverse() : doneTasks.slice(-10).reverse();
   const cancelledOpen = showCancelled || cancelledTasks.length <= 3;
 
   /**
@@ -1104,7 +1105,7 @@ export function CommandRoomPage() {
                     ))}
                   </ul>
                 )}
-                {doneTasks.length > 5 ? <button type="button" className="exec-link room-more" onClick={() => setShowAllTasks((all) => !all)}>
+                {doneTasks.length > 12 ? <button type="button" className="exec-link room-more" onClick={() => setShowAllTasks((all) => !all)}>
                   {showAllTasks ? t('收起') : `${t('全部')} ${doneTasks.length} ${t('项')}`}
                 </button> : null}
               </section>
