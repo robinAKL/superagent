@@ -89,6 +89,24 @@ export function parseMcpList(text) {
   return out.slice(0, 32);
 }
 
+/**
+ * The MCP tools in an agent's tool list, by server: { "vera-crm": ["approve_order", …] }. Link's own permission
+ * server is not one of the employee's tools.
+ */
+export function mcpToolsByServer(tools) {
+  const out = {};
+  for (const name of Array.isArray(tools) ? tools : []) {
+    const parts = mcpParts(name);
+    if (!parts || parts.server === 'superagent_link') continue;
+    const server = parts.server.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 64);
+    const tool = parts.tool.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 128);
+    if (!server || !tool) continue;
+    const list = (out[server] ??= []);
+    if (!list.includes(tool) && list.length < 200) list.push(tool);
+  }
+  return Object.fromEntries(Object.entries(out).slice(0, 32));
+}
+
 /** A short line for the approval card: what the employee wants to do, in plain words. */
 export function describe(toolName, input = {}) {
   const parts = mcpParts(toolName);

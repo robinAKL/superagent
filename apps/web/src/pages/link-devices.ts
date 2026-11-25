@@ -29,7 +29,7 @@ export interface LinkDevice {
     /** Per bound employee: authorisation mode and remembered tool rules (see PermissionMode.tsx). */
     permissions?: Record<string, { mode: 'strict' | 'standard' | 'full'; rules?: Record<string, 'allow' | 'ask' | 'deny'>; askEmail?: boolean; seen?: string[] }>;
     /** MCP servers Claude Code has on the computer, as `claude mcp list` reports them. */
-    mcpServers?: { name: string; status: 'connected' | 'needs_auth' | 'failed' | 'unknown' }[];
+    mcpServers?: { name: string; status: 'connected' | 'needs_auth' | 'failed' | 'unknown'; tools?: string[] }[];
   };
 }
 

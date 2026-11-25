@@ -125,7 +125,7 @@ export function EmployeeWall({ employees, hasDraft, onManage }: { employees: Wal
                     ? <><span>{link.device?.name ?? t(link.status)}</span><span className="clip">{t(link.status)}{link.project ? `，${agentLabel(link.project.agent)}` : ''}</span></>
                     : <span className="status">{t('unbound')}</span>}
               </td>
-              <td className="num" data-label={t('tools')}>{tools === undefined ? '…' : tools}</td>
+              <td className="num" data-label={t('tools')}>{tools === undefined ? '…' : tools + mcpToolCount(link?.device ?? null)}</td>
               <td className="actions">
                 {/* Bind or change this employee's computer; shown whenever the device list has loaded. */}
                 {link ? <a className="btn quiet" href={`#settings?link=1&employee=${encodeURIComponent(employee.id)}`}>{t('manageLink')}</a> : null}
@@ -139,4 +139,9 @@ export function EmployeeWall({ employees, hasDraft, onManage }: { employees: Wal
       </table>
     </div>
   </section>;
+}
+
+/** MCP tools a computer reported for its connected servers (its own permission tool excluded). */
+export function mcpToolCount(device: { capabilities: { mcpServers?: { status: string; tools?: string[] }[] } } | null): number {
+  return (device?.capabilities.mcpServers ?? []).filter(server => server.status === 'connected').reduce((sum, server) => sum + (server.tools?.length ?? 0), 0);
 }
