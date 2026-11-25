@@ -18,6 +18,9 @@ const TEXT = {
     requests: '{n} requests',
     provided: '{n} capabilities are already provided by MCP on the employee’s computer (no action needed)',
     providedBy: 'Provided by {server} on {device}',
+    signIn: '{n} capabilities are in an MCP on the employee’s computer that needs signing in again',
+    signInBy: '{server} on {device} needs signing in',
+    signInHow: 'On that computer, open Claude Code and run /mcp, then sign in to {servers}. Until then these tasks cannot use it.',
   },
   zh: {
     title: '员工反馈与能力申请（{n}）',
@@ -28,6 +31,9 @@ const TEXT = {
     requests: '{n} 条申请',
     provided: '{n} 项能力已由员工电脑上的 MCP 提供（不用处理）',
     providedBy: '已由 {device} 上的 {server} 提供',
+    signIn: '{n} 项能力在员工电脑上的 MCP 里，但需要重新登录授权',
+    signInBy: '{device} 上的 {server} 需要重新登录',
+    signInHow: '在那台电脑上打开 Claude Code，运行 /mcp，重新登录 {servers}。登录前，用到它的任务都做不了。',
   },
 };
 
@@ -54,11 +60,14 @@ export function EmployeeFeedback({ employees }: { employees: WallEmployee[] }) {
 
   const all = groupCapabilities(placeholders);
   const sources = mcpSources(devices ?? [], ids);
-  const withProvider = all.map(group => ({ ...group, provider: providerOf(group, sources) }));
-  const groups = withProvider.filter(group => !group.provider);
+  // A server that would provide it but is not signed in on the computer: the person can fix that, so say so.
+  const offline = mcpSources(devices ?? [], ids, true).filter(source => source.status !== 'connected');
+  const withProvider = all.map(group => ({ ...group, provider: providerOf(group, sources), signIn: providerOf(group, sources) ? null : providerOf(group, offline) }));
+  const groups = withProvider.filter(group => !group.provider && !group.signIn);
   const provided = withProvider.filter(group => group.provider);
+  const signIn = withProvider.filter(group => group.signIn);
   // What still needs someone: feedback, and capabilities nothing provides (each counted once).
-  const n = (items?.length ?? 0) + groups.length;
+  const n = (items?.length ?? 0) + groups.length + signIn.length;
   const waitingRequests = groups.reduce((sum, group) => sum + group.count, 0);
   const nameCell = (group: { name: string; systems: string[] }) => {
     const zh = lang === 'zh' ? capabilityLabel(group.name) : null;
@@ -67,7 +76,7 @@ export function EmployeeFeedback({ employees }: { employees: WallEmployee[] }) {
   };
   return <section className="emp-feedback" aria-labelledby="emp-feedback-title">
     <h2 id="emp-feedback-title">{t('title', { n })}</h2>
-    {items === null ? <p className="helper">…</p> : n === 0 && !provided.length ? <p className="helper" role="status">{t('empty')}</p> : <>
+    {items === null ? <p className="helper">…</p> : n === 0 && !provided.length && !signIn.length ? <p className="helper" role="status">{t('empty')}</p> : <>
       {items?.length ? <ul className="emp-feedback-list">
         {items.map(item => <li key={item.id}><span>{t('feedback')}</span> {String(item.payload.title ?? item.kind)}</li>)}
       </ul> : null}
@@ -78,6 +87,18 @@ export function EmployeeFeedback({ employees }: { employees: WallEmployee[] }) {
             <tbody>{groups.map(group => <tr key={group.name}>
               {nameCell(group)}
               <td className="num">{t('requests', { n: group.count })}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+      </details> : null}
+      {signIn.length ? <details className="disclosure" data-sign-in open>
+        <summary>{t('signIn', { n: signIn.length })}</summary>
+        <p className="warn">{t('signInHow', { servers: [...new Set(signIn.map(group => group.signIn!.server))].join('、') })}</p>
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <tbody>{signIn.map(group => <tr key={group.name}>
+              {nameCell(group)}
+              <td className="num">{t('signInBy', { server: group.signIn!.server, device: group.signIn!.device })}</td>
             </tr>)}</tbody>
           </table>
         </div>
@@ -118,15 +139,15 @@ export function groupCapabilities(tools: readonly { name: string }[]): { name: s
 }
 
 /** The MCP servers connected on these employees' computers, with the tools their tasks have already used there. */
-export interface McpSource { server: string; device: string; used: Set<string>; tools: string[] | null }
+export interface McpSource { server: string; device: string; used: Set<string>; tools: string[] | null; status?: string }
 
-export function mcpSources(devices: readonly LinkDevice[], employees: ReadonlySet<string>): McpSource[] {
+export function mcpSources(devices: readonly LinkDevice[], employees: ReadonlySet<string>, any = false): McpSource[] {
   const result: McpSource[] = [];
   for (const device of devices) {
     if (!(device.capabilities.roomAssignments ?? []).some(assignment => employees.has(assignment.employeeId))) continue;
     const used = new Set(Object.entries(device.capabilities.permissions ?? {}).filter(([id]) => employees.has(id)).flatMap(([, policy]) => policy.seen ?? []));
     for (const server of device.capabilities.mcpServers ?? []) {
-      if (server.status === 'connected') result.push({ server: server.name, device: device.name, used, tools: server.tools ?? null });
+      if (any || server.status === 'connected') result.push({ server: server.name, device: device.name, used, tools: server.tools ?? null, status: server.status });
     }
   }
   return result;
