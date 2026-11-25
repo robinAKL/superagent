@@ -167,6 +167,9 @@ it('managers add, change, pause and dismiss schedules; "run now" starts one run 
   const ran = (await app.inject({ method: 'POST', url: `/schedules/${made.id}/run-now`, payload: {} })).json();
   expect(ran.taskId).toBeTruthy();
   expect(roomState.current.listTasks({ userId: 'owner', roles: ['owner'], projectScopes: [] })[0]!.employeeId).toBe('emp-fin');
+  const runNow = roomState.current.listTasks({ userId: 'owner', roles: ['owner'], projectScopes: [] })[0]!;
+  expect(runNow.title).toMatch(/^立即运行业务流程「月结对账」：\n核对本月应收/);
+  expect(runNow.title).not.toContain('now-');
   await app.inject({ method: 'POST', url: `/schedules/${made.id}/dismiss`, payload: {} });
   const left = (await app.inject({ method: 'GET', url: '/schedules' + range })).json().schedules.map((s: { title: string }) => s.title);
   expect(left).toEqual(['周报汇总']);
