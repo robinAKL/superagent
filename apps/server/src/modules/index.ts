@@ -12,6 +12,7 @@ import { sopModule } from './sop/index.js';
 import { executionModule } from './execution/index.js';
 import { workersModule } from './workers/index.js';
 import { accountsModule } from './accounts/index.js';
+import { schedulesModule } from './schedules/index.js';
 
 export interface ModuleDef {
   prefix: string;
@@ -40,4 +41,6 @@ export const modules: ModuleDef[] = [
   { prefix: 'workers', plugin: workersModule }, // room T-03
   // Mail and calendar accounts: an administrator's own (controls Super Agent) and each digital employee's own.
   { prefix: 'accounts', plugin: accountsModule, roles: ['admin', 'owner'] },
+  // The workflow calendar: every signed-in member; the module shows each role only what it may see.
+  { prefix: 'schedules', plugin: schedulesModule },
 ];

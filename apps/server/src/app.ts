@@ -10,6 +10,7 @@ import { KnowledgeService, type KnowledgeDeps } from './modules/knowledge/servic
 import { longWorkModule, mailWebhook, type LongWorkDeps } from './modules/longwork/http.js';
 import { workerLinkModule, workerPairModule } from './modules/workers/index.js';
 import { accountCallbackRoute } from './modules/accounts/index.js';
+import { schedulesHooks } from './modules/schedules/index.js';
 import { MCP_CALLBACK, MCP_CLIENT_DOCUMENT, mcpClientDocument } from './modules/knowledge/mcp-oauth.js';
 import { publicMcpEndpoint } from './modules/knowledge/plugins/mcp-public-http.js';
 
@@ -87,6 +88,8 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   const authCfgForBrowser = auth;
   const authenticate = createAuthenticate(auth);
   const knowledge = opts.knowledgeDeps?.organization ? new KnowledgeService(opts.knowledgeDeps) : undefined;
+  // The calendar's suggestions: workflows whose sources state a cadence, with the employee who does them.
+  schedulesHooks.suggestions = knowledge ? (user) => knowledge.workflowSchedules(user) : null;
   await app.register(mailWebhook, { deps: opts.longWorkDeps });
   // Microsoft sends a person back here after signing in a mailbox; the signed-in browser finishes it.
   await app.register(accountCallbackRoute);

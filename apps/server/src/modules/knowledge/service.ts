@@ -585,6 +585,31 @@ export class KnowledgeService {
     if (!this.deps.organization) return 0;
     return this.restoreOrganization(await this.deps.repo.readConfirmedTeam(tenantId));
   }
+  /**
+   * The workflow calendar's suggestions for this person: workflows whose sources state a cadence, with the digital
+   * employee who carries each one out (the role whose step comes first, else the first role assigned the workflow).
+   */
+  async workflowSchedules(ctx: UserContext): Promise<import('../schedules/schedules.js').SuggestedSchedule[]> {
+    const s = await this.deps.repo.read(ctx);
+    const draft = this.organizationDraft(s, ctx);
+    const view = this.recommendationView(s, ctx);
+    const sops = [...view.recommendations, ...view.mcpRecommendations].filter(r => !r.stale && r.kind === 'sop' && r.workflow?.schedule);
+    return sops.map(r => {
+      const workflow = r.workflow!, { citation, ...rule } = workflow.schedule!;
+      const roles = draft.employees.filter(e => e.sops.includes(r.key));
+      const first = workflow.steps.find(step => step.kind === 'employee' && step.employeeKey)?.employeeKey;
+      const owner = roles.find(e => e.key === first) ?? roles[0];
+      const quote = r.evidence[(citation ?? 1) - 1] ?? r.evidence[0];
+      const steps = workflow.steps.filter(step => step.kind !== 'trigger').map((step, index) => `${index + 1}. ${step.label}${step.detail ? `：${step.detail}` : ''}`);
+      return {
+        workflowKey: r.key, title: r.name, description: r.description,
+        work: [r.description, ...steps, workflow.completion ? `完成标准：${workflow.completion}` : ''].filter(Boolean).join('\n'),
+        rule, employeeId: owner?.employeeId ?? null,
+        participants: roles.filter(e => e !== owner && e.employeeId).map(e => e.employeeId!),
+        evidence: quote ? { title: s.source.items.find(item => item.id === quote.sourceId)?.title ?? '', locator: quote.locator, quote: quote.quote.slice(0, 300) } : null,
+      };
+    });
+  }
   async resolveWorkflowTeam(tenantId: string): Promise<Record<string, string>> {
     if (!this.deps.organization) return {};
     const team = await this.deps.repo.readConfirmedTeam(tenantId);

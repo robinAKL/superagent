@@ -1,6 +1,7 @@
 import { SOP_NODE_KINDS, type SopNodeKind, type UserContext } from '@superagent/shared';
 import { evidenceValid, hash, id, KnowledgeError, mayRead, mergeRecommendations, positionedChunks, signature, type AnalysisRun, type Evidence, type KnowledgeState, type OntologyAttribute, type Recommendation, type RecommendedWorkflow } from '../knowledge/domain.js';
 import type { KnowledgeRepository } from '../knowledge/repository.js';
+import { parseRule } from '../schedules/rule.js';
 import { matchesExcerpt, mcpEvidenceValid, mcpSelectionsCurrent } from '../knowledge/mcp-analysis.js';
 export interface AnalysisModel {
   check?(tenantId: string): Promise<void>;
@@ -20,7 +21,7 @@ function boundedText(input: unknown, max: number): string | undefined {
 /** Optional workflow detail is kept only when every step has a direct citation and connects to the trigger. */
 function recommendedWorkflow(input: unknown, evidenceCount: number): RecommendedWorkflow | undefined {
   if (!input || typeof input !== 'object') return;
-  const { steps, completion } = input as Record<string, unknown>;
+  const { steps, completion, schedule } = input as Record<string, unknown>;
   if (!Array.isArray(steps) || steps.length < 2 || steps.length > 12) return;
 
   const seen = new Set<string>();
@@ -44,6 +45,11 @@ function recommendedWorkflow(input: unknown, evidenceCount: number): Recommended
       employeeKey: boundedText(value.employeeKey, 120), toolKey: boundedText(value.toolKey, 120),
     });
   }
+  // A cadence the sources state ("every Monday 9:00", "the 1st of each month") becomes a calendar suggestion. A bad
+  // or uncited one is dropped; the workflow itself stays.
+  const rule = parseRule(schedule);
+  const citation = schedule && typeof schedule === 'object' ? (schedule as Record<string, unknown>).citation : undefined;
+  if (rule && Number.isInteger(citation) && (citation as number) >= 1 && (citation as number) <= evidenceCount) workflow.schedule = { ...rule, citation: citation as number };
   return workflow;
 }
 
