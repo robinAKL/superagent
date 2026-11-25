@@ -11,7 +11,6 @@ import '@fontsource/noto-sans-sc/700.css';
 import './styles/tokens.css';
 import './styles/shell.css';
 import { App } from './App';
-import { Landing } from './pages/Landing';
 import { initAuth } from './auth';
 import { LangProvider, storedLang, translate, type Dict } from './i18n';
 
@@ -68,12 +67,14 @@ fetch('/auth/config')
     // ?landing shows the front page anywhere (previews, screenshots), even without sign-in configured.
     const forced = new URLSearchParams(window.location.search).has('landing');
     if (!forced && (config.mode !== 'entra' || !showsLanding())) return startApp();
-    root.render(
+    // The front page and its stylesheet load only here, and signing in reloads into the app, so none of its CSS
+    // reaches the signed-in screens.
+    return import('./pages/landing/Landing').then(({ Landing }) => root.render(
       <React.StrictMode>
         <LangProvider initial={landingLang()}>
-          <Landing onSignIn={() => { window.history.replaceState(null, '', '/#room'); window.scrollTo(0, 0); startApp(); }} />
+          <Landing onSignIn={() => { window.history.replaceState(null, '', '/#room'); window.location.reload(); }} />
         </LangProvider>
       </React.StrictMode>,
-    );
+    ));
   })
   .catch(startApp);
