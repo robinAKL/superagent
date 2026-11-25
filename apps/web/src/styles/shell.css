@@ -232,3 +232,21 @@ button, input, select, textarea { font-family: inherit; }
 /* Always-latest Link download, at the top of the Link devices card. */
 .link-download { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-sm); margin: var(--space-sm) 0 0; }
 .link-download .helper { margin: 0; font-size: 13px; }
+
+/* Mail and calendar accounts: one card per mailbox, its owner said in the lead above. */
+.accounts { display: grid; gap: var(--space-sm); }
+.accounts > p { margin: 0; }
+.accounts-done { color: var(--color-success); }
+.account-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-sm); }
+.account-card { display: grid; gap: var(--space-xs); padding: var(--space-sm); border: 1px solid var(--color-rule); border-radius: 10px; }
+.account-card[data-status="reauthorize"] { border-color: color-mix(in srgb, var(--color-warning) 50%, var(--color-rule)); }
+.account-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-sm); }
+.account-provider { display: inline-grid; place-items: center; width: 40px; height: 28px; border-radius: 6px; font-size: 11px; font-weight: 600;
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent); color: var(--color-accent); }
+.account-who { display: grid; min-width: 0; }
+.account-who strong, .account-who small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-who small { color: var(--color-subtle); font-size: 12px; }
+.account-check { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 13px; margin: 0; }
+.account-check input { flex: none; width: 16px; height: 16px; margin: 0; }
+.account-send { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-xs); font-size: 13px; }
+.account-actions, .account-connect { display: flex; flex-wrap: wrap; gap: var(--space-xs); }

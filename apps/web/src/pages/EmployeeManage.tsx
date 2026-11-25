@@ -4,6 +4,7 @@ import { useT } from '../i18n';
 import type { WallEmployee } from './EmployeeWall';
 import { agentLabel, getEmployeeLink, LINK_INSTALLER_URL, useLinkDevices } from './link-devices';
 import { PermissionMode, ToolRules } from './PermissionMode';
+import { AccountConnections, employeeAccountsTitle } from './AccountConnections';
 
 interface CatalogTool {
   toolId: string;
@@ -116,6 +117,10 @@ export function EmployeeManage({ employee, lang, onClose, onChanged }: {
       <p className="helper">{t('promptHint')}</p>
       <button className="btn" disabled={busy || !prompt.trim()}>{busy ? t('saving') : t('promptSave')}</button>
     </form>
+    <section aria-labelledby="emp-manage-accounts">
+      <h3 id="emp-manage-accounts">{employeeAccountsTitle(lang)}</h3>
+      <AccountConnections employee={{ id: employee.id, name: employee.name }} />
+    </section>
     <section aria-labelledby="emp-manage-tools">
       <h3 id="emp-manage-tools">{t('tools')}</h3>
       {tools === null ? <p className="helper">…</p> : installed.length === 0 ? <p className="helper">{t('toolsEmpty')}</p> :
