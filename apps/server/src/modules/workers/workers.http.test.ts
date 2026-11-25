@@ -350,6 +350,13 @@ it('the tool list: Link reports the MCP servers on the heartbeat and the tools a
   const fresh = async () => (await workersState.registry.get(TENANT, worker.id))!.capabilities;
   expect((await fresh()).mcpServers).toEqual([{ name: 'vera-crm', status: 'connected' }, { name: 'claude_ai_Gmail', status: 'needs_auth' }]);
 
+  // Each server's tools, as the last run listed them: names checked, duplicates once.
+  await a.inject({
+    method: 'POST', url: '/api/v1/worker-link/heartbeat', headers: auth(token),
+    payload: { capabilities: { mcpServers: [{ name: 'vera-crm', status: 'connected', tools: ['list_invoices', 'approve_order', 'list_invoices', 'bad tool!', 7] }] } },
+  });
+  expect((await fresh()).mcpServers).toEqual([{ name: 'vera-crm', status: 'connected', tools: ['list_invoices', 'approve_order'] }]);
+
   const seen = (payload: object) => a.inject({ method: 'POST', url: '/api/v1/worker-link/permissions/seen', headers: auth(token), payload });
   expect((await seen({ projectId: 'p-ops', tools: ['mcp__vera-crm__search_orders', 'Bash'] })).statusCode).toBe(200);
   expect((await seen({ projectId: 'p-ops', tools: ['Bash', 'not a tool name'] })).statusCode).toBe(200);

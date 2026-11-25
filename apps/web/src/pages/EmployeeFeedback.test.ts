@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { capabilityLabel, groupCapabilities, mcpSources, providerOf } from './EmployeeFeedback';
 import type { LinkDevice } from './link-devices';
+import { mcpToolCount } from './EmployeeWall';
 
 const device = (over: Partial<LinkDevice['capabilities']> = {}): LinkDevice => ({
   id: 'w1', name: 'WIN-RLDG3T479VI', kind: 'link',
@@ -28,5 +29,12 @@ describe('employee capability requests', () => {
     expect(providerOf({ name: 'approve_order', systems: [] }, used)).toEqual({ server: 'orders', device: 'WIN-RLDG3T479VI' });
     // Another employee's computer provides nothing here.
     expect(mcpSources([device()], new Set(['emp-other']))).toEqual([]);
+  });
+
+  it('with the tool list the computer reported, only listed tools count as provided; no guessing from the system name', () => {
+    const sources = mcpSources([device({ mcpServers: [{ name: 'vera-crm', status: 'connected', tools: ['list_invoices', 'approve_order'] }] })], new Set(['emp-wo']));
+    expect(providerOf({ name: 'list_invoices', systems: ['CRM/finance'] }, sources)).toEqual({ server: 'vera-crm', device: 'WIN-RLDG3T479VI' });
+    expect(providerOf({ name: 'create_balance_draft', systems: ['CRM finance'] }, sources)).toBeNull();
+    expect(mcpToolCount(device({ mcpServers: [{ name: 'vera-crm', status: 'connected', tools: ['a', 'b'] }, { name: 'gmail', status: 'needs_auth', tools: ['c'] }] }))).toBe(2);
   });
 });

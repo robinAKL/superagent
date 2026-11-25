@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
-import { WorkerLink } from './link.mjs';
+import { WorkerLink, withMcpTools } from './link.mjs';
 
 const fakeAgent = `
 import { appendFileSync } from 'node:fs';
@@ -16,7 +16,7 @@ const emit = (item) => console.log(JSON.stringify(item));
 if (prompt === 'auth') { console.error('Please log in'); process.exitCode = 1; }
 else {
   const codex = process.argv[2] === 'exec';
-  emit(codex ? { type: 'thread.started', thread_id: 'session-1' } : { type: 'system', subtype: 'init', session_id: 'session-1' });
+  emit(codex ? { type: 'thread.started', thread_id: 'session-1' } : { type: 'system', subtype: 'init', session_id: 'session-1', tools: ['Read', 'mcp__vera-crm__list_invoices', 'mcp__vera-crm__approve_order', 'mcp__superagent_link__approve'] });
   emit({ type: 'item.started' });
   if (prompt === 'hang') {
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
@@ -137,6 +137,25 @@ test('runs Claude Code with a fixed headless adapter', async (t) => {
   assert.equal(argv[argv.indexOf('--permission-prompt-tool') + 1], 'mcp__superagent_link__approve');
   assert.match(argv[argv.indexOf('--mcp-config') + 1], /superagent-link-permissions-.+\.json$/);
   assert.ok(f.requests.some(({ path, body }) => path.endsWith('/report') && body.body === 'Result: Summarise'));
+});
+
+test('Claude Code’s tool list is kept: each MCP server’s tools go out with the computer’s capabilities', async (t) => {
+  const f = await fixture(t, 'claude-code');
+  f.wake(1, 'Summarise');
+  const link = f.make();
+  await link.poll(undefined, 0);
+  await link.runNext();
+  // Link's own permission server is not one of the employee's tools.
+  assert.deepEqual((await f.state()).mcpTools, { 'vera-crm': ['list_invoices', 'approve_order'] });
+});
+
+test('tool lists join the MCP health list; a server only seen in a run counts as connected', () => {
+  assert.equal(withMcpTools(null, undefined), null);
+  assert.deepEqual(withMcpTools([{ name: 'vera-crm', status: 'connected' }, { name: 'gmail', status: 'needs_auth' }], { 'vera-crm': ['list_invoices'], claude_ai_Docs: ['read'] }), [
+    { name: 'vera-crm', status: 'connected', tools: ['list_invoices'] },
+    { name: 'gmail', status: 'needs_auth' },
+    { name: 'claude_ai_Docs', status: 'connected', tools: ['read'] },
+  ]);
 });
 
 test('reconnects with backoff and delivers a queued task after a network interruption', { timeout: 8_000 }, async (t) => {
