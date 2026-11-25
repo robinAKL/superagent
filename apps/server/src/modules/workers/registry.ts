@@ -44,6 +44,8 @@ export interface PermissionPolicy {
   seen?: string[];
 }
 /** An MCP server Claude Code has on this computer, as `claude mcp list` reports it. */
+/** A local client (agent CLI) on a Link computer: where it stands, and whether a project folder uses it. */
+export interface ClientInfo { agent: 'claude-code' | 'codex'; state: 'missing' | 'signed-out' | 'ready'; connected: boolean }
 export interface McpServerInfo { name: string; status: 'connected' | 'needs_auth' | 'failed' | 'unknown'; tools?: string[] }
 const MCP_STATUS = new Set(['connected', 'needs_auth', 'failed', 'unknown']);
 export const PERMISSION_MODES: readonly PermissionMode[] = ['strict', 'standard', 'full'];
@@ -74,6 +76,7 @@ export interface WorkerCapabilities {
   permissions?: Record<string, PermissionPolicy>;
   /** MCP servers Claude Code has on this computer (reported by Link). */
   mcpServers?: McpServerInfo[];
+  clients?: ClientInfo[];
   /** Queue kinds this worker may claim. Empty or absent: it claims nothing until an admin grants kinds. */
   kinds?: string[];
   /** Agent CLIs the device can start, e.g. ["claude-code", "codex"]. Reported, not trusted for authorisation. */
@@ -134,7 +137,7 @@ export interface HeartbeatInput {
  * and gets every event after it, so nothing sent while it slept is lost. Delivery is at-least-once; the worker
  * de-duplicates by event id.
  */
-export const WORKER_EVENT_KINDS = ['wake', 'cancel', 'message', 'mcp_login'] as const;
+export const WORKER_EVENT_KINDS = ['wake', 'cancel', 'message', 'mcp_login', 'client_setup'] as const;
 export type WorkerEventKind = (typeof WORKER_EVENT_KINDS)[number];
 export const EVENTS_PAGE = 100;
 
@@ -243,6 +246,13 @@ export function cleanCapabilities(value: unknown): WorkerCapabilities {
       return typeof name === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(name) && MCP_STATUS.has(String(status))
         ? [{ name, status: status as McpServerInfo['status'], ...(names ? { tools: names } : {}) }] : [];
     }).slice(0, 32);
+  }
+  if (Array.isArray(raw.clients)) {
+    out.clients = raw.clients.flatMap((entry: unknown) => {
+      const { agent, state, connected } = (entry && typeof entry === 'object' ? entry : {}) as Partial<ClientInfo>;
+      return (agent === 'claude-code' || agent === 'codex') && (state === 'missing' || state === 'signed-out' || state === 'ready')
+        ? [{ agent, state, connected: connected === true }] : [];
+    }).slice(0, 8);
   }
   if (kinds) out.kinds = kinds;
   if (agents) out.agents = agents;

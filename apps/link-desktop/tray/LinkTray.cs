@@ -137,6 +137,9 @@ namespace SuperAgentLinkTray
         private string _authAgent;
         private bool _reauthRunning;
         private bool _restartAfterTask;
+        // The local clients window: open at most once at a time; offered once after this computer first connects.
+        private bool _clientsOpen;
+        private bool _clientsPrompted;
 
         public TrayApp()
         {
@@ -161,7 +164,7 @@ namespace SuperAgentLinkTray
 
             _statusItem = new ToolStripMenuItem("Status: Unpaired") { Enabled = false };
             var openRoomItem = new ToolStripMenuItem("Open Command Room / 打开指挥室", null, OnOpenRoom);
-            var configureItem = new ToolStripMenuItem("Set up local agent / 配置本地 Agent", null, OnConfigureAgent);
+            var configureItem = new ToolStripMenuItem("Local clients / 本地客户端（Claude Code、Codex）", null, OnConfigureAgent);
             var repairItem = new ToolStripMenuItem("Re-pair / 重新配对", null, OnRepair);
             var logsItem = new ToolStripMenuItem("View Logs / 查看日志", null, OnViewLogs);
             var exitItem = new ToolStripMenuItem("Exit / 退出", null, OnExit);
@@ -443,7 +446,7 @@ namespace SuperAgentLinkTray
             if (line.StartsWith("LINK_STATE:", StringComparison.Ordinal))
             {
                 var s = line.Substring("LINK_STATE:".Length).Trim().ToLowerInvariant();
-                if (s == "connected") { _restartAttempt = 0; UpdateStatus(LinkStatus.Connected); }
+                if (s == "connected") { _restartAttempt = 0; UpdateStatus(LinkStatus.Connected); MaybeGuideClients(); }
                 else if (s == "reconnecting") UpdateStatus(LinkStatus.Reconnecting);
                 else if (s == "revoked") UpdateStatus(LinkStatus.Revoked);
                 else if (s == "unpaired") UpdateStatus(LinkStatus.Unpaired);
@@ -464,6 +467,12 @@ namespace SuperAgentLinkTray
             else if (line.StartsWith("LINK_AUTH:", StringComparison.Ordinal))
             {
                 BeginReauth(line.Substring("LINK_AUTH:".Length).Trim());
+            }
+            else if (line.StartsWith("LINK_CLIENT_SETUP:", StringComparison.Ordinal))
+            {
+                // Asked from the web page: open the local clients window and start that step (install, sign in, connect).
+                var parts = line.Substring("LINK_CLIENT_SETUP:".Length).Trim().Split(':');
+                if (parts.Length == 2) { var ignored = ShowClients(parts[0], parts[1]); }
             }
             else if (line.StartsWith("LINK_MCP_LOGIN:", StringComparison.Ordinal))
             {
@@ -986,84 +995,225 @@ namespace SuperAgentLinkTray
 
         private async void OnConfigureAgent(object sender, EventArgs e)
         {
-            var item = (ToolStripMenuItem)sender;
-            item.Enabled = false;
+            await ShowClients(null, null);
+        }
+
+        /** After this computer first connects with no client set up, open the local clients window once. */
+        private void MaybeGuideClients()
+        {
+            if (_clientsPrompted || _exiting) return;
+            _clientsPrompted = true;
+            if (ConfiguredAgents().Count > 0) return;
+            Notify("连接本地客户端", "这台电脑还没有连接 Claude Code 或 Codex，已为你打开设置窗口。", ToolTipIcon.Info);
+            var ignored = ShowClients(null, null);
+        }
+
+        /** Each client that has project folders on this computer, with those folders. */
+        private Dictionary<string, List<string>> ConfiguredAgents()
+        {
+            var result = new Dictionary<string, List<string>>();
+            try
+            {
+                var configPath = Path.Combine(_dataDir, "link-runtime.json");
+                if (!File.Exists(configPath)) return result;
+                var config = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(configPath));
+                object raw;
+                var projects = config != null && config.TryGetValue("projects", out raw) ? raw as Dictionary<string, object> : null;
+                if (projects == null) return result;
+                foreach (var entry in projects.Values)
+                {
+                    var project = entry as Dictionary<string, object>;
+                    object agent, directory;
+                    if (project == null || !project.TryGetValue("agent", out agent) || !project.TryGetValue("directory", out directory)) continue;
+                    var key = agent as string;
+                    if (key == null) continue;
+                    if (!result.ContainsKey(key)) result[key] = new List<string>();
+                    result[key].Add(Path.GetFileName((directory as string ?? "").TrimEnd('\\', '/')));
+                }
+            }
+            catch (Exception ex) { Log("Could not read link-runtime.json: " + ex.Message); }
+            return result;
+        }
+
+        /**
+         * The local clients window. Claude Code and Codex each get one row with where they stand and the one step that
+         * comes next: install (and sign in), sign in, or choose a project folder. Several clients can be connected,
+         * also to the same folder. A step can start by itself (asked from the web page, or after pairing).
+         */
+        private async Task ShowClients(string autoAgent, string autoAction)
+        {
+            if (_clientsOpen || _exiting) return;
+            _clientsOpen = true;
+            var changed = false;
             try
             {
                 var serializer = new JavaScriptSerializer();
                 var setupScript = Path.Combine(Path.GetDirectoryName(_linkEntry), "setup-agents.mjs");
-                var output = await Task.Run(() => RunNodeScript(setupScript, ""));
-                var choices = serializer.Deserialize<Dictionary<string, object>[]>(output);
-                var available = new List<Dictionary<string, object>>();
-                foreach (var agent in choices)
-                    if ("ready".Equals(agent["state"])) available.Add(agent);
-                if (available.Count == 0)
+                using (var form = new Form())
+                using (var intro = new Label())
+                using (var rows = new Panel())
+                using (var status = new Label())
+                using (var close = new Button())
                 {
-                    var guided = await GuideLocalAgent(serializer, setupScript, choices);
-                    if (guided == null) return;
-                    available.Add(guided);
-                }
+                    form.Text = "Local clients / 本地客户端";
+                    form.ClientSize = new Size(520, 330);
+                    form.StartPosition = FormStartPosition.CenterScreen;
+                    form.FormBorderStyle = FormBorderStyle.FixedDialog;
+                    form.MaximizeBox = false;
+                    form.MinimizeBox = false;
+                    form.TopMost = true;
+                    intro.Text = "Super Agent 通过这台电脑上的客户端干活。可以连接多个客户端；每一步点按钮即可，登录在弹出的窗口或浏览器里完成。";
+                    intro.SetBounds(12, 12, 496, 40);
+                    rows.SetBounds(12, 58, 496, 196);
+                    status.SetBounds(12, 258, 496, 34);
+                    close.Text = "完成 / Done";
+                    close.DialogResult = DialogResult.OK;
+                    close.SetBounds(408, 294, 100, 28);
+                    form.Controls.AddRange(new Control[] { intro, rows, status, close });
+                    form.AcceptButton = close;
+                    form.CancelButton = close;
 
-                var configPath = Path.Combine(_dataDir, "link-runtime.json");
-                var config = File.Exists(configPath)
-                    ? serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(configPath))
-                    : new Dictionary<string, object>();
-                object rawProjects;
-                var projects = config.TryGetValue("projects", out rawProjects)
-                    ? (Dictionary<string, object>)rawProjects : new Dictionary<string, object>();
-                using (var folder = new FolderBrowserDialog())
-                {
-                    folder.Description = "Choose the folder this agent can work in / 选择 Agent 可使用的项目文件夹";
-                    folder.ShowNewFolderButton = false;
-                    if (folder.ShowDialog() != DialogResult.OK) return;
-                    if (string.Equals(Path.GetPathRoot(folder.SelectedPath), folder.SelectedPath, StringComparison.OrdinalIgnoreCase))
+                    Dictionary<string, object>[] choices = null;
+                    Func<Task> render = null;
+                    Func<Dictionary<string, object>, Task> act = async (choice) =>
                     {
-                        MessageBox.Show("Choose a project folder inside the drive. / 请选择磁盘下的项目文件夹。", "SuperAgent Link");
-                        return;
-                    }
-                    string projectId = null;
-                    Dictionary<string, object> project = null;
-                    foreach (var entry in projects)
-                    {
-                        var saved = entry.Value as Dictionary<string, object>;
-                        object directory;
-                        if (saved != null && saved.TryGetValue("directory", out directory)
-                            && string.Equals(directory as string, folder.SelectedPath, StringComparison.OrdinalIgnoreCase))
+                        foreach (Control control in rows.Controls) control.Enabled = false;
+                        close.Enabled = false;
+                        try
                         {
-                            projectId = entry.Key;
-                            project = saved;
-                            break;
+                            var id = choice["agent"] as string;
+                            if (!"ready".Equals(choice["state"]))
+                            {
+                                var signedIn = await InstallAndSignIn(serializer, setupScript, choice, status);
+                                status.Text = AgentLabel(id) + " 已可以使用。最后选一个项目文件夹。";
+                                choice = signedIn ?? choice;
+                                object executable;
+                                if (signedIn != null && signedIn.TryGetValue("executable", out executable) && executable is string) choice["executable"] = executable;
+                            }
+                            if (ConnectFolder(choice)) { changed = true; status.Text = AgentLabel(id) + " 已连接。可以继续连接其他客户端，或点「完成」。"; }
                         }
-                    }
-                    var agentIndex = available.Count == 1 ? 0 : ChooseAgent(available);
-                    if (agentIndex < 0) return;
-                    if (_taskActive)
+                        catch (Exception ex)
+                        {
+                            Log("Local client setup failed: " + ex.Message);
+                            status.Text = ex.Message;
+                        }
+                        close.Enabled = true;
+                        await render();
+                    };
+                    render = async () =>
                     {
-                        MessageBox.Show("Try again when the current task finishes. / 请在当前任务完成后再试。", "SuperAgent Link");
-                        return;
-                    }
-                    var selected = available[agentIndex];
-                    if (project == null) project = new Dictionary<string, object>();
-                    if (project.ContainsKey("agent") && !Equals(project["agent"], selected["agent"])) project.Remove("approvals");
-                    project["directory"] = folder.SelectedPath;
-                    project["agent"] = selected["agent"];
-                    project["executable"] = selected["executable"];
-                    projects[projectId ?? Guid.NewGuid().ToString()] = project;
-                    config["projects"] = projects;
-                    var temporary = configPath + ".tmp";
-                    File.WriteAllText(temporary, serializer.Serialize(config), new UTF8Encoding(false));
-                    if (File.Exists(configPath)) File.Replace(temporary, configPath, null);
-                    else File.Move(temporary, configPath);
+                        status.Text = status.Text.Length == 0 ? "正在检查这台电脑上的客户端…" : status.Text;
+                        choices = serializer.Deserialize<Dictionary<string, object>[]>(await Task.Run(() => RunNodeScript(setupScript, "")));
+                        var configured = ConfiguredAgents();
+                        rows.Controls.Clear();
+                        var top = 0;
+                        foreach (var choice in choices)
+                        {
+                            var id = choice["agent"] as string;
+                            var state = choice["state"] as string;
+                            List<string> folders;
+                            var connected = configured.TryGetValue(id, out folders) && folders.Count > 0;
+                            var line = new Label();
+                            line.AutoSize = false;
+                            line.SetBounds(0, top + 6, 330, 40);
+                            line.Text = AgentLabel(id) + "\r\n" + ("missing".Equals(state) ? "未安装"
+                                : "signed-out".Equals(state) ? "已安装，还没登录"
+                                : connected ? "已连接 · 项目：" + string.Join("、", folders.ToArray())
+                                : "已登录，还没连接项目文件夹");
+                            var button = new Button();
+                            button.SetBounds(340, top + 8, 156, 32);
+                            button.Text = "missing".Equals(state) ? "安装并登录" : "signed-out".Equals(state) ? "登录" : connected ? "再连接一个文件夹" : "选择项目文件夹";
+                            var selected = choice;
+                            button.Click += async (s2, ev2) => await act(selected);
+                            rows.Controls.Add(line);
+                            rows.Controls.Add(button);
+                            top += 52;
+                        }
+                        if (status.Text == "正在检查这台电脑上的客户端…") status.Text = "";
+                    };
+                    form.Shown += async (s2, ev2) =>
+                    {
+                        try
+                        {
+                            await render();
+                            if (autoAgent == null) return;
+                            foreach (var choice in choices)
+                                if (autoAgent.Equals(choice["agent"])) { await act(choice); break; }
+                        }
+                        catch (Exception ex)
+                        {
+                            Log("Local client check failed: " + ex.Message);
+                            status.Text = "检查客户端失败，请查看 Link 日志。";
+                        }
+                    };
+                    form.ShowDialog();
                 }
-                StartLinkProcess(pairMode: false);
-                OpenWorkspace("/#settings?link=1");
+                if (changed)
+                {
+                    if (_taskActive) _restartAfterTask = true;
+                    else StartLinkProcess(pairMode: false);
+                    OpenWorkspace("/#settings?section=computers");
+                }
             }
             catch (Exception ex)
             {
                 Log("Local setup failed: " + ex.Message);
                 MessageBox.Show("Local setup failed. Open Link logs for details. / 配置失败，请查看 Link 日志。", "SuperAgent Link");
             }
-            finally { item.Enabled = true; }
+            finally { _clientsOpen = false; }
+        }
+
+        /**
+         * Choose the project folder a client works in and save it. One entry per folder and client, so the same folder
+         * can be worked on by Claude Code and by Codex.
+         */
+        private bool ConnectFolder(Dictionary<string, object> client)
+        {
+            var serializer = new JavaScriptSerializer();
+            var configPath = Path.Combine(_dataDir, "link-runtime.json");
+            var config = File.Exists(configPath)
+                ? serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(configPath))
+                : new Dictionary<string, object>();
+            object rawProjects;
+            var projects = config.TryGetValue("projects", out rawProjects)
+                ? (Dictionary<string, object>)rawProjects : new Dictionary<string, object>();
+            using (var folder = new FolderBrowserDialog())
+            {
+                folder.Description = "Choose the folder " + AgentLabel(client["agent"] as string) + " can work in / 选择它可以使用的项目文件夹";
+                folder.ShowNewFolderButton = false;
+                if (folder.ShowDialog() != DialogResult.OK) return false;
+                if (string.Equals(Path.GetPathRoot(folder.SelectedPath), folder.SelectedPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show("Choose a project folder inside the drive. / 请选择磁盘下的项目文件夹。", "SuperAgent Link");
+                    return false;
+                }
+                string projectId = null;
+                Dictionary<string, object> project = null;
+                foreach (var entry in projects)
+                {
+                    var saved = entry.Value as Dictionary<string, object>;
+                    object directory, agent;
+                    if (saved != null && saved.TryGetValue("directory", out directory) && saved.TryGetValue("agent", out agent)
+                        && string.Equals(directory as string, folder.SelectedPath, StringComparison.OrdinalIgnoreCase)
+                        && Equals(agent, client["agent"]))
+                    {
+                        projectId = entry.Key;
+                        project = saved;
+                        break;
+                    }
+                }
+                if (project == null) project = new Dictionary<string, object>();
+                project["directory"] = folder.SelectedPath;
+                project["agent"] = client["agent"];
+                project["executable"] = client["executable"];
+                projects[projectId ?? Guid.NewGuid().ToString()] = project;
+                config["projects"] = projects;
+                var temporary = configPath + ".tmp";
+                File.WriteAllText(temporary, serializer.Serialize(config), new UTF8Encoding(false));
+                if (File.Exists(configPath)) File.Replace(temporary, configPath, null);
+                else File.Move(temporary, configPath);
+                return true;
+            }
         }
 
         private string RunNodeScript(string script, string extra)
@@ -1089,71 +1239,6 @@ namespace SuperAgentLinkTray
                 if (process.ExitCode != 0 && !payload.StartsWith("{") && !payload.StartsWith("["))
                     throw new InvalidOperationException(stderr.Length > 0 ? stderr.ToString().Trim() : "命令行检测失败。");
                 return payload;
-            }
-        }
-
-        private async Task<Dictionary<string, object>> GuideLocalAgent(
-            JavaScriptSerializer serializer, string setupScript, Dictionary<string, object>[] choices)
-        {
-            using (var form = new Form())
-            using (var intro = new Label())
-            using (var status = new Label())
-            using (var cancel = new Button())
-            {
-                form.Text = "Install a local agent / 安装本地 Agent";
-                form.ClientSize = new Size(460, 250);
-                form.StartPosition = FormStartPosition.CenterScreen;
-                form.FormBorderStyle = FormBorderStyle.FixedDialog;
-                form.MaximizeBox = false;
-                form.MinimizeBox = false;
-                intro.Text = "Link did not find a signed-in Codex or Claude Code command line.\r\n点下面的按钮后，Link 会安装客户端、打开登录，然后继续绑定项目。";
-                intro.SetBounds(12, 12, 436, 52);
-                status.SetBounds(12, 156, 436, 48);
-                cancel.Text = "取消";
-                cancel.DialogResult = DialogResult.Cancel;
-                cancel.SetBounds(348, 210, 100, 28);
-                form.CancelButton = cancel;
-                var buttons = new List<Button>();
-                var top = 72;
-                foreach (var choice in choices)
-                {
-                    if ("ready".Equals(choice["state"])) continue;
-                    var button = new Button();
-                    var id = choice["agent"] as string;
-                    var install = "install".Equals(choice["action"]);
-                    button.Text = install
-                        ? ("codex".Equals(id) ? "安装并登录 Codex" : "安装并登录 Claude Code")
-                        : ("codex".Equals(id) ? "登录 Codex" : "登录 Claude Code");
-                    button.SetBounds(12, top, 436, 34);
-                    top += 42;
-                    var selected = choice;
-                    button.Click += async (s, ev) =>
-                    {
-                        foreach (var other in buttons) other.Enabled = false;
-                        cancel.Enabled = false;
-                        try
-                        {
-                            form.Tag = await InstallAndSignIn(serializer, setupScript, selected, status);
-                            form.DialogResult = DialogResult.OK;
-                            form.Close();
-                        }
-                        catch (Exception ex)
-                        {
-                            if (form.IsDisposed) return;
-                            Log("Local agent setup failed: " + ex.Message);
-                            status.Text = ex.Message;
-                            foreach (var other in buttons) other.Enabled = true;
-                            cancel.Enabled = true;
-                        }
-                    };
-                    buttons.Add(button);
-                    form.Controls.Add(button);
-                }
-                form.Controls.Add(intro);
-                form.Controls.Add(status);
-                form.Controls.Add(cancel);
-                if (form.ShowDialog() != DialogResult.OK) return null;
-                return form.Tag as Dictionary<string, object>;
             }
         }
 
@@ -1224,37 +1309,6 @@ namespace SuperAgentLinkTray
             var parts = new List<string>();
             foreach (var item in items) if (item != null) parts.Add(item.ToString());
             return string.Join(" ", parts.ToArray());
-        }
-
-        private static int ChooseAgent(List<Dictionary<string, object>> agents)
-        {
-            using (var form = new Form())
-            using (var select = new ComboBox())
-            using (var save = new Button())
-            using (var cancel = new Button())
-            {
-                form.Text = "Choose a local agent / 选择本地 Agent";
-                form.ClientSize = new Size(360, 100);
-                form.StartPosition = FormStartPosition.CenterScreen;
-                form.FormBorderStyle = FormBorderStyle.FixedDialog;
-                form.MaximizeBox = false;
-                form.MinimizeBox = false;
-                select.AccessibleName = "Local agent / 本地 Agent";
-                select.DropDownStyle = ComboBoxStyle.DropDownList;
-                select.SetBounds(12, 12, 336, 28);
-                foreach (var agent in agents) select.Items.Add("codex".Equals(agent["agent"]) ? "Codex" : "Claude Code");
-                select.SelectedIndex = 0;
-                save.Text = "Use / 使用";
-                save.DialogResult = DialogResult.OK;
-                save.SetBounds(154, 55, 92, 30);
-                cancel.Text = "Cancel / 取消";
-                cancel.DialogResult = DialogResult.Cancel;
-                cancel.SetBounds(256, 55, 92, 30);
-                form.Controls.AddRange(new Control[] { select, save, cancel });
-                form.AcceptButton = save;
-                form.CancelButton = cancel;
-                return form.ShowDialog() == DialogResult.OK ? select.SelectedIndex : -1;
-            }
         }
 
         private void OnRepair(object sender, EventArgs e)

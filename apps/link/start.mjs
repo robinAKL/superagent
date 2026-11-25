@@ -92,6 +92,8 @@ async function main() {
         onAuth: (agent) => console.log(`LINK_AUTH:${agent}`),
         // The tray opens Claude Code's MCP sign-in for this server, for the person at the computer to finish.
         onMcpLogin: (server) => console.log(`LINK_MCP_LOGIN:${server}`),
+        // The tray opens its local clients window at that step (install, sign in, connect a folder).
+        onClientSetup: (agent, action) => console.log(`LINK_CLIENT_SETUP:${agent}:${action}`),
       }).start(shutdown.signal);
     } catch (error) {
       if (error.status !== 401) throw error;

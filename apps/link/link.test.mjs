@@ -39,7 +39,7 @@ async function fixture(t, agent = 'codex', options = {}) {
   if (options.launchWithApprovals) config.projects.p1.approvals = 'room';
   const events = [];
   const requests = [];
-  const control = { refuseDispatch: false, pollFailures: 0, authAgents: [], mcpLogins: [] };
+  const control = { refuseDispatch: false, pollFailures: 0, authAgents: [], mcpLogins: [], clientSetups: [] };
   const fetcher = async (url, init) => {
     const path = url.pathname;
     const body = JSON.parse(init.body);
@@ -65,6 +65,8 @@ async function fixture(t, agent = 'codex', options = {}) {
       fetcher, launch: options.launch, launchWithApprovals: options.launchWithApprovals,
       sleep: options.sleep, renameState: options.renameState, onAuth: (agent) => control.authAgents.push(agent),
       onMcpLogin: (server) => control.mcpLogins.push(server),
+      onClientSetup: (agent, action) => control.clientSetups.push([agent, action]),
+      ...(options.discover ? { discover: options.discover } : {}),
     }),
     args: async () => (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse),
     state: async () => JSON.parse(await readFile(stateFile, 'utf8')),
@@ -74,6 +76,7 @@ async function fixture(t, agent = 'codex', options = {}) {
     wake: (seq, prompt, projectId = 'p1', attempt) => events.push({ seq, kind: 'wake', payload: { roomTaskId: 'task1', projectId, prompt, ...(attempt ? { attempt } : {}) } }),
     cancel: (seq) => events.push({ seq, kind: 'cancel', payload: { roomTaskId: 'task1' } }),
     mcpLogin: (seq, server) => events.push({ seq, kind: 'mcp_login', payload: { server } }),
+    clientSetup: (seq, agent, action) => events.push({ seq, kind: 'client_setup', payload: { agent, action } }),
   };
 }
 
@@ -382,4 +385,27 @@ test('an MCP sign-in asked from the command room reaches the tray once, by serve
   await link.poll(undefined, 0);
   await link.poll(undefined, 0);
   assert.deepEqual(f.control.mcpLogins, ['vera-crm']);
+});
+
+test('the first heartbeat says where each local client stands; one with a project folder here counts as connected', async (t) => {
+  const f = await fixture(t, 'codex', { discover: async () => [{ agent: 'claude-code', state: 'signed-out' }, { agent: 'codex', state: 'ready' }] });
+  const shutdown = new AbortController();
+  f.control.stopAfterPoll = async () => { shutdown.abort(); return true; };
+  await f.make().start(shutdown.signal);
+  const heartbeat = f.requests.find(({ path, body }) => path.endsWith('/heartbeat') && body.capabilities);
+  assert.deepEqual(heartbeat.body.capabilities.clients, [
+    { agent: 'claude-code', state: 'signed-out', connected: false },
+    { agent: 'codex', state: 'ready', connected: true },
+  ]);
+});
+
+test('install, sign-in and connect steps asked from the web page reach the tray; anything else is ignored', async (t) => {
+  const f = await fixture(t);
+  f.clientSetup(1, 'claude-code', 'install');
+  f.clientSetup(2, 'codex', 'connect');
+  f.clientSetup(3, 'gemini', 'install');
+  f.clientSetup(4, 'codex', 'uninstall');
+  const link = f.make();
+  await link.poll(undefined, 0);
+  assert.deepEqual(f.control.clientSetups, [['claude-code', 'install'], ['codex', 'connect']]);
 });

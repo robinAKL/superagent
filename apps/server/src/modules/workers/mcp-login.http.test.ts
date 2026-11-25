@@ -69,3 +69,18 @@ it('"open the sign-in" sends the computer one instruction for that server; stran
   // Already connected: nothing to open.
   expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/mcp-login`, payload: { server: 'gmail' } })).json()).toEqual({ opened: false, connected: true });
 });
+
+it('the computer reports its local clients; the page can ask it to install, sign in or connect one', async () => {
+  await a.inject({
+    method: 'POST', url: '/api/v1/worker-link/heartbeat', headers: { authorization: 'Bearer ' + token },
+    payload: { capabilities: { clients: [{ agent: 'claude-code', state: 'ready', connected: true }, { agent: 'codex', state: 'missing', connected: false }, { agent: 'gemini', state: 'ready' }] } },
+  });
+  const listed = (await a.inject({ method: 'GET', url: '/api/v1/workers' })).json().workers.find((worker: { id: string }) => worker.id === id);
+  expect(listed.capabilities.clients).toEqual([{ agent: 'claude-code', state: 'ready', connected: true }, { agent: 'codex', state: 'missing', connected: false }]);
+
+  expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/client-setup`, payload: { agent: 'codex', action: 'install' } })).json()).toEqual({ opened: true });
+  expect((await events()).filter((event) => event.kind === 'client_setup')).toEqual([expect.objectContaining({ payload: { agent: 'codex', action: 'install' } })]);
+  expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/client-setup`, payload: { agent: 'gemini', action: 'install' } })).statusCode).toBe(400);
+  expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/client-setup`, payload: { agent: 'codex', action: 'run' } })).statusCode).toBe(400);
+  expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/client-setup`, headers: { 'x-test-user': 'someone|employee' }, payload: { agent: 'codex', action: 'install' } })).statusCode).toBe(404);
+});

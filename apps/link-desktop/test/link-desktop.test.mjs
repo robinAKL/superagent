@@ -35,9 +35,13 @@ describe('link-desktop Windows installer & tray', () => {
     assert.match(cs, /LinkStatus\.Revoked/);
     assert.match(cs, /SHA256SUMS/);
     assert.match(cs, /setup-agents\.mjs/);
-    assert.match(cs, /安装并登录 Codex/);
-    assert.match(cs, /安装并登录 Claude Code/);
-    assert.match(cs, /登录 Codex/);
+    // One window for every local client: install and sign in, sign in, or connect a project folder; also opened
+    // from the web page (LINK_CLIENT_SETUP) and once after the computer first connects.
+    assert.match(cs, /Local clients \/ 本地客户端/);
+    assert.match(cs, /"安装并登录"/);
+    assert.match(cs, /"选择项目文件夹"/);
+    assert.match(cs, /LINK_CLIENT_SETUP:/);
+    assert.match(cs, /MaybeGuideClients\(\)/);
     assert.doesNotMatch(cs, /请先在这台电脑登录 Codex 或 Claude Code，再重试。/);
   });
 

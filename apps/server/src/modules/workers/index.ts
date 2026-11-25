@@ -326,6 +326,28 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return { opened: true };
   });
 
+  /**
+   * "安装" / "登录" / "连接到项目" for a local client (Claude Code, Codex) on this computer: Link opens its local clients
+   * window there at that step, for the person at the computer. Sign-ins and passwords are theirs; nothing is typed
+   * for them. The page follows the client's state through the heartbeat.
+   */
+  app.post('/:id/client-setup', SELF, async (req, reply) => {
+    const user = req.user!;
+    const { id } = req.params as { id: string };
+    if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
+    const device = await workersState.registry.get(user.tenantId, id);
+    if (!device || device.revokedAt !== null || device.kind !== 'link' || !mayManage(user, device)) return reply.code(404).send({ error: 'not_found' });
+    const { agent, action } = (req.body ?? {}) as { agent?: unknown; action?: unknown };
+    if ((agent !== 'claude-code' && agent !== 'codex') || (action !== 'install' && action !== 'login' && action !== 'connect')) {
+      return reply.code(400).send({ error: 'invalid_input' });
+    }
+    const key = `${id}:${agent}`;
+    if ((lastMcpLogin.get(key) ?? 0) > workersState.now() - 30_000) return { opened: true, again: false };
+    lastMcpLogin.set(key, workersState.now());
+    await workersState.registry.appendEvent(user.tenantId, id, 'client_setup', { agent, action }, user.userId, workersState.now());
+    return { opened: true };
+  });
+
   /** Address an instruction to one worker. It is delivered on the worker's next poll, however long it was away. */
   app.post('/:id/events', async (req, reply) => {
     const user = req.user;
@@ -570,14 +592,15 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     };
     const worker = req.worker!;
     if (body.capabilities && typeof body.capabilities === 'object') {
-      const { agents, projects, mcpServers } = cleanCapabilities(body.capabilities);
+      const { agents, projects, mcpServers, clients } = cleanCapabilities(body.capabilities);
       if (mcpServers && worker.kind === 'link') {
         await announceMcpChanges(worker, worker.capabilities.mcpServers, mcpServers, now).catch((error: unknown) => console.warn(`mcp announce failed: ${error instanceof Error ? error.message : String(error)}`));
       }
-      if (agents || (projects && worker.kind === 'link') || (mcpServers && worker.kind === 'link')) {
+      if (agents || (projects && worker.kind === 'link') || (mcpServers && worker.kind === 'link') || (clients && worker.kind === 'link')) {
         await workersState.registry.patchCapabilities(worker.tenantId, worker.id, {
           ...(agents ? { agents } : {}), ...(worker.kind === 'link' && projects ? { projects } : {}),
           ...(worker.kind === 'link' && mcpServers ? { mcpServers } : {}),
+          ...(worker.kind === 'link' && clients ? { clients } : {}),
         });
       }
     }
