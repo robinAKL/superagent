@@ -365,11 +365,13 @@ export class CommandRoom {
 
     if (input.followupTo && !originalVisible) return noTask('找不到要追问的任务，这条没有建任务。');
 
-    const understood = !mentions.length && !original ? input.understood ?? null : null;
+    // Work Super Agent started itself names the employee in its note ("交给 @员工") but carries the work separately:
+    // the work it carries is the task, never the note.
+    const understood = (input.systemWork && !original) || (!mentions.length && !original) ? input.understood ?? null : null;
     const routed = understood && 'employeeId' in understood
       ? this.roster(author).find((item) => item.id === understood.employeeId) ?? null
       : null;
-    const employee = mentions[0] ?? (original ? this.employees().find((item) => item.id === original.employeeId) ?? null : routed);
+    const employee = (input.systemWork && routed) || mentions[0] || (original ? this.employees().find((item) => item.id === original.employeeId) ?? null : routed);
     const work = routed && understood && 'work' in understood && understood.work.trim() ? understood.work.trim() : named;
     if (original && !employee) return noTask('原任务的数字员工已经不在了，这条没有建任务。');
 

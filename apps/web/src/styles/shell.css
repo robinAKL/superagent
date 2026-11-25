@@ -284,3 +284,13 @@ button, input, select, textarea { font-family: inherit; }
   .room-agents-foot { grid-template-columns: 1fr 1fr; }
   .room-agents-foot a { justify-content: center; font-size: 13px; }
 }
+
+/* Phones: the top bar is two rows (brand with language and sign-out, then the menu), and the room puts the
+   conversation first: members are the avatars in the room head, so the member strip and its links step aside. */
+@media (max-width: 560px) {
+  .topbar-end { margin-left: auto; gap: var(--space-2xs); }
+  .topbar-end .who > span:first-child { display: none; }
+  .topbar-end .who .btn { padding-inline: var(--space-xs); }
+  .room .room-agents { display: none; }
+  .room .room-head h1 { font-size: 20px; }
+}

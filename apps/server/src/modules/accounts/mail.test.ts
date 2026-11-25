@@ -82,7 +82,8 @@ it('mail already in the mailbox is not work; new mail becomes the employee’s t
   expect(await pollMail(accountsState.current, () => now)).toBe(1);
   expect(tasks()).toHaveLength(1);
   expect(tasks()[0]).toMatchObject({ employeeId: 'emp-ops' });
-  expect(tasks()[0]!.title).toContain('client@example.com');
+  expect(tasks()[0]!.title).toMatch(/^处理这封发到 ops@innopro.co.nz 的来信/);
+  expect(tasks()[0]!.title).toContain('请报价，尺寸见附件。');
   expect(messages()[0]!.body).toBe('收到发给 @运营员工 的邮件「询价：百叶窗 3 樘」（来自 client@example.com），已交给它处理。');
 
   // Read again: nothing is handled twice.

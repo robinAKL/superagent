@@ -107,7 +107,10 @@ it('at its time Super Agent hands the workflow to the employee as a task, sent t
   const tasks = roomState.current.listTasks({ userId: 'owner', roles: ['owner'], projectScopes: [] });
   expect(tasks).toHaveLength(1);
   expect(tasks[0]).toMatchObject({ employeeId: 'emp-ops', id: runs[0]!.taskId });
-  expect(tasks[0]!.title).toContain('周报汇总');
+  // The employee gets the schedule's work, not Super Agent's note about it (which names the employee).
+  expect(tasks[0]!.title).toMatch(/^按日历执行业务流程「周报汇总」/);
+  expect(tasks[0]!.title).toContain('1. 拉取上周订单');
+  expect(tasks[0]!.title).not.toContain('交给');
   const messages = roomState.current.eventsAfter('room-1', 0, { userId: 'owner', roles: ['owner'], projectScopes: [] });
   expect(messages[0]!.body).toBe('按日历启动「周报汇总」（每周一 09:00），交给 @运营员工。');
   const wakes = (await app.inject({ method: 'POST', url: '/link/poll', headers: { authorization: 'Bearer ' + token }, payload: { waitMs: 0 } })).json().events;
