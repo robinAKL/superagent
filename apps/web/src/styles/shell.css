@@ -264,3 +264,23 @@ button, input, select, textarea { font-family: inherit; }
   background: var(--color-paper-2); border-radius: 8px; }
 .mail-draft textarea { width: 100%; font: inherit; font-size: 13px; }
 .mail-draft-actions { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+
+/* Phones: rows that scroll sideways show no scrollbar; their items keep their size instead of breaking into columns. */
+@media (max-width: 800px) {
+  .topnav, .room .room-head .room-filters, .room-agents ul { scrollbar-width: none; }
+  .topnav::-webkit-scrollbar, .room .room-head .room-filters::-webkit-scrollbar, .room-agents ul::-webkit-scrollbar { display: none; }
+  .topnav .nav-item, .room-filters .room-chip { flex-shrink: 0; white-space: nowrap; }
+  /* Six destinations fit in two rows on a phone instead of hiding half of them off-screen. */
+  .topnav { flex-wrap: wrap; overflow-x: visible; row-gap: 2px; }
+  .topnav-group + .topnav-group { border-left: 0; padding-left: 0; }
+  .exec-room.room .room-head .room-filters { flex-wrap: wrap; overflow-x: visible; row-gap: 6px; }
+  .exec-room.room .room-head .room-filters .room-search { flex: 1 1 100%; }
+  /* Getting started: the title on its own line, the next step and its link below, never split letter by letter. */
+  .getting-started-head { flex-wrap: wrap; }
+  .getting-started-head h2 { flex: 1 1 100%; }
+  .getting-started-next, .getting-started-link { white-space: nowrap; }
+  .getting-started-next { flex-wrap: wrap; }
+  /* The two room links side by side under the members. */
+  .room-agents-foot { grid-template-columns: 1fr 1fr; }
+  .room-agents-foot a { justify-content: center; font-size: 13px; }
+}

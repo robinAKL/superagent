@@ -196,6 +196,14 @@ export function SetupPage() {
   const [capNotice, setCapNotice] = useState<Notice | null>(null);
   const [pending, setPending] = useState<'test' | 'activate' | 'budget' | 'resetPreview' | 'reset' | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  // Admin sections appear once the role is known: a link to one of them (#settings?section=accounts) lands there then.
+  useEffect(() => {
+    if (!isAdmin) return;
+    const section = requestedSection();
+    if (!section || !ADMIN_SECTIONS.has(section)) return;
+    const timer = window.setTimeout(() => { setCurrent(section); document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' }); }, 50);
+    return () => window.clearTimeout(timer);
+  }, [isAdmin]);
   const [resetPreview, setResetPreview] = useState<ResetPreview | null>(null);
   const [resetConfirmText, setResetConfirmText] = useState('');
   const [resetNotice, setResetNotice] = useState<Notice | null>(null);

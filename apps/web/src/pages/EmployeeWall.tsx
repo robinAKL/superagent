@@ -17,7 +17,7 @@ const TEXT = {
     conn_online: 'Managed worker connected', conn_busy: 'Managed worker connected', conn_unconnected: 'No worker connected yet', conn_waiting_auth: 'Worker waiting for authorization',
     conn_paused: 'Worker paused', conn_fault: 'Worker reported a fault', ownerUnknown: 'Not set', fromAnalysis: 'From knowledge analysis', manual: 'Added by hand',
     wallAria: 'Digital employees', count: '{n} employees', nextFlow: 'Next: publish workflows',
-    localLink: 'Local agent', manageLink: 'Manage Link', unbound: 'Not bound', ambiguous: 'Multiple bindings',
+    localLink: 'Local agent', manageLink: 'Manage Link', bindLink: 'Bind a computer', unbound: 'Not bound', ambiguous: 'Multiple bindings',
     restricted: 'Blocked by device permissions', offline: 'Device offline', waitingAuth: 'Sign in on the device',
     missingProject: 'Project not found on the device', busy: 'Running a task', ready: 'Ready for tasks',
     status_offline: 'Offline',
@@ -31,7 +31,7 @@ const TEXT = {
     conn_online: '受管 worker 已连接', conn_busy: '受管 worker 已连接', conn_unconnected: '还没有连接 worker', conn_waiting_auth: 'worker 等待授权',
     conn_paused: 'worker 已暂停', conn_fault: 'worker 报告故障', ownerUnknown: '未设置', fromAnalysis: '来自知识分析', manual: '手动添加',
     wallAria: '数字员工', count: '{n} 名员工', nextFlow: '下一步：发布流程',
-    localLink: '本地 Agent', manageLink: '管理 Link', unbound: '未绑定', ambiguous: '绑定了多个项目',
+    localLink: '本地 Agent', manageLink: '管理 Link', bindLink: '绑定电脑', unbound: '未绑定', ambiguous: '绑定了多个项目',
     restricted: '受设备权限限制', offline: '设备离线', waitingAuth: '等待本地登录',
     missingProject: '设备上找不到项目', busy: '正在执行任务', ready: '可接任务',
     status_offline: '离线',
@@ -128,7 +128,7 @@ export function EmployeeWall({ employees, hasDraft, onManage }: { employees: Wal
               <td className="num" data-label={t('tools')}>{tools === undefined ? '…' : tools + mcpToolCount(link?.device ?? null)}</td>
               <td className="actions">
                 {/* Bind or change this employee's computer; shown whenever the device list has loaded. */}
-                {link ? <a className="btn quiet" href={`#settings?link=1&employee=${encodeURIComponent(employee.id)}`}>{t('manageLink')}</a> : null}
+                {link ? <a className="btn quiet" href={`#settings?link=1&employee=${encodeURIComponent(employee.id)}`}>{t(link.status === 'unbound' ? 'bindLink' : 'manageLink')}</a> : null}
                 {onManage
                   ? <button type="button" className="btn" onClick={() => onManage(employee)}>{t('manage')}</button>
                   : <a className="btn" href={`#employees?manage=${encodeURIComponent(employee.id)}`}>{t('manage')}</a>}

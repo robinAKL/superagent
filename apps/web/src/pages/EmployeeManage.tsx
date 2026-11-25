@@ -69,21 +69,24 @@ export function EmployeeManage({ employee, lang, onClose, onChanged }: {
     return () => { cancelled = true; };
   }, [employee.id]);
 
-  async function mutate(path: string, init?: RequestInit) {
+  async function mutate(path: string, init?: RequestInit): Promise<boolean> {
     setBusy(true); setError(null); setNotice(null);
     try {
       const r = await api(path, init);
-      if (r.status >= 400) { setError(t('error')); return; }
+      if (r.status >= 400) { setError(t('error')); return false; }
       setNotice(t('saved'));
       onChanged();
-    } catch { setError(t('error')); }
+      return true;
+    } catch { setError(t('error')); return false; }
     finally { setBusy(false); }
   }
 
   function savePrompt(event: FormEvent) {
     event.preventDefault();
     if (!prompt.trim()) return;
-    void mutate(`/api/v1/employees/${encodeURIComponent(employee.id)}/prompt`, { method: 'PUT', body: JSON.stringify({ prompt: prompt.trim() }) });
+    // Saved text becomes the new version shown above; the box empties for the next one.
+    void mutate(`/api/v1/employees/${encodeURIComponent(employee.id)}/prompt`, { method: 'PUT', body: JSON.stringify({ prompt: prompt.trim() }) })
+      .then((ok) => { if (ok) setPrompt(''); });
   }
 
   const installed = tools ?? [];
