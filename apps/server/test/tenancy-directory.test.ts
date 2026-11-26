@@ -22,6 +22,9 @@ describe('company directory', () => {
     const { service } = setup();
     const staff = await service.resolve(person('robin', PLATFORM_DIR, 'robin@innopro.co.nz', ['owner']));
     expect(staff).toMatchObject({ tenantId: PLATFORM, userId: 'robin', roles: ['owner'] });
+    // The member list shows the role Microsoft gives them, and it counts as the company's owner.
+    expect((await service.members(staff!)).find((m) => m.userId === 'robin')?.roles).toEqual(['owner']);
+    await expect(service.setRoles(staff!, 'robin', ['admin'])).rejects.toMatchObject({ code: 'last_owner' });
     expect(await service.resolve(person('ana', 'dir-acme', 'ana@acme.co.nz'))).toBeNull();
     const me = await service.me(person('ana', 'dir-acme', 'ana@acme.co.nz'));
     expect(me.memberships).toEqual([]);

@@ -122,16 +122,22 @@ export class TenancyService {
     const platform = this.options.platformDirectory && identity.tid === this.options.platformDirectory;
     if (!platform) return rows;
     const existing = rows.find((m) => m.tenantId === this.options.platformTenantId);
-    if (existing) return rows.map((m) => m === existing ? { ...m, roles: [...new Set([...m.roles, ...identity.tokenRoles])] } : m);
+    if (existing) {
+      // App roles from Microsoft that the membership does not hold yet are recorded, so the member list shows the
+      // role the person really has and the last-owner rule counts them.
+      const merged = [...new Set([...existing.roles, ...identity.tokenRoles])];
+      if (merged.length !== existing.roles.length) await this.store.saveMember({ ...existing, roles: merged, email: existing.email ?? identity.email, displayName: identity.name });
+      return rows.map((m) => m === existing ? { ...m, roles: merged } : m);
+    }
     // A person of the platform company's own directory: recorded on first sign-in so administrators can see them.
     const removed = (await this.store.membershipsOf(identity.tid, identity.oid)).some((m) => m.tenantId === this.options.platformTenantId);
     if (removed) return rows;
     const member: Member = {
       tenantId: this.options.platformTenantId, userId: identity.oid, entraTid: identity.tid, email: identity.email,
-      displayName: identity.name, roles: [], status: 'active', createdAt: this.stamp(),
+      displayName: identity.name, roles: identity.tokenRoles, status: 'active', createdAt: this.stamp(),
     };
     await this.store.saveMember(member);
-    return [...rows, { ...member, roles: identity.tokenRoles }];
+    return [...rows, member];
   }
 
   /** Development identities: the header's company is theirs; recorded once so member lists show who is around. */
