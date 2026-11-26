@@ -260,7 +260,10 @@ export class TenancyService {
     const target = members.find((m) => m.userId === userId);
     if (!target) throw new TenancyError('member_not_found', '找不到这位成员。', 404);
     const grantsOwner = roles.includes('owner') !== target.roles.includes('owner');
-    if (grantsOwner && !user.roles.includes('owner')) throw new TenancyError('owner_only', '只有所有者可以设置或取消所有者。', 403);
+    // A company that has no owner yet (the platform company started with administrators only) gets its first one
+    // from an administrator; after that only an owner changes who owns it.
+    const ownerless = !members.some((m) => m.roles.includes('owner'));
+    if (grantsOwner && !user.roles.includes('owner') && !ownerless) throw new TenancyError('owner_only', '只有所有者可以设置或取消所有者。', 403);
     if (target.roles.includes('owner') && !roles.includes('owner') && members.filter((m) => m.roles.includes('owner')).length <= 1) {
       throw new TenancyError('last_owner', '公司至少要保留一位所有者。', 409);
     }

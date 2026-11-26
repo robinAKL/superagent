@@ -96,6 +96,14 @@ describe('company directory', () => {
     expect(await service.resolve(ben)).toBeNull();
   });
 
+  it('a company with no owner gets its first one from an administrator, once', async () => {
+    const { service } = setup();
+    const admin = (await service.resolve(person('robin', PLATFORM_DIR, 'robin@innopro.co.nz', ['admin'])))!;
+    const other = (await service.resolve(person('sam', PLATFORM_DIR, 'sam@innopro.co.nz', ['admin'])))!;
+    expect((await service.setRoles(admin, 'robin', ['owner'])).roles).toEqual(['owner']);
+    await expect(service.setRoles(other, 'sam', ['owner'])).rejects.toMatchObject({ code: 'owner_only' });
+  });
+
   it('someone in two companies works in the one they pick, and in no other', async () => {
     const { service } = setup();
     const ana = person('ana', 'dir-acme', 'ana@acme.co.nz');
