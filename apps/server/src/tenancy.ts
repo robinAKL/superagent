@@ -37,11 +37,13 @@ export function openRequestContext(done: () => void): void {
   als.run({ tenantId: null }, done);
 }
 
-/** Sets the tenant of the current request context (auth hook only). */
+/**
+ * Sets the tenant of the current request context (auth hook only). Outside a request context (routes mounted without
+ * the app's onRequest hook, as some unit tests do) it does nothing and the fallback applies.
+ */
 export function enterTenant(tenantId: string): void {
   const store = als.getStore();
   if (store) store.tenantId = tenantId;
-  else als.enterWith({ tenantId });
 }
 
 export interface TenantScoped<T> {

@@ -24,7 +24,7 @@ live('concurrent real PG consumers reuse the claimed instance and expose the sam
   const oldSop = sopState.current; const oldInbox = inboxState.current; const oldRuns = executionState.current.snapshot();
   try {
     await admin.query(`CREATE SCHEMA "${schema}"`);
-    for (const file of ['0005_longwork.sql', '0007_sop_runtime.sql', '0009_longwork_sop_starts.sql', '0010_inbox_and_runs.sql', '0011_execution_run.sql', '0012_work_item.sql'])
+    for (const file of ['0005_longwork.sql', '0007_sop_runtime.sql', '0025_sop_tenant_keys.sql', '0009_longwork_sop_starts.sql', '0010_inbox_and_runs.sql', '0011_execution_run.sql', '0012_work_item.sql'])
       await pool.query(fs.readFileSync(new URL(`../../../migrations/${file}`, import.meta.url), 'utf8').replace(/^GRANT .*$/gm, ''));
     const db: Queryable = { query: async <T>(sql: string, params: readonly unknown[]) => ({ rows: (await pool.query(sql, params as unknown[])).rows as T[] }) };
     const source: MailSource = { id: 'source', tenant: 'tenant', mailbox: 'mail@example.invalid', folder: 'inbox', sopId: 's', projectId: 'p', objectId: 'object', assignee: 'staff', reviewer: 'reviewer', reminderMs: 60000,

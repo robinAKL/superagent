@@ -42,7 +42,8 @@ CREATE TABLE "${schema}".knowledge_audit_log (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE "${schema}".sop_versions (
-  id text PRIMARY KEY,
+  id text NOT NULL,
+  tenant_id text NOT NULL,
   sop_id text NOT NULL,
   number integer NOT NULL,
   definition jsonb NOT NULL,
@@ -50,7 +51,8 @@ CREATE TABLE "${schema}".sop_versions (
   report jsonb,
   revision integer NOT NULL,
   validated_revision integer,
-  effective_at text
+  effective_at text,
+  PRIMARY KEY (tenant_id, id)
 );
 CREATE TABLE "${schema}".sop_instances (
   id text PRIMARY KEY,

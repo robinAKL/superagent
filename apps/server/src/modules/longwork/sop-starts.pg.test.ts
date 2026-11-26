@@ -20,7 +20,7 @@ async function database(run: (pool: pg.Pool, db: Queryable) => Promise<void>) {
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, options: `-c search_path=${schema}`, max: 8 });
   try {
     await admin.query(`CREATE SCHEMA "${schema}"`);
-    for (const name of ['0005_longwork.sql', '0007_sop_runtime.sql', '0009_longwork_sop_starts.sql']) {
+    for (const name of ['0005_longwork.sql', '0007_sop_runtime.sql', '0025_sop_tenant_keys.sql', '0009_longwork_sop_starts.sql']) {
       const sql = fs.readFileSync(new URL(`../../../migrations/${name}`, import.meta.url), 'utf8');
       await pool.query(sql.replace(/^GRANT .*$/gm, ''));
     }

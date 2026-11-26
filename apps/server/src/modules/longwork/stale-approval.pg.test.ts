@@ -25,7 +25,7 @@ live('a stale process cannot execute an approval after the original contract was
   const old = { sop: sopState.current, ex: executionState.current, inbox: inboxState.current, gateway: gatewayState.current };
   try {
     await admin.query(`CREATE SCHEMA "${schema}"`);
-    for (const file of ['0005_longwork.sql', '0007_sop_runtime.sql', '0008_gateway_actions.sql', '0009_longwork_sop_starts.sql', '0010_inbox_and_runs.sql', '0011_execution_run.sql', '0012_work_item.sql'])
+    for (const file of ['0005_longwork.sql', '0007_sop_runtime.sql', '0025_sop_tenant_keys.sql', '0008_gateway_actions.sql', '0009_longwork_sop_starts.sql', '0010_inbox_and_runs.sql', '0011_execution_run.sql', '0012_work_item.sql'])
       await pool.query(fs.readFileSync(new URL(`../../../migrations/${file}`, import.meta.url), 'utf8').replace(/^GRANT .*$/gm, ''));
     let beforeDecisionSave: (() => Promise<void>) | undefined;
     const db = { query: async <T>(sql: string, params: readonly unknown[]) => {
