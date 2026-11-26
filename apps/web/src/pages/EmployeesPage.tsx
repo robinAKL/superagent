@@ -46,6 +46,8 @@ export const TEXT = {
     blockedStale: 'Materials changed while they were being analyzed. Run the analysis again before confirming.',
     emptyTitle: 'No digital employees yet',
     emptyBody: 'Add one now: give it a name and its responsibilities, then publish. Or add materials in Company knowledge and let Super Agent suggest employees.',
+    noSuggestTitle: 'No suggested employees yet',
+    noSuggestBody: 'Add and check materials in Company knowledge, then run an analysis. Suggested employees, tools and workflows appear here with their sources.',
     goKnowledge: 'Go to Company knowledge',
     rolesTitle: 'Suggested employees ({n})',
     toolsTitle: 'Tools ({n})',
@@ -108,6 +110,8 @@ export const TEXT = {
     blockedStale: '资料在分析期间发生了变化，请重新分析后再确认。',
     emptyTitle: '还没有数字员工',
     emptyBody: '直接新增一个：写好名称和岗位职责就能发布。也可以先在企业知识里添加资料，让 Super Agent 推荐员工。',
+    noSuggestTitle: '还没有推荐的员工',
+    noSuggestBody: '先在企业知识里添加并核对资料，然后开始分析。推荐的员工、工具和流程会带着原文依据出现在这里。',
     goKnowledge: '去企业知识',
     rolesTitle: '推荐的员工（{n}）',
     toolsTitle: '工具（{n}）',
@@ -457,9 +461,10 @@ export function EmployeesPage() {
     {loadError && !org ? <div className="panel org-empty"><p>{loadError}</p><button className="btn" onClick={() => void load()}>{t('retry')}</button></div> : null}
 
     {org && org.blocked === 'no_employees' ? <section className="panel org-empty">
-      <h2>{t('emptyTitle')}</h2>
-      <p className="helper">{t('emptyBody')}</p>
-      {org.canConfirm ? <AddEmployeeForm busy={busy} t={t} onPublish={addEmployee} /> : null}
+      {/* With nobody on the team, adding one is the first step; with a team, this view is only about suggestions. */}
+      <h2>{t(team.length ? 'noSuggestTitle' : 'emptyTitle')}</h2>
+      <p className="helper">{t(team.length ? 'noSuggestBody' : 'emptyBody')}</p>
+      {org.canConfirm && !team.length ? <AddEmployeeForm busy={busy} t={t} onPublish={addEmployee} /> : null}
       <a className="btn" href="#knowledge">{t('goKnowledge')}</a>
     </section> : null}
 
