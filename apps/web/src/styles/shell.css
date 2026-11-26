@@ -318,6 +318,7 @@ button, input, select, textarea { font-family: inherit; }
   padding: var(--space-xs) var(--space-sm); border: 1px solid var(--color-soft-rule); border-radius: 8px; }
 .local-client .tag { justify-self: start; }
 .local-client > p { grid-column: 1 / -1; margin: 0; }
+.local-client-use { font-size: 13px; color: var(--color-success); }
 .local-client-name { font-weight: 600; font-size: 14px; }
 @media (max-width: 560px) { .local-client { grid-template-columns: 1fr auto; } .local-client .btn { grid-column: 1 / -1; } }
 

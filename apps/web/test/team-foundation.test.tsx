@@ -41,5 +41,24 @@ describe('linked computers', () => {
       employees={[{ id: 'e1', name: 'Wholesale Operations' }]} employeesLoaded boundEmployees={new Set(['e1'])} defaultEmployee="" busy={false} onSave={async () => undefined} /></LangProvider>);
     expect(html).toContain('所有数字员工都已绑定');
     expect(html).not.toContain('配置本地 Agent');
+    expect(html).toContain('谁在这台电脑上干活');
+    expect(html).toContain('使用中');
+    expect(html).toContain('用 <b>Claude Code</b> 在 <b>super agent</b> 文件夹里执行任务');
+  });
+
+  it('marks the client a bound employee uses, and a connected client nobody uses', async () => {
+    const { clientUsers } = await import('../src/pages/WorkerConnectPanel');
+    const { LocalClients } = await import('../src/pages/LocalClients');
+    const worker = { id: 'w1', name: 'PC', kind: 'link' as const, status: 'registered' as const, capabilities: {
+      projects: [{ id: 'p1', name: 'super agent', agent: 'claude-code' as const }, { id: 'p2', name: 'super agent link', agent: 'codex' as const }],
+      roomAssignments: [{ employeeId: 'e1', projectId: 'p1' }],
+      clients: [{ agent: 'claude-code' as const, state: 'ready' as const, connected: true }, { agent: 'codex' as const, state: 'ready' as const, connected: true }],
+    } };
+    const users = clientUsers(worker, [{ id: 'e1', name: 'Wholesale Operations' }]);
+    expect(users).toEqual({ 'claude-code': [{ employee: 'Wholesale Operations', folder: 'super agent' }] });
+    const html = renderToStaticMarkup(<LangProvider initial="zh"><LocalClients device={worker} users={users} onChanged={() => undefined} /></LangProvider>);
+    expect(html).toContain('正在被 Wholesale Operations 使用 · 文件夹 super agent');
+    expect(html).toMatch(/data-agent="codex" data-state="connected"[\s\S]*已连接，未使用/);
+    expect(html).toContain('data-agent="claude-code" data-state="in-use"');
   });
 });
