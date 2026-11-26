@@ -3,12 +3,13 @@
  * 待我处理 (work-items decide) and resume the run; this module never writes without one.
  */
 import { randomUUID } from 'node:crypto';
-import { currentTenant } from '../../tenancy.js';
+import { currentTenant, runAsTenant } from '../../tenancy.js';
 import type { FastifyPluginAsync } from 'fastify';
 import { flushGateway, gatewayState, hydrateGateway } from '../gateway/index.js';
 import { employeesState } from '../employees/index.js';
 import { flushInbox, inboxState, workItemEvents } from '../humanwork/index.js';
 import { insertWorkItem, loadWorkItemsForRun, updateWorkItem } from '../humanwork/pg-inbox.js';
+import type { WorkItem } from '../humanwork/work-items.js';
 import {
   claimCommandAdvance, completeCommandInstance, insertCommandRun, insertRun, loadClaimedRuns,
   loadCommandRuns, loadRunById, loadRunByInstance, loadRuns, saveRuns, updateRun, type Queryable,
@@ -151,14 +152,21 @@ async function restoreClaimedItems(executionId: string): Promise<void> {
  * Does not call manualStart or claim the event again.
  * The run is stored on its own row before any tool call. A second caller gets that row and does not advance.
  */
-export async function runClaimedInstance(input: {
+export function runClaimedInstance(input: ClaimedInput): Promise<Execution> {
+  // Called by the long-work worker outside any request: the run happens inside the instance's own company.
+  return runAsTenant(input.tenantId, () => runClaimedInTenant(input));
+}
+
+interface ClaimedInput {
   tenantId: string;
   versionId: string;
   instanceId: string;
   eventId: string;
   startedBy: string;
   data: Record<string, unknown>;
-}): Promise<Execution> {
+}
+
+async function runClaimedInTenant(input: ClaimedInput): Promise<Execution> {
   if (runStore) await ensurePinned(input.versionId);
   const local = executionState.current.byInstance(input.tenantId, input.instanceId);
   if (local) {
@@ -228,7 +236,9 @@ async function advanceCommandRun(
   return run ?? current;
 }
 
-workItemEvents.decided.push(async (item) => {
+// A decision resumes the run inside the work item's own company.
+workItemEvents.decided.push((item) => runAsTenant(item.tenantId, () => resumeDecided(item)));
+async function resumeDecided(item: WorkItem) {
   const executionId = item.payload.executionId;
   if (runStore && typeof executionId === 'string' && isCommandRun(executionId)) {
     const current = await loadRunById(runStore, executionId);
@@ -256,7 +266,7 @@ workItemEvents.decided.push(async (item) => {
   await flushExecutions();
   await flushInbox();
   await flushGateway();
-});
+}
 
 export const executionModule: FastifyPluginAsync<{ resolveWorkflowTeam?: (tenantId: string) => Promise<Record<string, string>> }> = async (app, opts) => {
   app.setErrorHandler((err, _req, reply) => {
