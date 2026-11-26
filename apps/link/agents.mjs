@@ -91,7 +91,7 @@ export const AGENT_SPECS = [
       || existsSync(join(home(env), '.gemini', 'oauth_creds.json'))
       || /GEMINI_API_KEY\s*=\s*\S/.test((() => { try { return readFileSync(join(home(env), '.gemini', '.env'), 'utf8'); } catch { return ''; } })()),
     loginArgs: [],
-    loginHint: '在弹出的 Gemini 窗口里选择「Sign in with Google」，在浏览器登录；看到登录成功后可以关掉那个窗口。',
+    loginHint: '在弹出的 Gemini 窗口里选择「Sign in with Google」，在浏览器登录，之后可以关掉那个窗口。',
     install: { command: NPM_INSTALL('@google/gemini-cli'), env: {} },
   },
   {
@@ -102,7 +102,7 @@ export const AGENT_SPECS = [
     signedIn: (env) => existsSync(join(home(env), '.qwen', 'oauth_creds.json'))
       || Boolean(readJson(join(home(env), '.qwen', 'settings.json'))?.security?.auth?.selectedType),
     loginArgs: [],
-    loginHint: '在弹出的 Qwen Code 窗口里输入 /auth，按提示在浏览器登录或填写服务商密钥；完成后可以关掉那个窗口。',
+    loginHint: '在弹出的 Qwen Code 窗口里输入 /auth，按提示在浏览器登录或填写服务商密钥，之后可以关掉那个窗口。',
     install: { command: NPM_INSTALL('@qwen-code/qwen-code'), env: {} },
   },
 ];

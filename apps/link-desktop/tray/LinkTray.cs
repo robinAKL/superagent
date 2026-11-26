@@ -1070,20 +1070,22 @@ namespace SuperAgentLinkTray
                 using (var close = new Button())
                 {
                     form.Text = "Local clients / 本地客户端";
-                    form.ClientSize = new Size(520, 470);
+                    form.ClientSize = new Size(520, 496);
                     form.StartPosition = FormStartPosition.CenterScreen;
                     form.FormBorderStyle = FormBorderStyle.FixedDialog;
                     form.MaximizeBox = false;
                     form.MinimizeBox = false;
                     form.TopMost = true;
+                    // The default WinForms font has no Chinese glyphs; Windows then mixes fallback fonts per character.
+                    form.Font = new Font("Microsoft YaHei UI", 9F);
                     intro.Text = "Super Agent 通过这台电脑上的客户端干活，选任一个即可，也可以连接多个。每个客户端三步：安装 → 登录 → 选项目文件夹（连到指挥室）。点按钮即可，登录在弹出的窗口或浏览器里完成。";
-                    intro.SetBounds(12, 12, 496, 44);
-                    rows.SetBounds(12, 60, 496, 318);
+                    intro.SetBounds(12, 10, 496, 62);
+                    rows.SetBounds(12, 76, 496, 318);
                     rows.AutoScroll = true;
-                    status.SetBounds(12, 384, 496, 46);
+                    status.SetBounds(12, 400, 496, 50);
                     close.Text = "完成 / Done";
                     close.DialogResult = DialogResult.OK;
-                    close.SetBounds(408, 434, 100, 28);
+                    close.SetBounds(408, 458, 100, 30);
                     form.Controls.AddRange(new Control[] { intro, rows, status, close });
                     form.AcceptButton = close;
                     form.CancelButton = close;
@@ -1271,8 +1273,8 @@ namespace SuperAgentLinkTray
                 if (!true.Equals(result["ok"]))
                 {
                     object error;
-                    throw new InvalidOperationException(result.TryGetValue("error", out error) && error != null
-                        ? error.ToString() : "安装失败。");
+                    throw new InvalidOperationException(label + " 安装失败：" + (result.TryGetValue("error", out error) && error != null
+                        ? error.ToString() : "请稍后再试，或查看 Link 日志。"));
                 }
                 executable = result["executable"] as string;
                 object loginArgs;
@@ -1287,7 +1289,7 @@ namespace SuperAgentLinkTray
             if (string.IsNullOrEmpty(executable)) throw new InvalidOperationException("没有找到 " + label + " 命令行。");
             object rawHint;
             var hint = choice.TryGetValue("loginHint", out rawHint) && rawHint is string ? (string)rawHint : "请在弹出的窗口或浏览器里完成登录。";
-            status.Text = "已打开 " + label + " 登录。" + hint + "完成后会自动继续。";
+            status.Text = "已打开 " + label + " 登录。" + hint + "登录好后这里会自动进入下一步。";
             object rawLogin;
             var loginArgsText = JoinArgs(choice.TryGetValue("loginArgs", out rawLogin) ? rawLogin : null);
             var start = new ProcessStartInfo { UseShellExecute = true };
