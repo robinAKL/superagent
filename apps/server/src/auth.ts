@@ -40,6 +40,16 @@ export function authConfigFromEnv(env = process.env): AuthConfig {
 
 const toRoles = (v: unknown): Role[] => (Array.isArray(v) ? v.filter((r): r is Role => (ROLES as readonly string[]).includes(String(r))) : []);
 
+/**
+ * The address an invitation may be matched against. The sign-in name (preferred_username / upn) is on a domain the
+ * person's organisation has verified with Microsoft. The free-form `email` claim is not: an organisation can put
+ * any address there, so it counts only when Microsoft marks its domain as verified (xms_edov).
+ */
+export function verifiedAddress(payload: JWTPayload): string | null {
+  const text = (value: unknown): string | null => typeof value === 'string' && value.includes('@') ? value : null;
+  return text(payload.preferred_username) ?? text(payload.upn) ?? (payload.xms_edov === true || payload.xms_edov === 'true' ? text(payload.email) : null);
+}
+
 const header = (req: FastifyRequest, name: string): string | null => {
   const value = req.headers[name];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -93,7 +103,7 @@ export function createAuthenticate(cfg: AuthConfig, options: { identityOnly?: bo
       enterTenant(req.user.tenantId);
       return;
     }
-    const email = [payload.email, payload.preferred_username, payload.upn].find((v): v is string => typeof v === 'string' && v.includes('@')) ?? null;
+    const email = verifiedAddress(payload);
     const identity: Identity = { tid, oid, email: email?.toLowerCase() ?? null, name: typeof payload.name === 'string' ? payload.name : email ?? oid, tokenRoles };
     req.identity = identity;
     const user = await cfg.directory.resolve(identity, header(req, 'x-tenant'));

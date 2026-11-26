@@ -8,6 +8,11 @@ import type { SecretStore, SecretVersion } from './secrets.js';
 import { setupModelPrice } from './model-catalog.js';
 
 export const SECRET_NAME = 'llm-provider-key';
+/**
+ * Each company's model key is its own Key Vault secret. (Keys activated before companies were separated stay where
+ * their record points, under the shared name.) Key Vault names allow letters, digits and dashes only.
+ */
+export const secretNameFor = (tenantId: string): string => `${SECRET_NAME}-${tenantId.replace(/[^a-zA-Z0-9-]/g, '-')}`.slice(0, 127);
 
 export interface LlmConfigRecord {
   tenantId: string;
@@ -145,7 +150,7 @@ export async function activateKey(
     if (!v?.chat || !v.tools) throw new Error(`model ${id} is not on the verified allowlist`);
   }
   const now = (deps.now ?? (() => new Date()))();
-  const newRef = await deps.secrets.put(SECRET_NAME, c.apiKey); // throws on failure → no activation
+  const newRef = await deps.secrets.put(secretNameFor(tenantId), c.apiKey); // throws on failure → no activation
   const rec = await deps.repo.get(tenantId);
   const oldRef = rec.secret;
   const modelChanged = rec.primaryModel !== null && rec.primaryModel !== models.primary;
