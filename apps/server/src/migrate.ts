@@ -30,6 +30,8 @@ export async function migrate(pool: pg.Pool, dir = migrationsDir(), log: (m: str
       const sql = fs.readFileSync(path.join(dir, f), 'utf8').replaceAll('--> statement-breakpoint', '');
       await client.query('BEGIN');
       try {
+        // Rows from the single-company days belong to the platform company; migrations read it from here.
+        await client.query("SELECT set_config('app.platform_tenant', $1, true)", [process.env.PLATFORM_TENANT_ID ?? 'default']);
         await client.query(sql);
         await client.query('INSERT INTO schema_migrations(name) VALUES ($1)', [f]);
         await client.query('COMMIT');

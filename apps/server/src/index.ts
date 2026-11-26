@@ -1,5 +1,6 @@
 import { APP_ROLES, type AppRole } from '@superagent/shared';
 import { buildApp } from './app.js';
+import { forEachTenant, setFallbackTenant } from './tenancy.js';
 import { dispatchBound, runWorker } from './worker.js';
 import { bindRuntimeDb, runtimeState } from './modules/runtime/index.js';
 import { bindRoomBrain, bindRoomStore, hydrateRoom, startRoomSupervisor } from './modules/room/index.js';
@@ -119,6 +120,7 @@ if (role === 'web') {
 } else if (role === 'worker') {
   const { createRuntime } = await import('./bootstrap.js');
   const runtime = await createRuntime(process.env);
+  setFallbackTenant(runtime.config.platformTenantId);
   const controller = new AbortController();
   process.once('SIGTERM', () => controller.abort());
   process.once('SIGINT', () => controller.abort());
@@ -133,15 +135,27 @@ if (role === 'web') {
   if (!await longwork.ready()) { await runtime.close(); throw Error('Longwork migrations are required before starting the worker'); }
   if (!await knowledgeReady(knowledge)) { await knowledge.close?.(); await runtime.close(); throw Error('Knowledge migrations are required before starting the worker'); }
   let lastHeartbeat = 0;
+  // Background work runs company by company. The list is read again every minute so a new company is picked up.
+  let tenantCache: { at: number; ids: string[] } = { at: 0, ids: [] };
+  const tenantIds = async (): Promise<string[]> => {
+    if (Date.now() - tenantCache.at < 60_000) return tenantCache.ids;
+    const ids = new Set([runtime.config.platformTenantId]);
+    if (runtime.pool) for (const row of (await runtime.pool.query<{ t: string }>('SELECT id::text AS t FROM tenants UNION SELECT tenant_id AS t FROM knowledge_tenants')).rows) ids.add(row.t);
+    tenantCache = { at: Date.now(), ids: [...ids] };
+    return tenantCache.ids;
+  };
+  const eachTenant = async (work: (tenantId: string) => Promise<unknown>) => forEachTenant(await tenantIds(), work,
+    (tenantId, error) => console.error(JSON.stringify({ msg: 'worker_tick_failed', tenantId, error: error instanceof Error ? error.message : String(error) })));
   try { await runWorker({ runtime, signal: controller.signal, heartbeatMs: 1000,
     ticks: [
-      async () => { await tickKnowledge(knowledge, runtime.config.platformTenantId); },
-      async () => { await longwork.tick(); },
-      // T-41 queue: one claim per tick for kinds with a registered handler; nothing claimed without one.
+      async () => { await eachTenant((tenantId) => tickKnowledge(knowledge, tenantId)); },
+      async () => { await eachTenant((tenantId) => longwork.tick(tenantId)); },
+      // T-41 queue: one claim per tick and company for kinds with a registered handler; nothing claimed without one.
       async () => {
         if (!runtime.pool) return;
         const pool = runtime.pool;
-        await dispatchBound({ query: async <T>(text: string, params: readonly unknown[]) => ({ rows: (await pool.query(text, params as unknown[])).rows as T[] }) }, runtimeState.queue, process.env.WORKER_ID ?? 'worker', runtime.config.platformTenantId);
+        const db = { query: async <T>(text: string, params: readonly unknown[]) => ({ rows: (await pool.query(text, params as unknown[])).rows as T[] }) };
+        await eachTenant((tenantId) => dispatchBound(db, runtimeState.queue, process.env.WORKER_ID ?? 'worker', tenantId));
       },
     ],
     log: entry => { if (entry.msg !== 'worker heartbeat' || Date.now() - lastHeartbeat >= 15_000) { console.log(JSON.stringify(entry)); lastHeartbeat = Date.now(); } },

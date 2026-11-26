@@ -1,12 +1,13 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { liveCurrent, tenantScoped } from '../../tenancy.js';
 import { EmployeeService } from './employees.js';
 
-/** One employee registry per process, shared with the executor's call-time authorisation. */
-export const employeesState = { current: new EmployeeService() };
+/** One employee registry per company, shared with the executor's call-time authorisation. */
+export const employeesState = tenantScoped(() => new EmployeeService());
 
 /** Digital employee routes (T-42). */
 export const employeesModule: FastifyPluginAsync<{ service?: EmployeeService }> = async (app, opts) => {
-  const svc = opts.service ?? employeesState.current;
+  const svc = opts.service ?? liveCurrent(employeesState);
   const view = (id: string) => {
     const e = svc.get(id);
     return { id: e.id, name: e.name, duty: e.duty, status: e.status, source: e.source, owner: e.owner, promptVersion: svc.currentPrompt(id).version, modelTier: e.modelTier };

@@ -5,7 +5,7 @@ import type { ActionDriver, LongWork } from './service.js';
 import type { MailTrigger } from './graph.js';
 import type { Action, Collection } from './store.js';
 
-export interface LongWorkDeps { work: LongWork; mail?: MailTrigger; driver?: ActionDriver; ready(): Promise<boolean>; tick(): Promise<void> }
+export interface LongWorkDeps { work: LongWork; mail?: MailTrigger; driver?: ActionDriver; ready(): Promise<boolean>; tick(tenantId?: string): Promise<void> }
 function manager(req: FastifyRequest) { return req.user?.roles.some(r => r === 'admin' || r === 'owner'); }
 function reviewer(req: FastifyRequest) { return manager(req) || req.user?.roles.includes('reviewer'); }
 function actionVisible(req: FastifyRequest, a: Action) { return manager(req) || a.assigneeUserId === req.user!.userId || (!a.assigneeUserId && reviewer(req)); }

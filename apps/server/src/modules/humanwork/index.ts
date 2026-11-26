@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import { currentTenant } from '../../tenancy.js';
 import type { WorkItemKind, WorkItemRenderer } from '@superagent/shared';
 import { viewerFrom } from '../room/index.js';
 import { loadInbox, loadWorkItems, loadWorkItemsForRun, saveInbox, updateWorkItem, type Queryable } from './pg-inbox.js';
@@ -101,7 +102,7 @@ export const humanworkModule: FastifyPluginAsync<{ deps?: LongWorkDeps }> = asyn
     const viewer = viewerFrom(req.headers, req.user);
     const owner = viewer.roles.includes('owner') || viewer.roles.includes('admin');
     return inboxState.current.create({
-      tenantId: tenantOf(req) ?? 't',
+      tenantId: tenantOf(req) ?? currentTenant(),
       kind: body.kind,
       renderer: body.renderer,
       projectId: body.projectId ?? null,

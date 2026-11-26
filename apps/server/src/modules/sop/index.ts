@@ -1,15 +1,16 @@
 import { validateSopGraph } from '@superagent/shared';
+import { currentTenant, tenantScoped } from '../../tenancy.js';
 import type { FastifyPluginAsync } from 'fastify';
 import { toolsState } from '../tools/index.js';
-import { countRunningSopInstances, loadActiveWorkflows, loadSopSnapshot, saveSopSnapshot, type Queryable } from './pg-sop.js';
+import { countRunningSopInstances, loadActiveWorkflows, loadSopSnapshot, loadSopTenants, saveSopSnapshot, type Queryable } from './pg-sop.js';
 import { OriginalRequests } from './original-request.js';
 import { CompanyContextStore, contextInput } from './company-context.js';
 import { setSopGraphCheck, SopRuntime, type SopDefinition, type SopGraphContext } from './sop.js';
 
 setSopGraphCheck((graph, context) => validateSopGraph(graph, context as Parameters<typeof validateSopGraph>[1]));
 
-export const sopState = { current: new SopRuntime() };
-export const originalRequestState = { current: new OriginalRequests() };
+export const sopState = tenantScoped(() => new SopRuntime());
+export const originalRequestState = tenantScoped(() => new OriginalRequests());
 
 let sopStore: Queryable | null = null;
 export const companyContext = { current: new CompanyContextStore(null) };
@@ -21,7 +22,7 @@ export function bindSopStore(db: Queryable | null): void {
 
 /** Writes the process cache. A worker reads the tables; it does not trust this process's memory. */
 export async function flushSop(): Promise<void> {
-  if (sopStore) await saveSopSnapshot(sopStore, sopState.current.snapshot());
+  if (sopStore) await saveSopSnapshot(sopStore, sopState.current.snapshot(), currentTenant());
 }
 
 /**
@@ -49,9 +50,11 @@ export async function commitSop<T>(change: () => T): Promise<T> {
 /** Replaces the process cache when Postgres already has versions, instances, or claimed events. */
 export async function hydrateSop(): Promise<void> {
   if (!sopStore) return;
-  const saved = await loadSopSnapshot(sopStore);
-  if (saved.versions.length === 0 && saved.instances.length === 0 && saved.eventKeys.length === 0) return;
-  sopState.current = SopRuntime.restore(saved);
+  for (const tenantId of await loadSopTenants(sopStore)) {
+    const saved = await loadSopSnapshot(sopStore, tenantId);
+    if (saved.versions.length === 0 && saved.instances.length === 0 && saved.eventKeys.length === 0) continue;
+    sopState.set(tenantId, SopRuntime.restore(saved));
+  }
 }
 
 /** Latest version must itself be published. A newer draft means the flow is no longer the confirmed one. */
@@ -74,10 +77,10 @@ export const sopModule: FastifyPluginAsync = async (app) => {
     const context = await companyContext.current.save(req.user!.tenantId, req.user!.userId, fields, expectedVersion);
     return context ? { context } : reply.code(409).send({ error: 'company_context_changed' });
   });
-  app.get('/published', async (_req, reply) => {
+  app.get('/published', async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     const now = Date.now();
-    const versions = sopStore ? await loadActiveWorkflows(sopStore) : sopState.current.list().flatMap(({ sopId }) => {
+    const versions = sopStore ? await loadActiveWorkflows(sopStore, req.user!.tenantId) : sopState.current.list().flatMap(({ sopId }) => {
       const active = sopState.current.activePublished(sopId, now);
       return active ? [active] : [];
     });
@@ -146,7 +149,7 @@ export const sopModule: FastifyPluginAsync = async (app) => {
       return reply.code(404).send({ error: error instanceof Error ? error.message : 'version_not_found' });
     }
     const runningInstances = sopStore
-      ? (await countRunningSopInstances(sopStore, version.sopId, req.user?.tenantId)).get(version.id) ?? 0
+      ? (await countRunningSopInstances(sopStore, version.sopId, req.user!.tenantId)).get(version.id) ?? 0
       : sopState.current.runningInstances(version.id);
     return { ...version, runningInstances };
   });
@@ -155,7 +158,7 @@ export const sopModule: FastifyPluginAsync = async (app) => {
     const { sopId } = req.params as { sopId: string };
     const versions = sopState.current.listVersions(sopId);
     if (!sopStore) return { versions };
-    const counts = await countRunningSopInstances(sopStore, sopId, req.user?.tenantId);
+    const counts = await countRunningSopInstances(sopStore, sopId, req.user!.tenantId);
     return { versions: versions.map(version => ({ ...version, runningInstances: counts.get(version.id) ?? 0 })) };
   });
 

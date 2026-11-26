@@ -1,7 +1,7 @@
 import type { ResultEvidence, ResultHold, ResultVerification } from './result-gate.js';
 import type { MessageKind, PromptSnapshot, RoomSnapshot, RoomTask, TaskContract } from './room.js';
 import {
-  LOAD_MEMBERS_SQL,
+  LOAD_MEMBERS_SQL, LOAD_ROOM_TENANTS_SQL,
   LOAD_MESSAGES_SQL,
   LOAD_TASKS_SQL,
   UPSERT_MEMBER_SQL,
@@ -75,7 +75,7 @@ function asStrings(value: unknown): string[] {
 }
 
 /** Writes the in-memory snapshot. Re-saving the same client message id updates the task link and does not insert a second row. */
-export async function saveRoomRows(db: Queryable, snapshot: RoomSnapshot): Promise<void> {
+export async function saveRoomRows(db: Queryable, snapshot: RoomSnapshot, tenantId: string): Promise<void> {
   for (const message of snapshot.messages) {
     await db.query(UPSERT_MESSAGE_SQL, [
       message.id,
@@ -120,16 +120,21 @@ export async function saveRoomRows(db: Queryable, snapshot: RoomSnapshot): Promi
   }
   for (const member of snapshot.members) {
     for (const userId of member.userIds) {
-      await db.query(UPSERT_MEMBER_SQL, [member.roomId, userId]);
+      await db.query(UPSERT_MEMBER_SQL, [tenantId, member.roomId, userId]);
     }
   }
 }
 
-/** Rebuilds a snapshot from room_messages, room_tasks, and room_members. */
-export async function loadRoomRows(db: Queryable): Promise<RoomSnapshot> {
-  const messages = await db.query<MessageRow>(LOAD_MESSAGES_SQL, []);
-  const tasks = await db.query<TaskRow>(LOAD_TASKS_SQL, []);
-  const members = await db.query<MemberRow>(LOAD_MEMBERS_SQL, []);
+/** Every company with saved command-room rows. */
+export async function loadRoomTenants(db: Queryable): Promise<string[]> {
+  return (await db.query<{ tenant_id: string }>(LOAD_ROOM_TENANTS_SQL, [])).rows.map((row) => row.tenant_id);
+}
+
+/** Rebuilds one company's snapshot from room_messages, room_tasks, and room_members. */
+export async function loadRoomRows(db: Queryable, tenantId: string): Promise<RoomSnapshot> {
+  const messages = await db.query<MessageRow>(LOAD_MESSAGES_SQL, [tenantId]);
+  const tasks = await db.query<TaskRow>(LOAD_TASKS_SQL, [tenantId]);
+  const members = await db.query<MemberRow>(LOAD_MEMBERS_SQL, [tenantId]);
   const byRoom = new Map<string, string[]>();
   for (const member of members.rows) {
     const users = byRoom.get(member.room_id) ?? [];

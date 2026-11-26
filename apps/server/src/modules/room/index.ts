@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import type { FastifyPluginAsync } from 'fastify';
-import { loadRoomRows, saveRoomRows, type Queryable } from './pg-room.js';
+import { loadRoomRows, loadRoomTenants, saveRoomRows, type Queryable } from './pg-room.js';
+import { currentTenant, forEachTenant, tenantScoped } from '../../tenancy.js';
 import { employeesState } from '../employees/index.js';
 import { queueRoomDispatch, resolveRoomDispatch, retryRoomDispatch, workersState } from '../workers/index.js';
 import { linkMayBeOnline, linkOnline } from '../workers/presence.js';
@@ -42,8 +43,8 @@ export function createCommandRoom(employees: EmployeeSource = registryEmployees)
   return new CommandRoom(employees);
 }
 
-/** Process-local room. Postgres rows are the restart contract; the JSON file remains a fallback. */
-export const roomState = { current: createCommandRoom() };
+/** One room per company, in process memory. Postgres rows are the restart contract; the JSON file remains a fallback. */
+export const roomState = tenantScoped(() => new CommandRoom(employeeSource));
 
 let roomStore: Queryable | null = null;
 
@@ -61,7 +62,8 @@ let roomLookups: RoomLookups | null = null;
  * One pass of Super Agent managing the board: resume tasks whose computer is back, retry failed or unclaimed ones,
  * remind people of what waits on them. Runs on a timer and before Super Agent answers a question about progress.
  */
-let supervising: Promise<number> | null = null;
+/** The pass running for each company. */
+const supervising = new Map<string, Promise<number>>();
 async function supervisePass(): Promise<number> {
   const room = roomState.current;
   room.holdDisconnected();
@@ -101,20 +103,25 @@ async function retryAndSay(viewer: Viewer, roomId: string, numbers: number[] | '
 async function dispatchAgain(request: import('./room.js').RetryRequest): Promise<boolean> {
   try { return await retryRoomDispatch(request.task); } catch (error) { console.warn(`room retry dispatch failed: ${error instanceof Error ? error.message : String(error)}`); return false; }
 }
-/** One pass at a time: a call while a pass runs shares it. */
+/** One pass at a time: a call while a pass runs shares it. The timer's pass covers every company in turn. */
 export function superviseRoom(): Promise<number> {
-  if (!supervising) {
-    const pass = supervisePass();
-    supervising = pass;
-    const clear = () => { if (supervising === pass) supervising = null; };
-    pass.then(clear, clear);
+  const tenantId = currentTenant();
+  let pass = supervising.get(tenantId);
+  if (!pass) {
+    const running = supervisePass();
+    pass = running;
+    supervising.set(tenantId, running);
+    const clear = () => { if (supervising.get(tenantId) === running) supervising.delete(tenantId); };
+    running.then(clear, clear);
   }
-  return supervising;
+  return pass;
 }
 
 /** Super Agent checks the board every minute (unref: never keeps the process alive). */
 export function startRoomSupervisor(everyMs = 60_000): () => void {
-  const timer = setInterval(() => { void superviseRoom().catch((error: unknown) => console.warn(`room supervisor failed: ${error instanceof Error ? error.message : String(error)}`)); }, everyMs);
+  const timer = setInterval(() => {
+    void forEachTenant(roomState.tenants(), () => superviseRoom(), (tenantId, error) => console.warn(`room supervisor failed for ${tenantId}: ${error instanceof Error ? error.message : String(error)}`));
+  }, everyMs);
   timer.unref?.();
   return () => clearInterval(timer);
 }
@@ -141,15 +148,17 @@ export function messageCursor(value: string | undefined): number | null {
 }
 
 export async function flushRoom(): Promise<void> {
-  if (roomStore) await saveRoomRows(roomStore, roomState.current.snapshot());
+  if (roomStore) await saveRoomRows(roomStore, roomState.current.snapshot(), currentTenant());
 }
 
 /** Replaces the process-local room when the database already has messages or tasks. */
 export async function hydrateRoom(): Promise<void> {
   if (!roomStore) return;
-  const saved = await loadRoomRows(roomStore);
-  if (saved.messages.length === 0 && saved.tasks.length === 0) return;
-  reloadRoom(saved);
+  for (const tenantId of await loadRoomTenants(roomStore)) {
+    const saved = await loadRoomRows(roomStore, tenantId);
+    if (saved.messages.length === 0 && saved.tasks.length === 0) continue;
+    roomState.set(tenantId, CommandRoom.restore(employeeSource, saved));
+  }
 }
 
 export function saveRoom(file: string): void {
@@ -191,7 +200,6 @@ export function viewerFrom(headers: Record<string, unknown>, user?: { userId: st
 
 interface MessageBody {
   roomId?: string;
-  tenantId?: string;
   projectId?: string | null;
   body?: string;
   clientMessageId?: string;
@@ -233,7 +241,8 @@ export async function receiveRoomMessage(req: RoomMessageRequest, reply: RoomMes
   const body = (req.body ?? {}) as MessageBody;
   if (!body.roomId || !body.body || !body.clientMessageId) return reply.code(400).send({ error: 'missing_fields' });
   const viewer = viewerFrom(req.headers, req.user);
-  const tenantId = req.user?.tenantId ?? body.tenantId ?? 't';
+  // The company is the signed-in user's (or the current context's), never one named in the request body.
+  const tenantId = req.user?.tenantId ?? currentTenant();
   const room = roomState.current;
   // A question about a numbered task is answered from the task, not read by the model.
   let aboutTask = !body.followupTo && !room.namesEmployee(body.body) ? room.answerAboutTask(body.body, viewer, body.roomId) : null;

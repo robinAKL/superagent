@@ -17,7 +17,8 @@ const ready: SopDefinition = {
 const DDL = `
 CREATE SCHEMA "${schema}";
 CREATE TABLE "${schema}".sop_versions (
-  id text PRIMARY KEY,
+  id text NOT NULL,
+  tenant_id text NOT NULL,
   sop_id text NOT NULL,
   number integer NOT NULL,
   definition jsonb NOT NULL,
@@ -26,16 +27,18 @@ CREATE TABLE "${schema}".sop_versions (
   revision integer NOT NULL,
   validated_revision integer,
   effective_at text,
-  UNIQUE (sop_id, number)
+  PRIMARY KEY (tenant_id, id),
+  UNIQUE (tenant_id, sop_id, number)
 );
 CREATE TABLE "${schema}".sop_instances (
-  id text PRIMARY KEY,
+  id text NOT NULL,
   tenant_id text NOT NULL,
   sop_id text NOT NULL,
   sop_version_id text NOT NULL,
   version_number integer NOT NULL,
   event_key text NOT NULL UNIQUE,
-  status text NOT NULL
+  status text NOT NULL,
+  PRIMARY KEY (tenant_id, id)
 );
 CREATE TABLE "${schema}".sop_events (
   tenant_id text NOT NULL,
@@ -47,7 +50,7 @@ CREATE TABLE "${schema}".sop_events (
   PRIMARY KEY (tenant_id, source, event_id, sop_id)
 );
 CREATE TABLE "${schema}".sop_runtime_seq (
-  id boolean PRIMARY KEY DEFAULT true CHECK (id),
+  tenant_id text PRIMARY KEY,
   seq integer NOT NULL
 );
 `;
@@ -78,15 +81,15 @@ live('a second process reads the published SOP and cannot claim the same event',
     runtime.validate(version.id);
     runtime.publish(version.id, '2026-11-10T00:00:00.000Z');
     runtime.manualStart('tenant-a', version.id, 'mail-1', true);
-    await saveSopSnapshot(writer, runtime.snapshot());
+    await saveSopSnapshot(writer, runtime.snapshot(), 'tenant-a');
 
     const reader = bound(pool);
-    const published = await loadPublishedVersion(reader, 'inquiry');
+    const published = await loadPublishedVersion(reader, 'tenant-a', 'inquiry');
     expect(published?.status).toBe('published');
     expect(published?.id).toBe(version.id);
     expect(published?.effectiveAt).toBe('2026-11-10T00:00:00.000Z');
 
-    const restored = SopRuntime.restore(await loadSopSnapshot(reader));
+    const restored = SopRuntime.restore(await loadSopSnapshot(reader, 'tenant-a'));
     expect(restored.manualStart('tenant-a', version.id, 'mail-1', true)).toBeNull();
     expect(await claimSopEvent(reader, { tenantId: 'tenant-a', source: 'manual', eventId: 'mail-1', sopId: 'inquiry' })).toBe(false);
     expect(await claimSopEvent(reader, { tenantId: 'tenant-a', source: 'mail', eventId: 'mail-2', sopId: 'inquiry' })).toBe(true);
@@ -99,11 +102,11 @@ live('a second process reads the published SOP and cannot claim the same event',
       VALUES ('cmd_3', $1, $2, $3, $4, $5, 'running')
     `, [command.tenantId, command.sopId, version.id, version.number,
       sopEventKey(command.tenantId, command.source, command.eventId, command.sopId)]);
-    const cachedSnapshot = await loadSopSnapshot(reader);
+    const cachedSnapshot = await loadSopSnapshot(reader, 'tenant-a');
     expect((await countRunningSopInstances(reader, 'inquiry', 'tenant-a')).get(version.id)).toBe(2);
     expect((await countRunningSopInstances(reader, 'inquiry', 'tenant-b')).size).toBe(0);
     await writer.query("UPDATE sop_instances SET status = 'completed' WHERE id = 'cmd_3'", []);
-    await saveSopSnapshot(reader, cachedSnapshot);
+    await saveSopSnapshot(reader, cachedSnapshot, 'tenant-a');
     expect((await countRunningSopInstances(reader, 'inquiry', 'tenant-a')).get(version.id)).toBe(1);
   } finally {
     await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

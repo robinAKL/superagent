@@ -3,7 +3,7 @@
  * Rule: secrets are never stored here — only Key Vault secret names/versions.
  */
 import { sql } from 'drizzle-orm';
-import { pgTable, text, uuid, timestamp, jsonb, integer, boolean, bigint, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, uuid, timestamp, jsonb, integer, boolean, bigint, uniqueIndex, index, primaryKey } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const tenantId = () => uuid('tenant_id').notNull();
@@ -173,9 +173,9 @@ export const tasks = pgTable('tasks', {
   ).where(sql`${t.deadLetter} = false AND ${t.status} IN ('assigned', 'running')`),
 ]);
 
-// Command room rows (T-41): text ids match the room module; (room_id, client_message_id) is the dedup key.
+// Command room rows (T-41): text ids match the room module, per company (migration 0024); (tenant_id, room_id, client_message_id) is the dedup key.
 export const roomMessages = pgTable('room_messages', {
-  id: text('id').primaryKey(),
+  id: text('id').notNull(),
   seq: integer('seq').notNull(),
   tenantId: text('tenant_id').notNull(),
   roomId: text('room_id').notNull(),
@@ -186,10 +186,10 @@ export const roomMessages = pgTable('room_messages', {
   taskIds: jsonb('task_ids').notNull(),
   // message | reply | report | review | cancel; NULL on rows from before migration 0006
   kind: text('kind'),
-}, (t) => [uniqueIndex('room_messages_dedup').on(t.roomId, t.clientMessageId)]);
+}, (t) => [primaryKey({ columns: [t.tenantId, t.id] }), uniqueIndex('room_messages_dedup').on(t.tenantId, t.roomId, t.clientMessageId)]);
 
 export const roomTasks = pgTable('room_tasks', {
-  id: text('id').primaryKey(),
+  id: text('id').notNull(),
   tenantId: text('tenant_id').notNull(),
   roomId: text('room_id').notNull(),
   projectId: text('project_id'),
@@ -201,12 +201,13 @@ export const roomTasks = pgTable('room_tasks', {
   waitingReason: text('waiting_reason'),
   // who asked, the task it continues, the prompt snapshot, approval need, who accepted it (migration 0006)
   context: jsonb('context').notNull().default({}),
-});
+}, (t) => [primaryKey({ columns: [t.tenantId, t.id] })]);
 
 export const roomMembers = pgTable('room_members', {
+  tenantId: text('tenant_id').notNull(),
   roomId: text('room_id').notNull(),
   userId: text('user_id').notNull(),
-}, (t) => [uniqueIndex('room_members_pk').on(t.roomId, t.userId)]);
+}, (t) => [uniqueIndex('room_members_pk').on(t.tenantId, t.roomId, t.userId)]);
 
 export const humanWorkItems = pgTable('human_work_items', {
   id: id(),

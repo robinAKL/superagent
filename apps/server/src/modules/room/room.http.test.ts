@@ -5,7 +5,7 @@ import Fastify from 'fastify';
 import { beforeEach, expect, it } from 'vitest';
 import { bindRoomBrain, bindRoomStore, createCommandRoom, hydrateRoom, loadRoom, reloadRoom, roomModule, roomState, saveRoom } from './index.js';
 import type { EmployeeRef } from './room.js';
-import { LOAD_MEMBERS_SQL, LOAD_MESSAGES_SQL, LOAD_TASKS_SQL, UPSERT_MEMBER_SQL, UPSERT_MESSAGE_SQL, UPSERT_TASK_SQL } from './sql.js';
+import { LOAD_MEMBERS_SQL, LOAD_ROOM_TENANTS_SQL, LOAD_MESSAGES_SQL, LOAD_TASKS_SQL, UPSERT_MEMBER_SQL, UPSERT_MESSAGE_SQL, UPSERT_TASK_SQL } from './sql.js';
 
 const EMPLOYEES: EmployeeRef[] = [
   { id: 'emp-sales', name: '销售员工', ownerUserId: 'user-sales', status: 'active' },
@@ -372,7 +372,7 @@ interface StoredTask {
 function memoryRoomDb() {
   const messages: StoredMessage[] = [];
   const tasks: StoredTask[] = [];
-  const members: Array<{ room_id: string; user_id: string }> = [];
+  const members: Array<{ tenant_id: string; room_id: string; user_id: string }> = [];
   return {
     async query<T>(sql: string, params: readonly unknown[]): Promise<{ rows: T[] }> {
       if (sql === UPSERT_MESSAGE_SQL) {
@@ -411,14 +411,16 @@ function memoryRoomDb() {
         return { rows: [] };
       }
       if (sql === UPSERT_MEMBER_SQL) {
-        const roomId = String(params[0]);
-        const userId = String(params[1]);
-        if (!members.some((item) => item.room_id === roomId && item.user_id === userId)) members.push({ room_id: roomId, user_id: userId });
+        const tenantId = String(params[0]);
+        const roomId = String(params[1]);
+        const userId = String(params[2]);
+        if (!members.some((item) => item.tenant_id === tenantId && item.room_id === roomId && item.user_id === userId)) members.push({ tenant_id: tenantId, room_id: roomId, user_id: userId });
         return { rows: [] };
       }
-      if (sql === LOAD_MESSAGES_SQL) return { rows: [...messages].sort((a, b) => a.seq - b.seq) as T[] };
-      if (sql === LOAD_TASKS_SQL) return { rows: tasks as T[] };
-      if (sql === LOAD_MEMBERS_SQL) return { rows: members as T[] };
+      if (sql === LOAD_ROOM_TENANTS_SQL) return { rows: [...new Set([...messages, ...tasks, ...members].map((row) => row.tenant_id))].map((tenant_id) => ({ tenant_id })) as T[] };
+      if (sql === LOAD_MESSAGES_SQL) return { rows: messages.filter((row) => row.tenant_id === params[0]).sort((a, b) => a.seq - b.seq) as T[] };
+      if (sql === LOAD_TASKS_SQL) return { rows: tasks.filter((row) => row.tenant_id === params[0]) as T[] };
+      if (sql === LOAD_MEMBERS_SQL) return { rows: members.filter((row) => row.tenant_id === params[0]) as T[] };
       throw new Error(`unexpected sql: ${sql}`);
     },
   };

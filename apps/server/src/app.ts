@@ -1,3 +1,4 @@
+import { openRequestContext, setFallbackTenant } from './tenancy.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';
@@ -36,6 +37,8 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     // Never log request bodies: Setup carries API keys (PRD §7.1).
     disableRequestLogging: true,
   });
+  // Every request gets its own tenant context; the auth hook (or a computer's token) fills in the company.
+  app.addHook('onRequest', (_req, _reply, done) => openRequestContext(done));
 
   app.get('/healthz', async () => ({ ok: true }));
   // One address that always downloads the newest Link for Windows: the release workflow keeps link-latest current.
@@ -85,6 +88,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   if (production && (!opts.auth || opts.auth.mode === 'dev')) throw new Error('production requires explicit Entra auth (use createRuntime in bootstrap.ts)');
   if (production && !opts.setupDeps) throw new Error('production requires persistent Setup dependencies (use createRuntime in bootstrap.ts)');
   const auth = opts.auth ?? { mode: 'dev' as const, platformTenantId: 'default' };
+  setFallbackTenant(auth.platformTenantId);
   const authCfgForBrowser = auth;
   const authenticate = createAuthenticate(auth);
   const knowledge = opts.knowledgeDeps?.organization ? new KnowledgeService(opts.knowledgeDeps) : undefined;
@@ -111,7 +115,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
         }
         const deps = m.prefix === 'setup' ? opts.setupDeps : m.prefix === 'knowledge' ? opts.knowledgeDeps : m.prefix === 'work-items' ? opts.longWorkDeps : undefined;
         const workflowTeam = m.prefix === 'executions' && knowledge ? { resolveWorkflowTeam: (tenantId: string) => knowledge.resolveWorkflowTeam(tenantId) } : {};
-        await scoped.register(m.plugin, { ...(deps ? { deps } : {}), ...workflowTeam, tenantOf: (req: any) => req.user?.tenantId ?? 'default' });
+        await scoped.register(m.plugin, { ...(deps ? { deps } : {}), ...workflowTeam, tenantOf: (req: any) => req.user?.tenantId ?? auth.platformTenantId });
       }, { prefix: `/api/v1/${m.prefix}` });
     }
   });

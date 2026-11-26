@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { enterTenant } from '../../tenancy.js';
 import { createHash } from 'node:crypto';
 import { flushRoom, roomState } from '../room/index.js';
 import type { RoomTask } from '../room/room.js';
@@ -532,6 +533,8 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
     const worker = await authenticateWorker(workersState.registry, bearer(req));
     if (!worker) return reply.code(401).send({ error: 'bad_worker_token' });
     req.worker = worker;
+    // A computer acts only inside the company it was paired with.
+    enterTenant(worker.tenantId);
   });
 
   registerApprovalLinkRoutes(app, approvalDeps);

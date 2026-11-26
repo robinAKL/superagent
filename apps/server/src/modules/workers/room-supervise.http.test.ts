@@ -1,10 +1,13 @@
 import Fastify from 'fastify';
+import { setFallbackTenant } from '../../tenancy.js';
 import { expect, it } from 'vitest';
 import { bindRoomBrain, bindRoomStore, createCommandRoom, roomModule, roomState, superviseRoom } from '../room/index.js';
 import type { EmployeeRef } from '../room/room.js';
 import { registerWorker, resetWorkers, workerLinkModule, workersState } from './index.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
+// These tests mount the routes without the app's request context: the test's company is the default one.
+setFallbackTenant(tenantId);
 const projectId = 'project-a';
 const employeeId = 'employee-a';
 

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { runAsTenant } from '../../tenancy.js';
 import type { FastifyPluginAsync } from 'fastify';
 import type { UserContext } from '@superagent/shared';
 import { flushRoom, receiveRoomMessage, roomState } from '../room/index.js';
@@ -164,6 +165,15 @@ async function draftReplies(row: AccountConnection, state: MailState, token: str
 export async function pollMail(service: AccountService, now: () => number = Date.now): Promise<number> {
   let handled = 0;
   for (const row of await service.mailAccounts()) {
+    // Every mailbox is read inside its own company: its tasks go to that company's room only.
+    handled += await runAsTenant(row.tenantId, () => pollOne(service, row, now));
+  }
+  return handled;
+}
+
+async function pollOne(service: AccountService, row: AccountConnection, now: () => number): Promise<number> {
+  let handled = 0;
+  {
     const at = new Date(now()).toISOString();
     const state: MailState = structuredClone(row.mailState ?? {});
     try {

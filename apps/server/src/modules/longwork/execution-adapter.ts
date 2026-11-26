@@ -12,7 +12,7 @@ export function pgMailSopConsumer(pool: pg.Pool): MailSopConsumer {
   return {
     inspect: (tenant, instance) => loadRunByInstance(db, tenant, instance),
     eligible: async input => {
-      const version = await loadVersionById(db, input.versionId);
+      const version = await loadVersionById(db, input.tenantId, input.versionId);
       if (!version || version.status !== 'published' || !version.report?.ok || version.validatedRevision !== version.revision || version.definition.employeeStatus !== 'active') return false;
       const context = input.data.longItem as { sourceId?: string } | undefined;
       if (!context?.sourceId) return false;

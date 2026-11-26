@@ -25,7 +25,7 @@ live('a stale process cannot execute an approval after the original contract was
   const old = { sop: sopState.current, ex: executionState.current, inbox: inboxState.current, gateway: gatewayState.current };
   try {
     await admin.query(`CREATE SCHEMA "${schema}"`);
-    for (const file of ['0005_longwork.sql', '0007_sop_runtime.sql', '0008_gateway_actions.sql', '0009_longwork_sop_starts.sql', '0010_inbox_and_runs.sql', '0011_execution_run.sql', '0012_work_item.sql'])
+    for (const file of ['0005_longwork.sql', '0007_sop_runtime.sql', '0025_sop_tenant_keys.sql', '0008_gateway_actions.sql', '0009_longwork_sop_starts.sql', '0010_inbox_and_runs.sql', '0011_execution_run.sql', '0012_work_item.sql'])
       await pool.query(fs.readFileSync(new URL(`../../../migrations/${file}`, import.meta.url), 'utf8').replace(/^GRANT .*$/gm, ''));
     let beforeDecisionSave: (() => Promise<void>) | undefined;
     const db = { query: async <T>(sql: string, params: readonly unknown[]) => {
@@ -37,7 +37,7 @@ live('a stale process cannot execute an approval after the original contract was
       nodes: [{ id: 't', kind: 'trigger', label: 'mail' }, { id: 'e', kind: 'employee', label: 'employee', ref: 'employee' }, { id: 'h', kind: 'human_review', label: 'approval' }, { id: 'w', kind: 'tool', label: 'write', ref: 'fixture.write' }],
       edges: [{ from: 't', to: 'e' }, { from: 'e', to: 'h' }, { from: 'h', to: 'w' }] } });
     const context = { employees: { employee: { status: 'active' as const } }, tools: { 'fixture.write': { stage: 'available', effect: 'write' } } };
-    expect(sop.validate(version.id, context).status).toBe('passed'); sop.publish(version.id, undefined, context); await saveSopSnapshot(db, sop.snapshot());
+    expect(sop.validate(version.id, context).status).toBe('passed'); sop.publish(version.id, undefined, context); await saveSopSnapshot(db, sop.snapshot(), 'tenant');
     sopState.current = sop; gatewayState.current = new ToolGateway(); inboxState.current = new WorkInbox(); let writes = 0;
     executionState.current = new SopExecutor({ sop: () => sopState.current, inbox: () => inboxState.current, gateway: gatewayState.current,
       tools: () => ({ effect: 'write', available: true }), connectors: new Map([['fixture.write', params => { writes++; return { actual: structuredClone(params) }; }]]),

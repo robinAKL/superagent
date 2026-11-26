@@ -24,7 +24,7 @@ live('concurrent real PG consumers reuse the claimed instance and expose the sam
   const oldSop = sopState.current; const oldInbox = inboxState.current; const oldRuns = executionState.current.snapshot();
   try {
     await admin.query(`CREATE SCHEMA "${schema}"`);
-    for (const file of ['0005_longwork.sql', '0007_sop_runtime.sql', '0009_longwork_sop_starts.sql', '0010_inbox_and_runs.sql', '0011_execution_run.sql', '0012_work_item.sql'])
+    for (const file of ['0005_longwork.sql', '0007_sop_runtime.sql', '0025_sop_tenant_keys.sql', '0009_longwork_sop_starts.sql', '0010_inbox_and_runs.sql', '0011_execution_run.sql', '0012_work_item.sql'])
       await pool.query(fs.readFileSync(new URL(`../../../migrations/${file}`, import.meta.url), 'utf8').replace(/^GRANT .*$/gm, ''));
     const db: Queryable = { query: async <T>(sql: string, params: readonly unknown[]) => ({ rows: (await pool.query(sql, params as unknown[])).rows as T[] }) };
     const source: MailSource = { id: 'source', tenant: 'tenant', mailbox: 'mail@example.invalid', folder: 'inbox', sopId: 's', projectId: 'p', objectId: 'object', assignee: 'staff', reviewer: 'reviewer', reminderMs: 60000,
@@ -32,7 +32,7 @@ live('concurrent real PG consumers reuse the claimed instance and expose the sam
     const sop = new SopRuntime(); const version = sop.draft('s', { requiredFields: ['title', 'amount'], threshold: { field: 'amount', max: 1000 }, employeeStatus: 'active', graph: {
       nodes: [{ id: 't', kind: 'trigger', label: 'mail' }, { id: 'h', kind: 'human_review', label: 'review' }], edges: [{ from: 't', to: 'h' }] } });
     const context = { employees: {}, tools: {} };
-    expect(sop.validate(version.id, context)).toMatchObject({ status: 'passed', issues: [] }); sop.publish(version.id, undefined, context); await saveSopSnapshot(db, sop.snapshot());
+    expect(sop.validate(version.id, context)).toMatchObject({ status: 'passed', issues: [] }); sop.publish(version.id, undefined, context); await saveSopSnapshot(db, sop.snapshot(), 'tenant');
     sopState.current = new SopRuntime(); inboxState.current = new WorkInbox(); executionState.current.load({ seq: 0, runs: [] }); bindExecutionStore(db); bindInboxStore(db);
     const makeStore = () => new PgLongWorkStore(pool, prepareMailSopStarts([source])); const work = new LongWork(makeStore());
     const mail = { id: 'mail', threadId: 'thread', from: 'person@example.invalid', receivedAt: '2026-11-10T00:00:00Z', body: 'Synthetic data only' };

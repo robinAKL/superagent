@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { liveCurrent, tenantScoped } from '../../tenancy.js';
 import type { ToolContract, ToolRoute } from '@superagent/shared';
 import { employeesState } from '../employees/index.js';
 import { roomState } from '../room/index.js';
@@ -6,11 +7,11 @@ import { findPresetTool, installPresetTool, listPresetCatalog } from './catalog.
 import { GateError, ToolService } from './lifecycle.js';
 
 /** Process-wide tool service, shared with the SOP executor (tool availability and effect). */
-export const toolsState = { current: new ToolService() };
+export const toolsState = tenantScoped(() => new ToolService());
 
 /** Tool card routes (T-42). Reviewer identity for release is the signed-in user — never taken from the body. */
 export const toolsModule: FastifyPluginAsync<{ service?: ToolService }> = async (app, opts) => {
-  const svc = opts.service ?? toolsState.current;
+  const svc = opts.service ?? liveCurrent(toolsState);
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof GateError || err instanceof SyntaxError) return reply.code(409).send({ error: 'gate', message: err.message });
     return reply.send(err);

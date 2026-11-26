@@ -12,7 +12,7 @@ const SCHEMA = `t41_${randomUUID().replace(/-/g, '')}`;
 const DDL = `
 CREATE SCHEMA "${SCHEMA}";
 CREATE TABLE "${SCHEMA}".room_messages (
-  id text PRIMARY KEY,
+  id text NOT NULL,
   seq integer NOT NULL,
   tenant_id text NOT NULL,
   room_id text NOT NULL,
@@ -22,10 +22,11 @@ CREATE TABLE "${SCHEMA}".room_messages (
   mentions jsonb NOT NULL,
   task_ids jsonb NOT NULL,
   kind text,
-  UNIQUE (room_id, client_message_id)
+  PRIMARY KEY (tenant_id, id),
+  UNIQUE (tenant_id, room_id, client_message_id)
 );
 CREATE TABLE "${SCHEMA}".room_tasks (
-  id text PRIMARY KEY,
+  id text NOT NULL,
   tenant_id text NOT NULL,
   room_id text NOT NULL,
   project_id text,
@@ -35,12 +36,14 @@ CREATE TABLE "${SCHEMA}".room_tasks (
   title text NOT NULL,
   status text NOT NULL,
   waiting_reason text,
-  context jsonb NOT NULL DEFAULT '{}'::jsonb
+  context jsonb NOT NULL DEFAULT '{}'::jsonb,
+  PRIMARY KEY (tenant_id, id)
 );
 CREATE TABLE "${SCHEMA}".room_members (
+  tenant_id text NOT NULL,
   room_id text NOT NULL,
   user_id text NOT NULL,
-  PRIMARY KEY (room_id, user_id)
+  PRIMARY KEY (tenant_id, room_id, user_id)
 );
 `;
 
@@ -91,12 +94,12 @@ live('a restarted room reloads the conversation from Postgres and keeps the clie
       clientMessageId: 'c2',
     });
     service.report(posted.task!.id, 'user-sales', '询价草稿已整理', 'report-1');
-    await saveRoomRows(db, service.snapshot());
-    await saveRoomRows(db, service.snapshot());
+    await saveRoomRows(db, service.snapshot(), 't');
+    await saveRoomRows(db, service.snapshot(), 't');
     // a row written before migration 0006 has no kind; the room works it out on load
     await db.query(`UPDATE room_messages SET kind = NULL WHERE client_message_id = $1`, ['report-1']);
 
-    const restored = CommandRoom.restore(employees, await loadRoomRows(db));
+    const restored = CommandRoom.restore(employees, await loadRoomRows(db, 't'));
     const owner = { userId: 'user-owner', roles: ['owner' as const], projectScopes: [] };
     const messages = restored.eventsAfter('room-1', 0, owner);
     expect(messages.map((message) => message.body)).toEqual(['@销售员工 整理询价草稿', '已交给 @销售员工：整理询价草稿', '询价草稿已整理']);
@@ -113,8 +116,8 @@ live('a restarted room reloads the conversation from Postgres and keeps the clie
     });
     // the completed result and a follow-up survive the next restart too
     const followup = restored.post({ roomId: 'room-1', tenantId: 't', authorUserId: 'user-owner', body: '请补充交期', clientMessageId: 'c3', followupTo: posted.task!.id });
-    await saveRoomRows(db, restored.snapshot());
-    const second = CommandRoom.restore(employees, await loadRoomRows(db));
+    await saveRoomRows(db, restored.snapshot(), 't');
+    const second = CommandRoom.restore(employees, await loadRoomRows(db, 't'));
     expect(second.listTasks(owner).find((task) => task.id === posted.task!.id)).toMatchObject({ status: 'completed', reviewedByUserId: null });
     expect(second.listTasks(owner).find((task) => task.id === followup.task!.id)).toMatchObject({ followupTo: posted.task!.id, projectId: 'p1' });
     const again = restored.post({
