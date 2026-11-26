@@ -1,15 +1,16 @@
 import { useState } from 'react';
+import { LINK_AGENT_LABELS, type LinkAgent } from '@superagent/shared';
 import { api } from '../api';
 import { useT } from '../i18n';
 import type { LinkDevice } from './link-devices';
 
 /**
- * The local clients on one computer (Claude Code, Codex): where each stands and the one step that comes next. A click
+ * The local clients on one computer (Claude Code, Codex, Cursor CLI, GitHub Copilot CLI, Gemini CLI, Qwen Code): where each stands and the one step that comes next. A click
  * opens the step on that computer (the tray's local clients window); installing, signing in and choosing a folder
  * happen there, by the person at the computer. Several clients can be connected at once.
  */
 export type ClientState = 'missing' | 'signed-out' | 'ready';
-export interface LocalClient { agent: 'claude-code' | 'codex'; state: ClientState; connected: boolean }
+export interface LocalClient { agent: LinkAgent; state: ClientState; connected: boolean }
 
 const TEXT = {
   en: {
@@ -30,7 +31,7 @@ const TEXT = {
   },
 };
 
-export const CLIENT_LABEL: Record<LocalClient['agent'], string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+export const CLIENT_LABEL: Record<LocalClient['agent'], string> = LINK_AGENT_LABELS;
 
 /** The step a client needs next. */
 export function nextStep(client: LocalClient): 'install' | 'login' | 'connect' | 'more' {

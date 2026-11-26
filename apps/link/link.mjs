@@ -7,9 +7,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { launchAgent, launchCodexWithApprovals, projectDirectory } from './agent.mjs';
 import { DEFAULT_POLICY, cleanPolicy, decide, describe, mcpToolsByServer, parseMcpList } from './policy.mjs';
 import { execFile } from 'node:child_process';
+import { AGENTS } from './agents.mjs';
 
-/** The local clients Link can run work with. */
-export const CLIENTS = ['claude-code', 'codex'];
+/** The local clients Link can run work with (agents.mjs). */
+export const CLIENTS = AGENTS;
 const CLIENT_ACTIONS = new Set(['install', 'login', 'connect']);
 
 /**
@@ -97,7 +98,7 @@ export class WorkerLink {
     this.#stateFile = config.stateFile;
     this.#projects = new Map(Object.entries(config.projects ?? {}));
     for (const project of this.#projects.values()) {
-      if (!['codex', 'claude-code'].includes(project.agent) || !isAbsolute(project.executable)) {
+      if (!CLIENTS.includes(project.agent) || !isAbsolute(project.executable)) {
         throw new Error('Each project needs a fixed agent and an absolute executable path.');
       }
     }
@@ -406,13 +407,18 @@ export class WorkerLink {
           }
         };
         // Claude Code asks through Link's permission tool: the employee's mode decides, the room answers the rest.
+        // The other clients (Cursor, Copilot, Gemini, Qwen) take the employee's mode as their own approval setting.
+        let mode;
         if (project.agent === 'claude-code') {
           approvals = new AbortController();
           approver = await this.#approver(job, await this.#policy(job), approvals.signal);
+        } else if (project.agent !== 'codex') {
+          mode = (await this.#policy(job)).mode;
         }
         const process = project.agent === 'codex' && project.approvals === 'room'
           ? this.#launchWithApprovals(project, job.prompt, job.session, notify, (request, signal) => this.#approve(job, request, signal))
-          : this.#launch(project, job.prompt, job.session, notify, approver);
+          : mode ? this.#launch(project, job.prompt, job.session, notify, null, { mode })
+            : this.#launch(project, job.prompt, job.session, notify, approver);
         this.#active = { job, process };
         this.#onTask(true);
         void this.#api('/heartbeat', { busy: true, waitingAuthReason: null }, AbortSignal.timeout(10_000)).catch(() => {});

@@ -1,3 +1,4 @@
+import { isLinkAgent } from '@superagent/shared';
 import { randomBytes } from 'node:crypto';
 import { WORK_KINDS } from '../runtime/queue.js';
 import type { Queryable } from '../runtime/pg-queue.js';
@@ -110,7 +111,7 @@ export function publicPairView(session: PairSession, now: number): { userCode: s
 export async function startPair(store: PairStore, input: { hostname?: unknown; agents?: unknown }, now: number): Promise<PairSession> {
   const hostname = typeof input.hostname === 'string' && input.hostname.trim() ? input.hostname.trim().slice(0, 80) : 'this computer';
   const agents = Array.isArray(input.agents)
-    ? [...new Set(input.agents.filter((v): v is string => typeof v === 'string' && (v === 'codex' || v === 'claude-code')))]
+    ? [...new Set(input.agents.filter((v): v is string => isLinkAgent(v)))]
     : [];
   for (let i = 0; i < 8; i++) {
     const session: PairSession = {

@@ -1,4 +1,4 @@
-import type { TaskStatus } from '@superagent/shared';
+import { isLinkAgent, type TaskStatus } from '@superagent/shared';
 import { asksAvailability, isExternalAction, isGreeting, needsParameters, workText, askedTaskNumber, smallTalkReply } from './intent.js';
 import {
   acceptSupplement, applyAsyncReport, evidenceFromReport, permissionHold, resultOverview, summaryLabel, verificationOf,
@@ -156,7 +156,8 @@ export const roomHooks: { linkMayBeOnline: (employeeId: string) => boolean } = {
  */
 export function workerUpdateState(body: string): 'progress' | 'failed' | 'needs_sign_in' {
   const text = body.trim();
-  if (/^(codex|claude-code) requires sign-in\.$/.test(text)) return 'needs_sign_in';
+  const signIn = /^([a-z-]+) requires sign-in\.$/.exec(text);
+  if (signIn && isLinkAgent(signIn[1])) return 'needs_sign_in';
   if (text.startsWith('Agent CLI did not return a completed result.') || text === 'Agent CLI could not be started.'
     || text === 'Project directory or local agent is unavailable.' || text === 'Codex App Server could not be started.'
     || text === 'Codex App Server disconnected.' || text === 'Codex App Server ended without a final response.') return 'failed';

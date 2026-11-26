@@ -164,7 +164,7 @@ namespace SuperAgentLinkTray
 
             _statusItem = new ToolStripMenuItem("Status: Unpaired") { Enabled = false };
             var openRoomItem = new ToolStripMenuItem("Open Command Room / 打开指挥室", null, OnOpenRoom);
-            var configureItem = new ToolStripMenuItem("Local clients / 本地客户端（Claude Code、Codex）", null, OnConfigureAgent);
+            var configureItem = new ToolStripMenuItem("Local clients / 本地客户端（Claude Code、Codex、Cursor、Copilot、Gemini、Qwen）", null, OnConfigureAgent);
             var repairItem = new ToolStripMenuItem("Re-pair / 重新配对", null, OnRepair);
             var logsItem = new ToolStripMenuItem("View Logs / 查看日志", null, OnViewLogs);
             var exitItem = new ToolStripMenuItem("Exit / 退出", null, OnExit);
@@ -480,15 +480,29 @@ namespace SuperAgentLinkTray
             }
         }
 
+        /** The local clients Link supports (apps/link/agents.mjs): name and the CLI's own sign-in arguments. */
+        private static readonly Dictionary<string, string[]> Agents = new Dictionary<string, string[]>
+        {
+            { "claude-code", new[] { "Claude Code", "auth login" } },
+            { "codex", new[] { "Codex", "login" } },
+            { "cursor", new[] { "Cursor CLI", "login" } },
+            { "copilot", new[] { "GitHub Copilot CLI", "login" } },
+            // Gemini CLI and Qwen Code sign in inside their own window (Sign in with Google, /auth).
+            { "gemini", new[] { "Gemini CLI", "" } },
+            { "qwen", new[] { "Qwen Code", "" } },
+        };
+
         private static string AgentLabel(string agent)
         {
-            return agent == "codex" ? "Codex" : agent == "claude-code" ? "Claude Code" : agent;
+            string[] spec;
+            return agent != null && Agents.TryGetValue(agent, out spec) ? spec[0] : agent;
         }
 
         /** The CLI's own sign-in command, the same one Set up local agent uses. */
         private static string LoginArguments(string agent)
         {
-            return agent == "codex" ? "login" : agent == "claude-code" ? "auth login" : null;
+            string[] spec;
+            return agent != null && Agents.TryGetValue(agent, out spec) ? spec[1] : null;
         }
 
         /** The executable a configured project uses for this agent; paths stay on this computer. */
@@ -1004,7 +1018,7 @@ namespace SuperAgentLinkTray
             if (_clientsPrompted || _exiting) return;
             _clientsPrompted = true;
             if (ConfiguredAgents().Count > 0) return;
-            Notify("连接本地客户端", "这台电脑还没有连接 Claude Code 或 Codex，已为你打开设置窗口。", ToolTipIcon.Info);
+            Notify("连接本地客户端", "这台电脑还没有连接任何本地客户端（Claude Code、Codex、Cursor、Copilot、Gemini、Qwen），已为你打开设置窗口。", ToolTipIcon.Info);
             var ignored = ShowClients(null, null);
         }
 
@@ -1056,19 +1070,20 @@ namespace SuperAgentLinkTray
                 using (var close = new Button())
                 {
                     form.Text = "Local clients / 本地客户端";
-                    form.ClientSize = new Size(520, 330);
+                    form.ClientSize = new Size(520, 470);
                     form.StartPosition = FormStartPosition.CenterScreen;
                     form.FormBorderStyle = FormBorderStyle.FixedDialog;
                     form.MaximizeBox = false;
                     form.MinimizeBox = false;
                     form.TopMost = true;
-                    intro.Text = "Super Agent 通过这台电脑上的客户端干活。可以连接多个客户端；每一步点按钮即可，登录在弹出的窗口或浏览器里完成。";
-                    intro.SetBounds(12, 12, 496, 40);
-                    rows.SetBounds(12, 58, 496, 196);
-                    status.SetBounds(12, 258, 496, 34);
+                    intro.Text = "Super Agent 通过这台电脑上的客户端干活，选任一个即可，也可以连接多个。每个客户端三步：安装 → 登录 → 选项目文件夹（连到指挥室）。点按钮即可，登录在弹出的窗口或浏览器里完成。";
+                    intro.SetBounds(12, 12, 496, 44);
+                    rows.SetBounds(12, 60, 496, 318);
+                    rows.AutoScroll = true;
+                    status.SetBounds(12, 384, 496, 46);
                     close.Text = "完成 / Done";
                     close.DialogResult = DialogResult.OK;
-                    close.SetBounds(408, 294, 100, 28);
+                    close.SetBounds(408, 434, 100, 28);
                     form.Controls.AddRange(new Control[] { intro, rows, status, close });
                     form.AcceptButton = close;
                     form.CancelButton = close;
@@ -1115,13 +1130,13 @@ namespace SuperAgentLinkTray
                             var connected = configured.TryGetValue(id, out folders) && folders.Count > 0;
                             var line = new Label();
                             line.AutoSize = false;
-                            line.SetBounds(0, top + 6, 330, 40);
+                            line.SetBounds(0, top + 6, 316, 40);
                             line.Text = AgentLabel(id) + "\r\n" + ("missing".Equals(state) ? "未安装"
                                 : "signed-out".Equals(state) ? "已安装，还没登录"
                                 : connected ? "已连接 · 项目：" + string.Join("、", folders.ToArray())
                                 : "已登录，还没连接项目文件夹");
                             var button = new Button();
-                            button.SetBounds(340, top + 8, 156, 32);
+                            button.SetBounds(322, top + 8, 152, 32);
                             button.Text = "missing".Equals(state) ? "安装并登录" : "signed-out".Equals(state) ? "登录" : connected ? "再连接一个文件夹" : "选择项目文件夹";
                             var selected = choice;
                             button.Click += async (s2, ev2) => await act(selected);
@@ -1270,7 +1285,9 @@ namespace SuperAgentLinkTray
                 }
             }
             if (string.IsNullOrEmpty(executable)) throw new InvalidOperationException("没有找到 " + label + " 命令行。");
-            status.Text = "已打开 " + label + " 登录。请在弹出的窗口或浏览器里完成登录，完成后会自动继续。";
+            object rawHint;
+            var hint = choice.TryGetValue("loginHint", out rawHint) && rawHint is string ? (string)rawHint : "请在弹出的窗口或浏览器里完成登录。";
+            status.Text = "已打开 " + label + " 登录。" + hint + "完成后会自动继续。";
             object rawLogin;
             var loginArgsText = JoinArgs(choice.TryGetValue("loginArgs", out rawLogin) ? rawLogin : null);
             var start = new ProcessStartInfo { UseShellExecute = true };
@@ -1296,7 +1313,16 @@ namespace SuperAgentLinkTray
                         return agent;
                 }
                 if (login != null && login.HasExited)
+                {
+                    // A client without a sign-in check (GitHub Copilot CLI): its own login command ending well is the answer.
+                    if (login.ExitCode == 0 && true.Equals(choice.ContainsKey("trustLoginExit") ? choice["trustLoginExit"] : null))
+                    {
+                        choice["state"] = "ready";
+                        choice["executable"] = executable;
+                        return choice;
+                    }
                     throw new InvalidOperationException("登录未完成，请再试一次。");
+                }
             }
             throw new InvalidOperationException("登录超时，请再试一次。");
         }

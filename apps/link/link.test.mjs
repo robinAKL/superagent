@@ -403,7 +403,7 @@ test('install, sign-in and connect steps asked from the web page reach the tray;
   const f = await fixture(t);
   f.clientSetup(1, 'claude-code', 'install');
   f.clientSetup(2, 'codex', 'connect');
-  f.clientSetup(3, 'gemini', 'install');
+  f.clientSetup(3, 'aider', 'install');
   f.clientSetup(4, 'codex', 'uninstall');
   const link = f.make();
   await link.poll(undefined, 0);

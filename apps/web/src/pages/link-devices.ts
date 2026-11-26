@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { LINK_AGENT_LABELS, isLinkAgent, type LinkAgent } from '@superagent/shared';
 import { api } from '../api';
 
 /** Always the newest Link for Windows: the server redirects to the link-latest release, which the release workflow keeps current. */
@@ -7,7 +8,7 @@ export const LINK_INSTALLER_URL = '/download/link';
 export interface LinkProject {
   id: string;
   name: string;
-  agent: 'codex' | 'claude-code';
+  agent: LinkAgent;
 }
 
 export interface LinkBinding {
@@ -31,7 +32,7 @@ export interface LinkDevice {
     /** MCP servers Claude Code has on the computer, as `claude mcp list` reports them. */
     mcpServers?: { name: string; status: 'connected' | 'needs_auth' | 'failed' | 'unknown'; tools?: string[] }[];
     /** Local clients (agent CLIs) Link found here, from Link 0.1.8. */
-    clients?: { agent: 'claude-code' | 'codex'; state: 'missing' | 'signed-out' | 'ready'; connected: boolean }[];
+    clients?: { agent: LinkAgent; state: 'missing' | 'signed-out' | 'ready'; connected: boolean }[];
   };
 }
 
@@ -67,7 +68,7 @@ export function useLinkDevices() {
 }
 
 export function agentLabel(agent: string) {
-  return agent === 'claude-code' ? 'Claude Code' : agent === 'codex' ? 'Codex' : agent;
+  return isLinkAgent(agent) ? LINK_AGENT_LABELS[agent] : agent;
 }
 
 export function allowsBinding(device: LinkDevice, employeeId: string, projectId: string) {
