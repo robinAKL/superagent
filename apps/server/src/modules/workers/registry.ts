@@ -1,3 +1,4 @@
+import { isLinkAgent, type LinkAgent } from '@superagent/shared';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 /**
@@ -28,7 +29,7 @@ export interface RoomAssignment {
 export interface LinkProject {
   id: string;
   name: string;
-  agent: 'codex' | 'claude-code';
+  agent: LinkAgent;
 }
 
 /** How freely an employee's local agent may act on this computer (see apps/link/policy.mjs). */
@@ -45,7 +46,7 @@ export interface PermissionPolicy {
 }
 /** An MCP server Claude Code has on this computer, as `claude mcp list` reports it. */
 /** A local client (agent CLI) on a Link computer: where it stands, and whether a project folder uses it. */
-export interface ClientInfo { agent: 'claude-code' | 'codex'; state: 'missing' | 'signed-out' | 'ready'; connected: boolean }
+export interface ClientInfo { agent: LinkAgent; state: 'missing' | 'signed-out' | 'ready'; connected: boolean }
 export interface McpServerInfo { name: string; status: 'connected' | 'needs_auth' | 'failed' | 'unknown'; tools?: string[] }
 const MCP_STATUS = new Set(['connected', 'needs_auth', 'failed', 'unknown']);
 export const PERMISSION_MODES: readonly PermissionMode[] = ['strict', 'standard', 'full'];
@@ -217,7 +218,7 @@ export function cleanCapabilities(value: unknown): WorkerCapabilities {
       if (!entry || typeof entry !== 'object') continue;
       const { id, name, agent } = entry as Partial<LinkProject>;
       if (typeof id !== 'string' || !id || id.length > 128 || typeof name !== 'string' || !name
-        || name.length > 128 || (agent !== 'codex' && agent !== 'claude-code')) continue;
+        || name.length > 128 || !isLinkAgent(agent)) continue;
       projects.set(id, { id, name, agent });
     }
     out.projects = [...projects.values()];
@@ -250,9 +251,9 @@ export function cleanCapabilities(value: unknown): WorkerCapabilities {
   if (Array.isArray(raw.clients)) {
     out.clients = raw.clients.flatMap((entry: unknown) => {
       const { agent, state, connected } = (entry && typeof entry === 'object' ? entry : {}) as Partial<ClientInfo>;
-      return (agent === 'claude-code' || agent === 'codex') && (state === 'missing' || state === 'signed-out' || state === 'ready')
+      return isLinkAgent(agent) && (state === 'missing' || state === 'signed-out' || state === 'ready')
         ? [{ agent, state, connected: connected === true }] : [];
-    }).slice(0, 8);
+    }).slice(0, 16);
   }
   if (kinds) out.kinds = kinds;
   if (agents) out.agents = agents;

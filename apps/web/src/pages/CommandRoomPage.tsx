@@ -70,6 +70,10 @@ const LINK_TEXT_ZH: Record<string, string> = {
   'Agent returned a response.': '已得到结果，正在整理。',
   'claude-code requires sign-in.': '电脑上的 Claude Code 需要重新登录，已在那台电脑上打开登录。登录后会自动重试。',
   'codex requires sign-in.': '电脑上的 Codex 需要重新登录，已在那台电脑上打开登录。登录后会自动重试。',
+  'cursor requires sign-in.': '电脑上的 Cursor CLI 需要重新登录，已在那台电脑上打开登录。登录后会自动重试。',
+  'copilot requires sign-in.': '电脑上的 GitHub Copilot CLI 需要重新登录，已在那台电脑上打开登录。登录后会自动重试。',
+  'gemini requires sign-in.': '电脑上的 Gemini CLI 需要重新登录，已在那台电脑上打开登录。登录后会自动重试。',
+  'qwen requires sign-in.': '电脑上的 Qwen Code 需要重新登录，已在那台电脑上打开登录。登录后会自动重试。',
   'Project directory or local agent is unavailable.': '电脑上找不到项目文件夹或本地 Agent。',
   'Agent CLI could not be started.': '本地 Agent 没能启动。',
 };

@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { runCodexTurn } from './codex-app-server.mjs';
+import { agentSpec, commandLine, headlessArgs } from './agents.mjs';
 
 import { AUTH_ERROR, failureReason } from './agent-errors.mjs';
 const RESULT_LIMIT = 60_000;
@@ -19,12 +20,11 @@ export function projectDirectory(projects, projectId) {
 }
 
 function spawnAgent(project, args) {
-  const command = project.executable.endsWith('.js') || project.executable.endsWith('.mjs') ? process.execPath : project.executable;
-  const argv = command === process.execPath ? [project.executable, ...args] : args;
+  const { command, argv, verbatim } = commandLine(project.executable, args);
   const env = { ...process.env };
   delete env.SUPERAGENT_WORKER_TOKEN;
   return spawn(command, argv, {
-    cwd: project.directory, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: project.directory, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'], windowsVerbatimArguments: verbatim,
     detached: process.platform !== 'win32', windowsHide: true,
   });
 }
@@ -82,21 +82,39 @@ function permissionArgs(approver) {
   };
 }
 
-export function launchAgent(project, prompt, session, notify, approver = null) {
+/**
+ * One headless run of the project's client. Claude Code asks the room through `approver`; Codex follows its own
+ * configuration; the other clients (agents.mjs) get the employee's authorisation `mode` as their approval setting.
+ */
+export function launchAgent(project, prompt, session, notify, approver = null, { mode = 'standard' } = {}) {
   const codex = project.agent === 'codex';
-  const permissions = codex ? { args: [], cleanup: () => {} } : permissionArgs(approver);
+  const claude = project.agent === 'claude-code';
+  const permissions = claude ? permissionArgs(approver) : { args: [], cleanup: () => {} };
+  const spec = agentSpec(project.agent);
   const args = codex
     ? ['exec', '--json', ...(session ? ['resume', session] : []), '-']
-    : ['--print', '--output-format', 'stream-json', '--verbose', ...permissions.args, ...(session ? ['--resume', session] : [])];
+    : claude
+      ? ['--print', '--output-format', 'stream-json', '--verbose', ...permissions.args, ...(session ? ['--resume', session] : [])]
+      : headlessArgs(project.agent, { session, mode, prompt });
+  if (!args) throw new Error('Unknown local agent.');
+  const promptOnStdin = !spec?.promptArg;
   const child = spawnAgent(project, args);
   let result = '';
+  let streamed = '';
+  let plain = '';
   let errorText = '';
   let cancelled = false;
   const lines = createInterface({ input: child.stdout });
   lines.on('line', (line) => {
     let item;
-    try { item = JSON.parse(line); } catch { return; }
-    if (item.type === 'thread.started' || (item.type === 'system' && item.subtype === 'init')) {
+    try { item = JSON.parse(line); } catch { item = null; }
+    if (!item || typeof item !== 'object') {
+      // A client without JSON output (GitHub Copilot CLI with -s) prints only its answer.
+      if (!promptOnStdin) plain = (plain + line + '\n').slice(-RESULT_LIMIT);
+      return;
+    }
+    if (item.type === 'thread.started' || item.type === 'init'
+      || (item.type === 'system' && (item.subtype === 'init' || item.subtype === 'session_start'))) {
       const id = item.thread_id ?? item.session_id;
       if (typeof id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(id)) notify({ session: id });
       // The tools this agent has here, MCP tools included ("mcp__vera-crm__approve_order"): reported to the room.
@@ -106,9 +124,18 @@ export function launchAgent(project, prompt, session, notify, approver = null) {
       result = item.item.text.slice(0, RESULT_LIMIT);
       notify({ progress: 'Agent returned a response.' });
     }
+    // Gemini CLI streams the answer as assistant messages (whole or in deltas) and ends with a result without text.
+    if (item.type === 'message' && item.role === 'assistant' && typeof item.content === 'string') {
+      streamed = (item.delta ? streamed + item.content : item.content).slice(-RESULT_LIMIT);
+      notify({ progress: 'Agent is processing the task.' });
+    }
+    if (item.type === 'tool_use' || item.type === 'tool_call') notify({ progress: 'Agent is processing the task.' });
     if (item.type === 'result') {
-      if (item.is_error) errorText = String(item.result ?? item.subtype ?? '').slice(0, 8_000);
-      else if (typeof item.result === 'string') result = item.result.slice(0, RESULT_LIMIT);
+      const failed = item.is_error || item.status === 'error' || (item.error && typeof item.result !== 'string');
+      if (failed) errorText = String(item.error?.message ?? item.error ?? item.result ?? item.subtype ?? '').slice(0, 8_000);
+      else if (typeof item.result === 'string' && item.result) result = item.result.slice(0, RESULT_LIMIT);
+      else if (typeof item.response === 'string' && item.response) result = item.response.slice(0, RESULT_LIMIT);
+      else if (streamed) result = streamed;
     }
     if (item.type === 'error' || item.type === 'turn.failed') {
       errorText = String(item.message ?? item.error?.message ?? '').slice(0, 8_000);
@@ -117,11 +144,12 @@ export function launchAgent(project, prompt, session, notify, approver = null) {
   });
   child.stderr.on('data', (chunk) => { errorText = (errorText + String(chunk)).slice(-8_000); });
   child.stdin.on('error', () => {}); // Early CLI exit can close the pipe before the prompt is written.
-  child.stdin.end(prompt);
+  child.stdin.end(promptOnStdin ? prompt : '');
   const completed = new Promise((resolve) => {
     child.once('close', permissions.cleanup);
     child.once('error', () => resolve({ failure: 'Agent CLI could not be started.' }));
     child.once('close', (code) => {
+      if (!result && code === 0) result = (streamed || plain.trim()).slice(0, RESULT_LIMIT);
       if (cancelled) resolve({ cancelled: true });
       else if (code === 0 && result) resolve({ result });
       else if (AUTH_ERROR.test(errorText)) resolve({ authentication: project.agent + ' requires sign-in.' });

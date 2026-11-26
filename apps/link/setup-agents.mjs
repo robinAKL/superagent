@@ -2,26 +2,20 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { discoverWindowsAgents } from './detect-agents.mjs';
+import { AGENT_SPECS } from './agents.mjs';
 
 const execFileAsync = promisify(execFile);
 
 /** Official Windows installers. Link runs these itself so the user never has to find a download page. */
-export const SETUP_AGENTS = [
-  {
-    agent: 'codex',
-    label: 'Codex',
-    loginArgs: ['login'],
-    installCommand: 'irm https://chatgpt.com/codex/install.ps1 | iex',
-    installEnv: { CODEX_NON_INTERACTIVE: '1' },
-  },
-  {
-    agent: 'claude-code',
-    label: 'Claude Code',
-    loginArgs: ['auth', 'login'],
-    installCommand: 'irm https://claude.ai/install.ps1 | iex',
-    installEnv: {},
-  },
-];
+export const SETUP_AGENTS = AGENT_SPECS.map((spec) => ({
+  agent: spec.agent,
+  label: spec.label,
+  loginArgs: spec.loginArgs,
+  loginHint: spec.loginHint,
+  installCommand: spec.install.command,
+  installEnv: spec.install.env,
+  trustLoginExit: !spec.status && spec.loginArgs.length > 0,
+}));
 
 export function setupChoices(discovered) {
   const byAgent = new Map(discovered.map(item => [item.agent, item]));
@@ -35,6 +29,9 @@ export function setupChoices(discovered) {
       action: state === 'ready' ? 'use' : state === 'signed-out' ? 'login' : 'install',
       executable: found?.executable ?? null,
       loginArgs: spec.loginArgs,
+      loginHint: spec.loginHint,
+      // No sign-in check of its own: the tray takes a login command that ended well as signed in.
+      trustLoginExit: spec.trustLoginExit,
     };
   });
 }
@@ -68,6 +65,7 @@ export async function installAgent(agent, {
     executable: found.executable,
     signedIn: Boolean(found.signedIn),
     loginArgs: spec.loginArgs,
+    loginHint: spec.loginHint,
   };
 }
 

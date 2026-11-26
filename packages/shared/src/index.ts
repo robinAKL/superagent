@@ -169,3 +169,19 @@ export const APP_ROLES = ['web', 'worker', 'browser'] as const;
 export type AppRole = (typeof APP_ROLES)[number];
 export * from './sop-graph.js';
 export type { SopGraph as SharedSopGraph, SopGraphContext as SharedSopGraphContext, SopGraphIssue as SharedSopGraphIssue } from './sop-graph.js';
+
+// ---------- Super Agent Link: local agent clients (apps/link/agents.mjs) ----------
+/** Agent CLIs a Link computer can run command-room work with. Keep in the same order as apps/link/agents.mjs. */
+export const LINK_AGENTS = ['claude-code', 'codex', 'cursor', 'copilot', 'gemini', 'qwen'] as const;
+export type LinkAgent = (typeof LINK_AGENTS)[number];
+export const LINK_AGENT_LABELS: Record<LinkAgent, string> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  cursor: 'Cursor CLI',
+  copilot: 'GitHub Copilot CLI',
+  gemini: 'Gemini CLI',
+  qwen: 'Qwen Code',
+};
+export function isLinkAgent(value: unknown): value is LinkAgent {
+  return typeof value === 'string' && (LINK_AGENTS as readonly string[]).includes(value);
+}

@@ -3,10 +3,25 @@
 On Windows, Link opens the workspace in the browser on first run. The person using the computer signs in with
 their own account and chooses **Allow**; no administrator is needed at that computer. The computer then belongs
 to that member: they see and can revoke only computers they paired, and can bind only digital employees they own.
-Administrators see and manage every computer. Then open **Set up local agent** in the tray menu. If Codex or Claude Code
-is missing, choose **安装并登录**. Link runs the official installer, opens that client's sign-in window, and continues
-after the command line reports a signed-in account. Then choose a project folder. When both clients are already
-signed in, Link asks which to use. The folder path and executable stay on the computer. Link reports the project
+Administrators see and manage every computer. Then open **Local clients / 本地客户端** in the tray menu. Each supported
+client gets the same three steps: **安装并登录** (Link runs the official installer), **登录** (Link opens that client's
+own sign-in and continues once it reports a signed-in account), and **选择项目文件夹**, which connects the client to
+the command room. Several clients can be connected at once.
+
+| Client | Install (Windows, run by Link) | Sign-in | Headless run | Approvals |
+| --- | --- | --- | --- | --- |
+| Claude Code (`claude-code`) | `irm https://claude.ai/install.ps1 \| iex` | `claude auth login` | `--print --output-format stream-json` | each request through the command room |
+| Codex (`codex`) | `irm https://chatgpt.com/codex/install.ps1 \| iex` | `codex login` | `exec --json` (or App Server) | Codex config, or the room with `"approvals": "room"` |
+| Cursor CLI (`cursor`) | `irm 'https://cursor.com/install?win32=true' \| iex` | `agent login` (`agent status`) | `--print --output-format stream-json --trust` | employee mode: `full` adds `--force` |
+| GitHub Copilot CLI (`copilot`) | `npm install -g @github/copilot` | `copilot login` | `-p <prompt> -s --no-ask-user` (text) | `standard` `--allow-tool=write`, `full` `--allow-all-tools` |
+| Gemini CLI (`gemini`) | `npm install -g @google/gemini-cli` | `gemini` → Sign in with Google | `--output-format stream-json` | `--approval-mode` default / auto_edit / yolo |
+| Qwen Code (`qwen`) | `npm install -g @qwen-code/qwen-code` | `qwen` → `/auth` | `--output-format stream-json` | `--approval-mode` default / auto-edit / yolo |
+
+The npm installs get Node.js LTS from winget first when npm is missing. Gemini CLI, Qwen Code and Copilot have no
+sign-in status command; Link reads their own credential files (`~/.gemini/oauth_creds.json`, `~/.qwen/oauth_creds.json`,
+`~/.copilot/config.json`) or a token in the environment. For Cursor, Copilot, Gemini and Qwen the employee's
+authorisation mode (strict / standard / full) becomes the client's own approval setting; their requests are not
+forwarded to the command room one by one. The folder path and executable stay on the computer. Link reports the project
 label and agent type to the workspace.
 
 In **Admin settings → Linked computers**, bind the project to a digital employee. If there is one available
@@ -35,7 +50,7 @@ Create a private configuration file with absolute paths and a separate state fil
 }
 ```
 
-Use `claude-code` for the Claude Code adapter. Set `executable` to the installed native executable or the absolute JavaScript CLI entry point. Link starts the executable without a shell and feeds the prompt on stdin. The agent uses the CLI configuration and permissions of the operating-system account that starts Link, including its configured tools and MCP servers. Configure the agent under that account before running Link. Headless execution follows the CLI's own approval behavior.
+Use `claude-code`, `cursor`, `copilot`, `gemini` or `qwen` for the other adapters. Set `executable` to the installed native executable or the absolute JavaScript CLI entry point. Link starts the executable without a shell and feeds the prompt on stdin. The agent uses the CLI configuration and permissions of the operating-system account that starts Link, including its configured tools and MCP servers. Configure the agent under that account before running Link. Headless execution follows the CLI's own approval behavior.
 
 For Codex projects using a server with worker approvals, set `"approvals": "room"` inside the project configuration. Link starts Codex App Server over stdio, forwarding command and file-change approvals to the command room, including network approvals reported by App Server. The approval is applied to that request only. Review still depends on Codex being configured to request approval for the operation.
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'vitest';
-import { CommandRoom, roomHooks, type EmployeeRef, type Viewer } from './room.js';
+import { CommandRoom, roomHooks, workerUpdateState, type EmployeeRef, type Viewer } from './room.js';
 
 const employees: EmployeeRef[] = [
   { id: 'emp-sales', name: '销售员工', ownerUserId: 'user-sales', status: 'active' },
@@ -204,6 +204,15 @@ it("a Link computer's updates move the task: working is in progress, its fixed f
   // Signed in again: Link picks the task up once more.
   update('Link received the task.', 'w4');
   assert.equal(task!.status, 'running');
+  // Every supported local client (Cursor, Copilot, Gemini, Qwen …) reports a sign-in the same way.
+  update('gemini requires sign-in.', 'w5');
+  assert.equal(task!.waitingReason, '等待本地登录');
+});
+
+it("only a supported client's sign-in text holds a task for sign-in", () => {
+  assert.equal(workerUpdateState('cursor requires sign-in.'), 'needs_sign_in');
+  assert.equal(workerUpdateState('qwen requires sign-in.'), 'needs_sign_in');
+  assert.equal(workerUpdateState('aider requires sign-in.'), 'progress');
 });
 
 it('a running task is not held as disconnected while its computer may still be online', () => {

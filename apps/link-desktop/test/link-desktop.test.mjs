@@ -42,6 +42,8 @@ describe('link-desktop Windows installer & tray', () => {
     assert.match(cs, /"选择项目文件夹"/);
     assert.match(cs, /LINK_CLIENT_SETUP:/);
     assert.match(cs, /MaybeGuideClients\(\)/);
+    // Every client Link supports has a name and its own sign-in in the tray (apps/link/agents.mjs).
+    for (const agent of ['claude-code', 'codex', 'cursor', 'copilot', 'gemini', 'qwen']) assert.ok(cs.includes(`{ "${agent}", new[] {`), agent);
     assert.doesNotMatch(cs, /请先在这台电脑登录 Codex 或 Claude Code，再重试。/);
   });
 

@@ -1,3 +1,4 @@
+import { isLinkAgent } from '@superagent/shared';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { enterTenant } from '../../tenancy.js';
 import { createHash } from 'node:crypto';
@@ -328,7 +329,7 @@ export const workersModule: FastifyPluginAsync = async (app) => {
   });
 
   /**
-   * "安装" / "登录" / "连接到项目" for a local client (Claude Code, Codex) on this computer: Link opens its local clients
+   * "安装" / "登录" / "连接到项目" for a local client (Claude Code, Codex, Cursor, Copilot, Gemini, Qwen) on this computer: Link opens its local clients
    * window there at that step, for the person at the computer. Sign-ins and passwords are theirs; nothing is typed
    * for them. The page follows the client's state through the heartbeat.
    */
@@ -339,7 +340,7 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     const device = await workersState.registry.get(user.tenantId, id);
     if (!device || device.revokedAt !== null || device.kind !== 'link' || !mayManage(user, device)) return reply.code(404).send({ error: 'not_found' });
     const { agent, action } = (req.body ?? {}) as { agent?: unknown; action?: unknown };
-    if ((agent !== 'claude-code' && agent !== 'codex') || (action !== 'install' && action !== 'login' && action !== 'connect')) {
+    if (!isLinkAgent(agent) || (action !== 'install' && action !== 'login' && action !== 'connect')) {
       return reply.code(400).send({ error: 'invalid_input' });
     }
     const key = `${id}:${agent}`;
