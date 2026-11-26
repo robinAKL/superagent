@@ -8,6 +8,8 @@ import type { AccountInfo, IPublicClientApplication } from '@azure/msal-browser'
 export interface PublicAuthConfig {
   mode: 'dev' | 'entra';
   tenantId?: string;
+  /** 'organizations' when any Microsoft 365 organisation may sign in (the company directory decides the rest). */
+  authority?: string;
   clientId?: string;
   scopes?: string[];
 }
@@ -35,7 +37,7 @@ export async function initAuth(fetchFn: typeof fetch = fetch): Promise<SignedIn>
   if (!cfg.tenantId || !cfg.clientId || !cfg.scopes?.length) throw new Error('sign-in is not configured on the server');
   const { PublicClientApplication } = await import('@azure/msal-browser');
   const pca = new PublicClientApplication({
-    auth: { clientId: cfg.clientId, authority: `https://login.microsoftonline.com/${cfg.tenantId}`, redirectUri: window.location.origin },
+    auth: { clientId: cfg.clientId, authority: `https://login.microsoftonline.com/${cfg.authority ?? cfg.tenantId}`, redirectUri: window.location.origin },
     cache: { cacheLocation: 'sessionStorage' }, // never localStorage: tokens end with the tab session
   });
   await pca.initialize();

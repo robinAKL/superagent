@@ -1,0 +1,11 @@
+/* The page a person sees before they belong to a company: the app's own paper, tokens and controls. */
+.onboarding { min-height: 100dvh; display: grid; grid-template-rows: auto 1fr; }
+.onboarding-main { width: min(100%, 640px); margin: 0 auto; padding: var(--space-xl) var(--space-md); display: grid; gap: var(--space-md); align-content: start; }
+.onboarding-main h1 { margin: 0; }
+.onboarding-card { display: grid; gap: var(--space-sm); }
+.onboarding-card h2 { margin: 0; }
+.onboarding-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-sm); }
+.onboarding-list li { display: grid; gap: var(--space-2xs); justify-items: start; }
+.onboarding-form { display: grid; gap: var(--space-sm); justify-items: start; }
+.onboarding-form .field { width: 100%; }
+.onboarding-form input { width: 100%; }
