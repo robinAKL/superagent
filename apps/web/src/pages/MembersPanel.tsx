@@ -14,6 +14,8 @@ interface JoinRequest { id: string; email: string | null; displayName: string; c
 interface Company { id: string; name: string; settings: { autoJoin?: boolean } }
 
 const ROLES: Role[] = ['owner', 'admin', 'employee', 'reviewer'];
+/** The strongest role a member holds, which is what the role menu shows. */
+const topRole = (roles: Role[]): Role | '' => ROLES.find((r) => roles.includes(r)) ?? '';
 
 const TEXT = {
   en: {
@@ -25,7 +27,7 @@ const TEXT = {
     invites: 'Invitations waiting', revoke: 'Withdraw',
     'role.owner': 'Owner', 'role.admin': 'Administrator', 'role.employee': 'Employee', 'role.reviewer': 'Reviewer',
     roleHelp: 'Owner: everything, including billing and removing the company. Administrator: members, digital employees, knowledge and settings. Employee: the command room and their own digital employees. Reviewer: reviews and approvals.',
-    failed: 'That did not work: {reason}', retry: 'please try again.', working: 'Working…',
+    failed: 'That did not work: {reason}', retry: 'please try again.', working: 'Working…', noRole: 'No role',
   },
   zh: {
     title: '成员', lead: '谁在「{company}」里工作、能做什么。角色决定每个人能看到什么、能批准什么。',
@@ -36,7 +38,7 @@ const TEXT = {
     invites: '待接受的邀请', revoke: '撤回',
     'role.owner': '所有者', 'role.admin': '管理员', 'role.employee': '员工', 'role.reviewer': '审核人',
     roleHelp: '所有者：全部权限，包括计费和删除公司。管理员：管理成员、数字员工、知识和设置。员工：使用指挥室和自己的数字员工。审核人：负责审核和审批。',
-    failed: '没有成功：{reason}', retry: '请稍后再试。', working: '处理中…',
+    failed: '没有成功：{reason}', retry: '请稍后再试。', working: '处理中…', noRole: '未分配角色',
   },
 };
 type Key = keyof typeof TEXT.en;
@@ -119,8 +121,9 @@ export function MembersPanel() {
       <span className="members-who"><strong>{member.displayName}{myEmail && member.email === myEmail ? ` ${t('you')}` : ''}</strong><span className="helper">{member.email}</span></span>
       <span className="members-actions">
         <label className="sr-only" htmlFor={`role-${member.userId}`}>{t('inviteAs')}</label>
-        <select id={`role-${member.userId}`} value={member.roles[0] ?? 'employee'} disabled={busy}
+        <select id={`role-${member.userId}`} value={topRole(member.roles)} disabled={busy}
           onChange={(e) => void call(`/api/v1/tenancy/members/${encodeURIComponent(member.userId)}`, 'PUT', { roles: [e.target.value] })}>
+          {!member.roles.length ? <option value="">{t('noRole')}</option> : null}
           {ROLES.map((r) => <option key={r} value={r}>{role(r)}</option>)}
         </select>
         <button type="button" className="btn quiet" disabled={busy} onClick={() => {
