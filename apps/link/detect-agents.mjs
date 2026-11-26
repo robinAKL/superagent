@@ -51,7 +51,9 @@ async function candidates(spec, directory, own) {
     if (await isFile(cmd)) {
       // An npm shim: run the JavaScript it points at with Link's Node.js. Another launcher is run as it is.
       const target = npmShimTarget(await readFile(cmd, 'utf8').catch(() => ''));
-      if (target && await isFile(join(dirname(cmd), target))) out.push(join(dirname(cmd), target));
+      // The shim names its target with backslashes; split them so the path is joined the same way on every platform.
+      const script = target && join(dirname(cmd), ...target.split('\\'));
+      if (script && await isFile(script)) out.push(script);
       else if (!target) out.push(cmd);
     }
   }
