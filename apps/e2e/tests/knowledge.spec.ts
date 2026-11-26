@@ -193,7 +193,7 @@ test('MCP analysis keeps supported drafts and shows them in Super Agent', async 
   await page.route('**/api/v1/sop', route => route.fulfill({ status: 503, json: {} }));
   // Analysis ends in one primary action: review the organization draft. Private MCP drafts appear there, marked as such,
   // and the step strip leads on to Super Agent where the workflow drafts are reviewed.
-  await page.getByRole('link', { name: '审阅组织草案', exact: true }).click();
+  await page.getByRole('link', { name: '查看推荐的员工', exact: true }).click();
   const role = page.getByRole('article', { name: '退货专员' });
   await expect(role.getByText('来自你的 MCP 来源', { exact: true })).toBeVisible();
   // #157 removed the employees-page step strip; go where its "3 发布流程" step linked.
@@ -440,7 +440,7 @@ test('a saved team size proposal is preselected and applies with one click', asy
     .map((name, i) => `角色：${name}；责任：负责第${i + 1}类业务的核对与登记。`).concat('工具：只读单据查询；职责：按编号查证业务记录。').join(String.fromCharCode(10));
   await localFile(page, true, EIGHT); await analyse(page);
   await page.goto('/#employees?view=draft');
-  await page.getByRole('button', { name: '创建团队', exact: true }).click();
+  await page.getByRole('button', { name: '全部发布', exact: true }).click();
   await page.goto('/#employees');
   await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(8);
 
@@ -469,7 +469,7 @@ test('one team size submission leaves one employee and that employee can be boun
     .map((name, i) => `角色：${name}；责任：负责第${i + 1}类业务的核对与登记。`).concat('工具：只读单据查询；职责：按编号查证业务记录。').join(String.fromCharCode(10));
   await localFile(page, true, TWELVE); await analyse(page);
   await page.goto('/#employees?view=draft');
-  await page.getByRole('button', { name: '创建团队', exact: true }).click();
+  await page.getByRole('button', { name: '全部发布', exact: true }).click();
   await page.goto('/#employees');
   await expect(page.locator('[data-employee^="emp-org-"]')).toHaveCount(12);
 

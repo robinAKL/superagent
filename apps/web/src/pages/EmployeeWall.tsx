@@ -5,13 +5,13 @@ import { agentLabel, getEmployeeLink, useLinkDevices } from './link-devices';
 
 /**
  * The digital employee card wall (prototype v12): one card per employee in the registry with status, duty, owner,
- * the tools it can use and how it is connected. Role design (duties, prompts, team size) stays in the draft review.
+ * the tools it can use and how it is connected. Suggested employees (duties, prompts, team size) are reviewed in the draft.
  */
 export interface WallEmployee { id: string; name: string; duty: string; status: string; owner?: string; source?: string }
 
 const TEXT = {
   en: {
-    addRole: 'Add role', suggestRoles: 'Suggest roles', reviewDraft: 'Review the organization draft',
+    addEmployee: 'Add a digital employee', suggestRoles: 'Suggest employees from company knowledge', reviewDraft: 'Suggested employees',
     owner: 'Owner', tools: 'Tools', toolsValue: '{n} tools', connection: 'Connection', manage: 'Manage', manageTools: 'Tools',
     status_online: 'Online', status_busy: 'Busy', status_unconnected: 'Not connected', status_waiting_auth: 'Waiting for authorization', status_paused: 'Paused', status_fault: 'Fault',
     conn_online: 'Managed worker connected', conn_busy: 'Managed worker connected', conn_unconnected: 'No worker connected yet', conn_waiting_auth: 'Worker waiting for authorization',
@@ -25,7 +25,7 @@ const TEXT = {
     all: 'All', filterAria: 'Filter by status', noneMatch: 'No employee has this status.',
   },
   zh: {
-    addRole: '新增岗位', suggestRoles: '生成岗位建议', reviewDraft: '审阅组织草案',
+    addEmployee: '新增数字员工', suggestRoles: '根据企业知识推荐员工', reviewDraft: '查看推荐的员工',
     owner: '负责人', tools: '可用工具', toolsValue: '{n} 个工具', connection: '连接', manage: '管理', manageTools: '工具',
     status_online: '在线', status_busy: '忙碌', status_unconnected: '未连接', status_waiting_auth: '等待授权', status_paused: '已暂停', status_fault: '故障',
     conn_online: '受管 worker 已连接', conn_busy: '受管 worker 已连接', conn_unconnected: '还没有连接 worker', conn_waiting_auth: 'worker 等待授权',
@@ -90,7 +90,7 @@ export function EmployeeWall({ employees, hasDraft, onManage }: { employees: Wal
       <div className="emp-wall-actions">
         <a className="btn quiet" href="#tools">{t('toolsPage')}</a>
         <a className="btn quiet" href="#brain?tab=sop">{t('workflowsPage')}</a>
-        <a className="btn quiet" href="#employees?view=draft&add=1">{t('addRole')}</a>
+        <a className="btn" href="#employees?add=1">{t('addEmployee')}</a>
         <a className="btn quiet" href={hasDraft ? '#employees?view=draft' : '#knowledge?view=analysis'}>{t(hasDraft ? 'reviewDraft' : 'suggestRoles')}</a>
       </div>
     </div>

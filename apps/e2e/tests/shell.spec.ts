@@ -73,10 +73,11 @@ test('digital employees without an analysed draft say how to start instead of sh
   // Employees other specs added are on the wall; the draft view is where a missing analysis shows.
   await page.goto('/#employees?view=draft');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('数字员工');
-  await expect(page.getByRole('heading', { name: '还没有组织草案' })).toBeVisible();
+  // With employees other specs added, this view is about suggestions only; run first, it offers to add one.
+  await expect(page.getByRole('heading', { name: /^还没有(推荐的员工|数字员工)$/ })).toBeVisible();
   await expect(page.getByRole('link', { name: '去企业知识', exact: true })).toHaveAttribute('href', '#knowledge');
   await expect(page.locator('.org-role')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: '确认组织' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '全部发布' })).toHaveCount(0);
   await expect(page.locator('main')).not.toContainText(/已完成|已发布/);
 });
 

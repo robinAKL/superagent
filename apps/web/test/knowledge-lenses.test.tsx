@@ -99,7 +99,8 @@ describe('employee wall', () => {
       { id: 'emp-2', name: '客服', duty: '回复客户', status: 'online', source: 'manual' },
     ]} />);
     expect(html.match(/class="emp-card"/g)).toHaveLength(2);
-    expect(html).toContain('新增岗位');
+    expect(html).toContain('新增数字员工');
+    expect(html).toContain('href="#employees?add=1"');
     expect(html).toContain('href="#employees?view=draft"');
     expect(html).toContain('href="#employees?manage=emp-org-rec1"');
     expect(html).toContain('未连接');
@@ -107,5 +108,17 @@ describe('employee wall', () => {
     // The owner moved to the manage drawer (UX plan: the team table is employee, status, computer, tools).
     expect(html).not.toContain('dev-owner');
     expect(render('en', <EmployeeWall hasDraft={false} employees={[]} />)).toContain('href="#knowledge?view=analysis"');
+  });
+});
+
+describe('add a digital employee', () => {
+  it('asks only for a name and responsibilities, and publishes at once', async () => {
+    const { AddEmployeeForm } = await import('../src/pages/EmployeesPage');
+    const zh = (key: string) => ({ roleName: '员工名称', duty: '岗位职责', dutyHint: '写清楚它负责什么', publishBtn: '发布', publishing: '正在发布…' } as Record<string, string>)[key] ?? key;
+    const html = render('zh', <AddEmployeeForm busy={false} t={zh as never} onPublish={async () => true} />);
+    expect(html).toContain('员工名称');
+    expect(html).toContain('岗位职责');
+    expect(html).toContain('>发布</button>');
+    expect(html).not.toContain('岗位名称');
   });
 });

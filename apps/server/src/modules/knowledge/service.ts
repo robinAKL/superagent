@@ -669,6 +669,56 @@ export class KnowledgeService {
     if (!this.deps.organization) throw new KnowledgeError('organization_unavailable', '数字员工服务暂不可用。', 503);
     return this.deps.repo.transact(ctx, s => this.applyConfirmedOrganization(s, ctx));
   }
+  /**
+   * "新增数字员工": adds one employee by hand and publishes it at once — no organization draft to review, no
+   * whole-team confirmation. It is recorded as a manual role too, so a later confirmation keeps it.
+   */
+  async createEmployee(ctx: UserContext, input: Record<string, unknown>) {
+    requireManager(ctx);
+    if (!this.deps.organization) throw new KnowledgeError('organization_unavailable', '数字员工服务暂不可用。', 503);
+    const name = bounded(input.name, 160, '员工名称'), description = bounded(input.description, 4000, '岗位职责');
+    const prompt = typeof input.prompt === 'string' && input.prompt.trim() ? bounded(input.prompt, 8000, '提示词') : undefined;
+    return this.deps.repo.transact(ctx, s => {
+      const role = { id: id(), key: `manual-${id()}`, kind: 'employee' as const, origin: 'manual' as const, name, description, evidence: [], humanLocked: true, deleted: false, ...(prompt ? { prompt } : {}) };
+      s.recommendations.push(role);
+      return this.publishRoles(s, ctx, [role.id]);
+    });
+  }
+  /** Publishes one role of the draft (a recommended or hand-added employee) without confirming the rest. */
+  async publishRole(ctx: UserContext, recId: string) {
+    requireManager(ctx);
+    if (!this.deps.organization) throw new KnowledgeError('organization_unavailable', '数字员工服务暂不可用。', 503);
+    return this.deps.repo.transact(ctx, s => this.publishRoles(s, ctx, [recId]));
+  }
+  /** Writes the named roles (and the tools they use) into the registries. Caller holds the knowledge transaction. */
+  private publishRoles(s: KnowledgeState, ctx: UserContext, recIds: string[]) {
+    const sink = this.deps.organization!;
+    const draft = this.organizationDraft(s, ctx);
+    const roles = recIds.map(recId => draft.employees.find(e => e.id === recId));
+    if (roles.some(role => !role)) throw new KnowledgeError('not_found', '这个员工草稿不存在或已失效。', 404);
+    const org = s.organization ?? { confirmedAt: '', confirmedBy: '', revision: 0, employees: {}, tools: {} };
+    const published: { employeeId: string; name: string; created: boolean }[] = [];
+    let createdTools = 0;
+    for (const e of roles as typeof draft.employees) {
+      const result = sink.ensureEmployee({ recId: e.id, name: e.name, duty: e.duty, prompt: e.prompt, owner: ctx.userId, manual: e.origin === 'manual' });
+      org.employees[e.id] = { employeeId: result.employeeId, name: e.name, duty: e.duty, prompt: e.prompt };
+      (org.created ??= {})[result.employeeId] = e.name;
+      published.push({ employeeId: result.employeeId, name: e.name, created: result.created });
+      for (const t of draft.tools.filter(tool => e.tools.includes(tool.key))) {
+        const known = org.tools[t.id];
+        if (known?.match === 'existing') continue;
+        const match = known ? null : sink.matchTool(t.name, t.description);
+        if (match) { org.tools[t.id] = { toolId: match.toolId, name: t.name, match: 'existing' }; continue; }
+        const consumers = [...new Set([...(known?.consumers ?? []), result.employeeId])];
+        const placeholder = sink.ensureToolPlaceholder({ recId: t.id, name: t.name, purpose: t.description, consumers, maintainer: ctx.userId });
+        if (placeholder.created && !known) createdTools++;
+        org.tools[t.id] = { toolId: placeholder.toolId, name: t.name, match: 'placeholder', purpose: t.description.slice(0, 1000), consumers };
+      }
+    }
+    Object.assign(org, { confirmedAt: stamp(), confirmedBy: ctx.userId, revision: org.revision + 1 });
+    s.organization = org;
+    return { revision: org.revision, published, createdTools };
+  }
   /** Writes the current role draft into the employee registry. Caller already holds the knowledge transaction. */
   private applyConfirmedOrganization(s: KnowledgeState, ctx: UserContext) {
     const sink = this.deps.organization;

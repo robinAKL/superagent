@@ -196,3 +196,8 @@ li.emp-card h3 { margin: var(--space-2xs) 0 0; font-size: 17px; overflow-wrap: a
 .emp-who { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; }
 .emp-who-text { display: grid; min-width: 0; }
 .emp-wall-bar .chip-row { flex: 1; }
+
+/* "新增数字员工" on the employee wall: name and responsibilities, published at once. */
+.org-add-panel { display: grid; gap: var(--space-sm); margin-bottom: var(--space-md); }
+.org-add-panel h2 { margin: 0; font-size: 16px; }
+.org-empty .org-edit { width: min(560px, 100%); text-align: left; }
