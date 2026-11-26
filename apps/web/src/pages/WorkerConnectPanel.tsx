@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { LocalClients } from './LocalClients';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { LocalClients, type ClientUsers } from './LocalClients';
 import { api } from '../api';
 import { useT, type Dict } from '../i18n';
 import { agentLabel, allowsBinding, LINK_INSTALLER_URL, useLinkDevices, type LinkBinding, type LinkDevice } from './link-devices';
@@ -21,7 +21,8 @@ const TEXT = {
     registered: 'Online', live: 'Running a task', offline: 'Offline', waiting_auth: 'Sign in on computer',
     loading: 'Checking connected computers…', noProjects: 'On this computer, open the Link tray and choose Set up local agent. Pick any supported client (Claude Code, Codex, Cursor CLI, GitHub Copilot CLI, Gemini CLI, Qwen Code); if it is missing, Link installs it and opens sign-in.',
     project: 'Local project', employee: 'Digital employee', choose: 'Select…', bind: 'Bind employee', unbind: 'Remove binding',
-    bound: 'Bound', unbound: 'No employee bound', advanced: 'Device permissions', projectUnavailable: 'Project unavailable',
+    bound: 'Bound', unbound: 'No employee bound',
+    usingTitle: 'Who works on this computer', inUse: 'In use', runsWith: 'Runs tasks with {agent} in the {folder} folder', advanced: 'Device permissions', projectUnavailable: 'Project unavailable',
     employeeUnavailable: 'Employee removed', alreadyBound: 'This employee already has a binding. Remove it before choosing another project.',
     bindingError: 'Could not save the binding. Check project availability and device permissions.',
     bindSaved: 'Employee bound.',
@@ -47,7 +48,8 @@ const TEXT = {
     registered: '在线', live: '正在执行任务', offline: '离线', waiting_auth: '等待本地登录',
     loading: '正在检查已连接的电脑…', noProjects: '在这台电脑上打开 Link 托盘，选择「配置本地 Agent」。可以选任一支持的客户端（Claude Code、Codex、Cursor CLI、GitHub Copilot CLI、Gemini CLI、Qwen Code）；没装的话 Link 会自动安装并打开登录。',
     project: '本地项目', employee: '数字员工', choose: '请选择…', bind: '绑定员工', unbind: '移除绑定',
-    bound: '已绑定', unbound: '未绑定员工', advanced: '设备权限', projectUnavailable: '项目不可用',
+    bound: '已绑定', unbound: '未绑定员工',
+    usingTitle: '谁在这台电脑上干活', inUse: '使用中', runsWith: '用 {agent} 在 {folder} 文件夹里执行任务', advanced: '设备权限', projectUnavailable: '项目不可用',
     employeeUnavailable: '员工已移除', alreadyBound: '这名员工已有绑定。请先移除旧绑定，再选择其他项目。',
     bindingError: '保存绑定失败，请检查项目是否可用及设备权限。',
     bindSaved: '已绑定员工。', bindRemoved: '已移除绑定。',
@@ -157,7 +159,7 @@ export function WorkerConnectPanel() {
             <span className={`link-device-status is-${w.status}`}>{t(w.status)}</span>
           </div>
           {w.capabilities.agents?.length ? <p className="helper">{t('agents')} · {w.capabilities.agents.map(agentLabel).join(' · ')}</p> : null}
-          {w.kind === 'link' && w.status !== 'revoked' ? <LocalClients device={w} onChanged={() => void load()} /> : null}
+          {w.kind === 'link' && w.status !== 'revoked' ? <LocalClients device={w} users={clientUsers(w, employees ?? [])} onChanged={() => void load()} /> : null}
           {w.status !== 'revoked' ? <>
             <DeviceBindings key={requestedEmployee} worker={w} employees={employees ?? []} employeesLoaded={employees !== null} boundEmployees={boundEmployees}
               defaultEmployee={requestedEmployee} busy={busy} t={t} onSave={saveBinding} />
@@ -193,12 +195,14 @@ function DeviceBindings({ worker, employees, employeesLoaded, boundEmployees, de
   const employeeId = choices.some(choice => choice.id === chosenEmployee)
     ? chosenEmployee : (choices.length === 1 ? choices[0]!.id : '');
   return <>
+    {roomAssignments.length ? <h4 className="link-device-bindings-title">{t('usingTitle')}</h4> : null}
     {roomAssignments.length ? <ul className="link-device-bindings">{roomAssignments.map(binding => {
       const project = projects.find(project => project.id === binding.projectId);
       const employee = employees.find(employee => employee.id === binding.employeeId);
       return <li key={JSON.stringify([binding.employeeId, binding.projectId])}>
-        <div><strong>{employee?.name ?? (employeesLoaded ? t('employeeUnavailable') : t('loadingName'))}</strong> · {project?.name ?? t('projectUnavailable')}
-          {project ? ` · ${agentLabel(project.agent)}` : ''}<small>{t('bound')}</small></div>
+        <div><strong>{employee?.name ?? (employeesLoaded ? t('employeeUnavailable') : t('loadingName'))}</strong>
+          {project ? <> <span className="tag is-good">{t('inUse')}</span></> : null}
+          <small>{project ? fill(t('runsWith'), { agent: <b>{agentLabel(project.agent)}</b>, folder: <b>{project.name}</b> }) : t('projectUnavailable')}</small></div>
         <button className="btn" type="button" disabled={busy} onClick={() => void onSave(worker.id, binding, true)}>{t('unbind')}</button>
       </li>;
     })}</ul> : <p className="helper">{t('unbound')}</p>}
@@ -219,6 +223,24 @@ function DeviceBindings({ worker, employees, employeesLoaded, boundEmployees, de
       <button className="btn primary" disabled={busy || !employeeId || !projectId}>{t('bind')}</button>
     </form> : projects.length ? null : <p className="helper">{t('noProjects')}</p>}
   </>;
+}
+
+/** Which bound employee uses which client on this computer, and in which folder. Exported for tests. */
+export function clientUsers(worker: LinkDevice, employees: EmployeeChoice[]): ClientUsers {
+  const { projects = [], roomAssignments = [] } = worker.capabilities;
+  const users: ClientUsers = {};
+  for (const binding of roomAssignments) {
+    const project = projects.find(item => item.id === binding.projectId);
+    if (!project) continue;
+    const employee = employees.find(item => item.id === binding.employeeId)?.name ?? binding.employeeId;
+    (users[project.agent] ??= []).push({ employee, folder: project.name });
+  }
+  return users;
+}
+
+/** Puts elements in place of {name} placeholders in a translated sentence. */
+function fill(text: string, parts: Record<string, ReactNode>): ReactNode {
+  return text.split(/\{(\w+)\}/).map((piece, i) => i % 2 ? <Fragment key={i}>{parts[piece] ?? piece}</Fragment> : piece);
 }
 
 function splitIds(value: string): string[] {

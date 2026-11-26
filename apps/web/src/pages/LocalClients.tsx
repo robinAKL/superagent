@@ -11,11 +11,16 @@ import type { LinkDevice } from './link-devices';
  */
 export type ClientState = 'missing' | 'signed-out' | 'ready';
 export interface LocalClient { agent: LinkAgent; state: ClientState; connected: boolean }
+/** Who runs tasks with a client on this computer: each bound employee and the folder it works in. */
+export type ClientUsers = Partial<Record<LinkAgent, { employee: string; folder: string }[]>>;
 
 const TEXT = {
   en: {
     title: 'Local clients', unknown: 'Link has not reported its clients yet (needs Link 0.1.8 or later; update it from the tray).',
     missing: 'Not installed', signedOut: 'Installed, not signed in', ready: 'Signed in, not connected to a project folder', connected: 'Connected',
+    inUse: 'In use', idle: 'Connected, not in use',
+    usedBy: 'In use by {employee} · folder {folder}',
+    idleHint: 'No employee uses this client yet. Bind an employee to one of its folders below and it starts taking tasks.',
     install: 'Install and sign in', login: 'Sign in', connect: 'Choose a project folder', more: 'Add a folder',
     sent: 'Opened on {device}. Follow the window there: click the button, sign in in the browser, then choose a folder. This page updates by itself.',
     failed: 'The computer could not be reached. Check that Link is running on it, then try again.',
@@ -24,6 +29,9 @@ const TEXT = {
   zh: {
     title: '本地客户端', unknown: 'Link 还没有上报客户端情况（需要 Link 0.1.8 或更新版本，请在托盘里检查更新）。',
     missing: '未安装', signedOut: '已安装，还没登录', ready: '已登录，还没连接项目文件夹', connected: '已连接',
+    inUse: '使用中', idle: '已连接，未使用',
+    usedBy: '正在被 {employee} 使用 · 文件夹 {folder}',
+    idleHint: '还没有员工用这个客户端。在下面把员工绑到它的文件夹，它才会接任务。',
     install: '安装并登录', login: '登录', connect: '选择项目文件夹', more: '再连接一个文件夹',
     sent: '已在 {device} 上打开。请在那台电脑弹出的窗口里点按钮、在浏览器里登录，最后选一个文件夹。这里会自动更新。',
     failed: '没能联系到那台电脑。请确认那台电脑上的 Link 在运行，再试一次。',
@@ -38,7 +46,7 @@ export function nextStep(client: LocalClient): 'install' | 'login' | 'connect' |
   return client.state === 'missing' ? 'install' : client.state === 'signed-out' ? 'login' : client.connected ? 'more' : 'connect';
 }
 
-export function LocalClients({ device, onChanged }: { device: LinkDevice; onChanged: () => void }) {
+export function LocalClients({ device, users = {}, onChanged }: { device: LinkDevice; users?: ClientUsers; onChanged: () => void }) {
   const t = useT(TEXT);
   const clients = device.capabilities.clients;
   const [state, setState] = useState<{ agent: string; result: 'sent' | 'failed' } | null>(null);
@@ -61,14 +69,17 @@ export function LocalClients({ device, onChanged }: { device: LinkDevice; onChan
       {clients.every((client) => !client.connected) ? <p className="warn">{t('none')}</p> : null}
       <ul>{clients.map((client) => {
         const step = nextStep(client);
-        return <li key={client.agent} className="local-client" data-agent={client.agent} data-state={client.connected ? 'connected' : client.state}>
+        const using = client.connected ? users[client.agent] ?? [] : [];
+        return <li key={client.agent} className="local-client" data-agent={client.agent} data-state={client.connected ? (using.length ? 'in-use' : 'connected') : client.state}>
           <span className="local-client-name">{CLIENT_LABEL[client.agent]}</span>
-          <span className={`tag ${client.connected ? 'is-good' : client.state === 'ready' ? 'is-accent' : 'is-warn'}`}>
-            {client.connected ? t('connected') : client.state === 'missing' ? t('missing') : client.state === 'signed-out' ? t('signedOut') : t('ready')}
+          <span className={`tag ${client.connected ? (using.length ? 'is-good' : 'is-accent') : client.state === 'ready' ? 'is-accent' : 'is-warn'}`}>
+            {client.connected ? t(using.length ? 'inUse' : 'idle') : client.state === 'missing' ? t('missing') : client.state === 'signed-out' ? t('signedOut') : t('ready')}
           </span>
           <button type="button" className={`btn ${step === 'more' ? 'quiet' : 'primary'}`} disabled={busy || device.status === 'offline' || device.status === 'revoked'} onClick={() => void open(client)}>
             {t(step)}
           </button>
+          {using.map((use) => <p key={use.employee + use.folder} className="local-client-use">{t('usedBy', use)}</p>)}
+          {client.connected && !using.length ? <p className="helper">{t('idleHint')}</p> : null}
           {state?.agent === client.agent ? <p className={state.result === 'sent' ? 'helper' : 'warn'} role="status">{state.result === 'sent' ? t('sent', { device: device.name }) : t('failed')}</p> : null}
         </li>;
       })}</ul>
