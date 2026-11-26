@@ -4,6 +4,7 @@ import { useT, type Dict, type Vars } from '../i18n';
 import { WorkerConnectPanel } from './WorkerConnectPanel';
 import { CompanyContextPanel } from './CompanyContextPanel';
 import { MyAccountsPanel } from './AccountConnections';
+import { MembersPanel } from './MembersPanel';
 import './SetupPage.css';
 
 interface LlmStatus {
@@ -26,7 +27,7 @@ const TEXT = {
   en: {
     title: 'Settings', lead: 'The company, the model and its budget, computers and the audit trail, in the order they are set up.', companyLink: 'Company profile and boundaries',
     tabRun: 'Runtime settings', tabAudit: 'Audit log', tabArch: 'Architecture',
-    sectionsNav: 'Settings sections', secCompany: 'Company', secModel: 'Model and usage', secComputers: 'Computers', secAccounts: 'My mailbox', secDanger: 'Danger zone',
+    sectionsNav: 'Settings sections', secCompany: 'Company', secMembers: 'Members', secModel: 'Model and usage', secComputers: 'Computers', secAccounts: 'My mailbox', secDanger: 'Danger zone',
     auditLead: 'Append-only events. Secrets and source text are never shown.',
     auditEmpty: 'No model-configuration events on this page yet. Status above is the current runtime setting.',
     auditStatus: 'Current model status',
@@ -77,7 +78,7 @@ const TEXT = {
   zh: {
     title: '管理设置', lead: '企业信息、模型与用量、电脑和审计，按设置的先后排列。', companyLink: '企业信息与工作边界',
     tabRun: '运行设置', tabAudit: '审计记录', tabArch: '架构说明',
-    sectionsNav: '设置分区', secCompany: '企业', secModel: '模型与用量', secComputers: '电脑', secAccounts: '我的邮箱', secDanger: '危险区',
+    sectionsNav: '设置分区', secCompany: '企业', secMembers: '成员', secModel: '模型与用量', secComputers: '电脑', secAccounts: '我的邮箱', secDanger: '危险区',
     auditLead: '只追加、不可改。密钥和原文不会出现在这里。',
     auditEmpty: '本页还没有列出模型配置事件。上方状态就是当前运行设置。',
     auditStatus: '当前模型状态',
@@ -152,10 +153,10 @@ interface ResetPreview {
     preserved: { connections: number; mcpUsers: number };
   };
 }
-type SetupSection = 'company' | 'model' | 'computers' | 'accounts' | 'audit' | 'danger';
-const SECTIONS: readonly SetupSection[] = ['company', 'model', 'computers', 'accounts', 'audit', 'danger'];
-const ADMIN_SECTIONS = new Set<SetupSection>(['company', 'computers', 'accounts', 'danger']);
-const SECTION_LABELS = { company: 'secCompany', model: 'secModel', computers: 'secComputers', accounts: 'secAccounts', audit: 'tabAudit', danger: 'secDanger' } as const;
+type SetupSection = 'company' | 'members' | 'model' | 'computers' | 'accounts' | 'audit' | 'danger';
+const SECTIONS: readonly SetupSection[] = ['company', 'members', 'model', 'computers', 'accounts', 'audit', 'danger'];
+const ADMIN_SECTIONS = new Set<SetupSection>(['company', 'members', 'computers', 'accounts', 'danger']);
+const SECTION_LABELS = { company: 'secCompany', members: 'secMembers', model: 'secModel', computers: 'secComputers', accounts: 'secAccounts', audit: 'tabAudit', danger: 'secDanger' } as const;
 /** Old links (?tab=audit) and section links (?section=…) open the page at that section. */
 function requestedSection(): SetupSection | null {
   const params = new URLSearchParams(typeof window === 'undefined' ? undefined : window.location.hash.split('?')[1]);
@@ -350,6 +351,7 @@ export function SetupPage() {
       </nav>
       <div className="setup-body">
     {isAdmin ? <div id="settings-company"><CompanyContextPanel fromOrganization={false} guide={false} /></div> : null}
+    {isAdmin ? <MembersPanel /> : null}
     <section id="settings-model" className="panel setup-card" aria-labelledby="setup-connection">
       <header className="setup-card-head">
         <h2 id="setup-connection" className="h2">{t('connection')}</h2>

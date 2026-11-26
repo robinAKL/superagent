@@ -1,4 +1,6 @@
 import { openRequestContext, setFallbackTenant } from './tenancy.js';
+import { MemoryDirectoryStore, TenancyService, type DirectoryStore } from './modules/tenancy/directory.js';
+import { tenancyModule, tenancyState } from './modules/tenancy/index.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';
@@ -29,6 +31,8 @@ export interface AppOptions {
   knowledgeDeps?: KnowledgeDeps;
   longWorkDeps?: LongWorkDeps;
   readiness?: ReadinessCheck[];
+  /** The company directory store (PostgreSQL in production; in memory when omitted). */
+  directoryStore?: DirectoryStore;
 }
 
 export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> {
@@ -72,7 +76,9 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   // Public sign-in configuration for the browser (no secrets: tenant and client ids are not credentials).
   app.get('/auth/config', async () =>
     authCfgForBrowser.mode === 'entra'
-      ? { mode: 'entra', tenantId: authCfgForBrowser.tenantId, clientId: authCfgForBrowser.clientId, scopes: [`api://${authCfgForBrowser.clientId}/access_as_user`] }
+      // Any Microsoft 365 organisation signs in through the shared "organizations" authority; the company directory
+      // then decides which company the person works in.
+      ? { mode: 'entra', tenantId: authCfgForBrowser.tenantId, authority: 'organizations', clientId: authCfgForBrowser.clientId, scopes: [`api://${authCfgForBrowser.clientId}/access_as_user`] }
       : { mode: 'dev' },
   );
   app.get('/readyz', async (_req, reply) => {
@@ -90,7 +96,11 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   const auth = opts.auth ?? { mode: 'dev' as const, platformTenantId: 'default' };
   setFallbackTenant(auth.platformTenantId);
   const authCfgForBrowser = auth;
-  const authenticate = createAuthenticate(auth);
+  // The company directory decides which company each signed-in person works in (SaaS step 1b).
+  const tenancy = new TenancyService(opts.directoryStore ?? new MemoryDirectoryStore(), { platformTenantId: auth.platformTenantId, platformDirectory: auth.tenantId ?? null });
+  tenancyState.service = tenancy;
+  const authWithDirectory: AuthConfig = { ...auth, directory: tenancy };
+  const authenticate = createAuthenticate(authWithDirectory);
   const knowledge = opts.knowledgeDeps?.organization ? new KnowledgeService(opts.knowledgeDeps) : undefined;
   // The calendar's suggestions: workflows whose sources state a cadence, with the employee who does them.
   schedulesHooks.suggestions = knowledge ? (user) => knowledge.workflowSchedules(user) : null;
@@ -100,6 +110,12 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   // Pairing has no token yet. The worker channel itself uses a revocable bearer token, not a user sign-in.
   await app.register(workerPairModule, { prefix: '/api/v1/worker-link' });
   await app.register(workerLinkModule, { prefix: '/api/v1/worker-link' });
+
+  // Sign-up, join requests and invitations work before the person belongs to any company.
+  await app.register(async (scoped) => {
+    scoped.addHook('preHandler', createAuthenticate(authWithDirectory, { identityOnly: true }));
+    await scoped.register(tenancyModule);
+  }, { prefix: '/api/v1/tenancy' });
 
   await app.register(async (api) => {
     api.addHook('preHandler', authenticate);

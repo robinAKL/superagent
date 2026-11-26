@@ -32,7 +32,7 @@ describe('app scaffold', () => {
     const entra = await buildApp({ auth: { mode: 'entra', tenantId: 'tid-1', clientId: 'cid-1', platformTenantId: 'p' } });
     const r = await entra.inject('/auth/config');
     expect(r.statusCode).toBe(200); // public: the browser needs it before sign-in
-    expect(r.json()).toEqual({ mode: 'entra', tenantId: 'tid-1', clientId: 'cid-1', scopes: ['api://cid-1/access_as_user'] });
+    expect(r.json()).toEqual({ mode: 'entra', tenantId: 'tid-1', authority: 'organizations', clientId: 'cid-1', scopes: ['api://cid-1/access_as_user'] });
     expect((await entra.inject('/api/v1/setup/llm')).statusCode).toBe(401); // API still requires a token
     await entra.close();
   });

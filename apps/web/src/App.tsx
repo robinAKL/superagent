@@ -3,7 +3,9 @@ import { SetupPage } from './pages/SetupPage';
 import { ToolsPage } from './pages/ToolsPage';
 import { KnowledgePage } from './pages/KnowledgePage';
 import { signOut, type SignedIn } from './auth';
-import { authHeaders } from './api';
+import { api, authHeaders, chooseCompany } from './api';
+import { Onboarding } from './pages/Onboarding';
+import type { MeView } from './company';
 import { SuperAgentPage } from './pages/SuperAgentPage';
 import { CommandRoomPage } from './pages/CommandRoomPage';
 import { WorkInboxPage } from './pages/WorkInboxPage';
@@ -31,7 +33,7 @@ const NAV: { group: NavGroupId; items: NavItem[] }[] = [
 const PARENT: Partial<Record<PageId, NavItemId>> = { tools: 'employees', brain: 'employees' };
 const PAGES: readonly PageId[] = ['room', 'work', 'calendar', 'employees', 'knowledge', 'settings', 'tools', 'brain', 'connect'];
 
-type ShellKey = `group.${NavGroupId}` | `nav.${NavItemId}` | 'menu' | 'signOut' | 'language' | 'noRole';
+type ShellKey = `group.${NavGroupId}` | `nav.${NavItemId}` | 'menu' | 'signOut' | 'language' | 'noRole' | 'company';
 
 const TEXT: Dict<ShellKey> = {
   en: {
@@ -47,6 +49,7 @@ const TEXT: Dict<ShellKey> = {
     signOut: 'Sign out',
     noRole: 'Your account has no Super Agent role yet, so there is nothing you can open here. Ask an administrator to assign you a role (Owner, Admin, Employee or Reviewer) for this app, then sign out and back in.',
     language: 'Language',
+    company: 'Company',
   },
   zh: {
     'group.daily': '日常工作',
@@ -61,6 +64,7 @@ const TEXT: Dict<ShellKey> = {
     signOut: '退出',
     noRole: '你的账号还没有 Super Agent 角色，所以这里暂时没有可用的内容。请联系管理员为你分配此应用的角色（所有者、管理员、员工或审核人），然后退出并重新登录。',
     language: '语言',
+    company: '公司',
   },
 };
 
@@ -112,7 +116,26 @@ function useHashPage(): PageId {
   return page;
 }
 
+/** The company directory's view of the signed-in person; reloaded after they create or join a company. */
+function useMe(): [MeView | null | 'failed', () => void] {
+  const [me, setMe] = useState<MeView | null | 'failed'>(null);
+  const [round, setRound] = useState(0);
+  useEffect(() => {
+    let stop = false;
+    void api<MeView>('/api/v1/tenancy/me').then((r) => { if (!stop) setMe(r.status === 200 ? r.body : 'failed'); }, () => { if (!stop) setMe('failed'); });
+    return () => { stop = true; };
+  }, [round]);
+  return [me, () => setRound((n) => n + 1)];
+}
+
 export function App({ user = { mode: 'dev' } }: { user?: SignedIn }) {
+  const [me, reloadMe] = useMe();
+  // Someone who belongs to no company yet creates theirs, asks to join, or accepts an invitation first.
+  if (me && me !== 'failed' && me.memberships.length === 0) return <Onboarding me={me} onChanged={() => { reloadMe(); window.location.reload(); }} />;
+  return <Shell user={user} me={me === 'failed' ? null : me} />;
+}
+
+function Shell({ user, me }: { user: SignedIn; me: MeView | null }) {
   const t = useT(TEXT);
   const requested = useHashPage();
   const roles = useRoles();
@@ -149,6 +172,12 @@ export function App({ user = { mode: 'dev' } }: { user?: SignedIn }) {
           ))}
         </nav>
         <span className="topbar-end">
+          {me && me.memberships.length > 1 ? (
+            <select className="company-switch" aria-label={t('company')} value={me.current ?? ''}
+              onChange={(e) => { chooseCompany(e.target.value); window.location.reload(); }}>
+              {me.memberships.map((m) => <option key={m.tenantId} value={m.tenantId}>{m.name}</option>)}
+            </select>
+          ) : null}
           <LangSwitch label={t('language')} />
           {user.mode === 'entra' ? (
             <span className="who">

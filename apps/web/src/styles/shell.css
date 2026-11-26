@@ -328,3 +328,4 @@ button, input, select, textarea { font-family: inherit; }
   .emp-feedback .data-table td { display: block; padding: 0; border: 0; }
   .emp-feedback .data-table td.num { text-align: left; color: var(--color-muted); font-size: 12px; }
 }
+.company-switch { min-height: 32px; max-width: 220px; }

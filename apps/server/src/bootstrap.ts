@@ -71,6 +71,8 @@ export async function createRuntime(env: NodeJS.ProcessEnv = process.env, factor
   const { PgAllowlist, PgConfigRepo } = await import('./modules/setup/pg-repo.js');
   const { PgBudgetStore, PgPriceBook } = await import('./modules/setup/pg-budget.js');
   const repo = new PgConfigRepo(pool);
+  const { PgDirectoryStore } = await import('./modules/tenancy/pg-directory.js');
+  const directoryStore = new PgDirectoryStore({ query: async <T>(text: string, params: readonly unknown[]) => ({ rows: (await pool.query(text, params as unknown[])).rows as T[] }) });
   return {
     pool,
     llm: createLlmGateway({ repo, secrets, budget: new PgBudgetStore(pool), prices: new PgPriceBook(pool) }),
@@ -78,6 +80,7 @@ export async function createRuntime(env: NodeJS.ProcessEnv = process.env, factor
     app: {
       auth: { ...auth, platformTenantId: env.PLATFORM_TENANT_ID! },
       setupDeps: { repo, secrets, allowlist: new PgAllowlist(pool) },
+      directoryStore,
       readiness: [{ name: 'postgres', check: async () => (await pool.query('SELECT 1 AS ok')).rows[0]?.ok === 1 }],
     },
     close: () => pool.end(),
