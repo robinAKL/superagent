@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { setFallbackTenant } from '../../tenancy.js';
 import { beforeEach, expect, it } from 'vitest';
 import type { UserContext } from '@superagent/shared';
 import { bindRoomBrain, bindRoomStore, createCommandRoom, roomState } from '../room/index.js';
@@ -12,6 +13,8 @@ import type { MailClient, MailMessage } from './graph.js';
 import { MICROSOFT_SCOPES } from './microsoft.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
+// The test's own company is the default context, so the room these tests read is the one schedules and mail write to.
+setFallbackTenant(tenantId);
 const owner: UserContext = { tenantId, userId: 'owner', roles: ['owner'], projectScopes: [] };
 const responsible: UserContext = { tenantId, userId: 'lead', roles: ['employee'], projectScopes: [] };
 const stranger: UserContext = { tenantId, userId: 'someone', roles: ['employee'], projectScopes: [] };

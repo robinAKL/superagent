@@ -32,7 +32,7 @@ live('concurrent real PG consumers reuse the claimed instance and expose the sam
     const sop = new SopRuntime(); const version = sop.draft('s', { requiredFields: ['title', 'amount'], threshold: { field: 'amount', max: 1000 }, employeeStatus: 'active', graph: {
       nodes: [{ id: 't', kind: 'trigger', label: 'mail' }, { id: 'h', kind: 'human_review', label: 'review' }], edges: [{ from: 't', to: 'h' }] } });
     const context = { employees: {}, tools: {} };
-    expect(sop.validate(version.id, context)).toMatchObject({ status: 'passed', issues: [] }); sop.publish(version.id, undefined, context); await saveSopSnapshot(db, sop.snapshot());
+    expect(sop.validate(version.id, context)).toMatchObject({ status: 'passed', issues: [] }); sop.publish(version.id, undefined, context); await saveSopSnapshot(db, sop.snapshot(), 'tenant');
     sopState.current = new SopRuntime(); inboxState.current = new WorkInbox(); executionState.current.load({ seq: 0, runs: [] }); bindExecutionStore(db); bindInboxStore(db);
     const makeStore = () => new PgLongWorkStore(pool, prepareMailSopStarts([source])); const work = new LongWork(makeStore());
     const mail = { id: 'mail', threadId: 'thread', from: 'person@example.invalid', receivedAt: '2026-11-10T00:00:00Z', body: 'Synthetic data only' };

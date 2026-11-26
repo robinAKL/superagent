@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import { runAsTenant } from '../../tenancy.js';
 import type { UserContext } from '@superagent/shared';
 import { flushRoom, roomState } from '../room/index.js';
 import { queueRoomDispatch, resolveRoomDispatch } from '../workers/index.js';
@@ -27,7 +28,12 @@ function employeesFor(user: Pick<UserContext, 'userId' | 'roles' | 'projectScope
  * Starts one scheduled run: Super Agent posts it in the command room and hands the workflow to the employee as a
  * task, sent to the employee's computer like any assignment. The task is followed up like every other one.
  */
-export async function startScheduledRun(schedule: Schedule, occurrence: Occurrence) {
+export function startScheduledRun(schedule: Schedule, occurrence: Occurrence) {
+  // The calendar timer covers every company; each run happens inside the schedule's own company.
+  return runAsTenant(schedule.tenantId, () => startInTenant(schedule, occurrence));
+}
+
+async function startInTenant(schedule: Schedule, occurrence: Occurrence) {
   const room = roomState.current;
   const employee = room.roster(SYSTEM).find((item) => item.id === schedule.employeeId);
   if (!employee) return { taskId: null, note: '负责的数字员工已不存在，请重新指派。', status: 'no_employee' as const };

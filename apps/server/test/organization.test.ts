@@ -149,8 +149,8 @@ describe('organization draft → confirmed team (PRD §3.3)', () => {
     const reduced = await f.service.resizeTeam(owner, { count: 1 });
     const [employee] = reduced.employees;
     expect(cached.list()).toHaveLength(3);
-    const oldRegistry = employeesState.current;
-    employeesState.current = cached;
+    const oldRegistry = employeesState.of(owner.tenantId);
+    employeesState.set(owner.tenantId, cached);
     const app = await buildApp({ auth: { mode: 'dev', platformTenantId: owner.tenantId }, knowledgeDeps: deps });
     const headers = { 'x-dev-user': 'alice|owner|project-a' };
     try {
@@ -176,7 +176,7 @@ describe('organization draft → confirmed team (PRD §3.3)', () => {
       expect(await replica.resolveWorkflowTeam(owner.tenantId)).toEqual(Object.fromEntries(first.employees.map(e => [e.employeeId, employee!.employeeId])));
     } finally {
       await app.close();
-      employeesState.current = oldRegistry;
+      employeesState.set(owner.tenantId, oldRegistry);
     }
   });
 

@@ -28,7 +28,7 @@ async function register(db: Queryable, tenant: string, item: LongItem, source?: 
   if (!source || source.tenant !== tenant || source.projectId !== item.projectId || source.objectId !== item.objectId || source.sopId !== item.sopId || source.assignee !== item.assignee)
     return update('blocked_source', '来源或业务对象绑定已变，起始请求保留，等待重新确认。');
   if (row.version_id && row.instance_id) return row.status === 'waiting_runtime' ? link(row) : update('waiting_runtime', WAITING_RUNTIME);
-  const version = await loadPublishedVersion(db, item.sopId);
+  const version = await loadPublishedVersion(db, tenant, item.sopId);
   if (!version || !version.report?.ok || version.validatedRevision !== version.revision)
     return update('waiting_publication', '流程尚未发布或校验已失效，起始请求保留，未执行外部动作。');
   if (version.definition.employeeStatus === 'paused') return update('paused', '流程员工已暂停，原起始请求继续等待。');

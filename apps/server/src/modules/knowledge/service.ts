@@ -1,4 +1,5 @@
 import type { KnowledgeSourcePlugin, SourceContent, UserContext } from '@superagent/shared';
+import { runAsTenant } from '../../tenancy.js';
 import { confirmSource, evidenceValid, hash, hydrate, id, invalidateAnalyses, KnowledgeError, mayRead, positionedChunks, selectedItem, requireManager, signature, snapshot, stamp, type KnowledgeState, type Evidence, type Recommendation } from './domain.js';
 import { managedSource, publicSourceScope, sourceScope, type SourceResource } from './sources.js';
 import type { Connection, Item } from './store.js';
@@ -636,7 +637,8 @@ export class KnowledgeService {
   /** Startup hook: restore every confirmed organization of these tenants into the registries of this process. */
   async restoreOrganizations(tenantIds: string[]): Promise<number> {
     let restored = 0;
-    for (const tenantId of tenantIds) restored += await this.refreshConfirmedTeam(tenantId);
+    // Each company's team goes into that company's own employee and tool registries.
+    for (const tenantId of tenantIds) restored += await runAsTenant(tenantId, () => this.refreshConfirmedTeam(tenantId));
     return restored;
   }
   /** Organization draft (PRD §3.3 step 3): roles, the tools they use and the SOPs they take part in, plus confirmation state. */

@@ -3,6 +3,7 @@
  * 待我处理 (work-items decide) and resume the run; this module never writes without one.
  */
 import { randomUUID } from 'node:crypto';
+import { currentTenant } from '../../tenancy.js';
 import type { FastifyPluginAsync } from 'fastify';
 import { flushGateway, gatewayState, hydrateGateway } from '../gateway/index.js';
 import { employeesState } from '../employees/index.js';
@@ -126,7 +127,7 @@ async function ensurePinned(versionId: string): Promise<void> {
     /* This process has not hydrated the SOP runtime. */
   }
   if (!runStore) throw new ExecutionError('not_published', 'the pinned version is not loaded');
-  const version = await loadVersionById(runStore, versionId);
+  const version = await loadVersionById(runStore, currentTenant(), versionId);
   if (!version || version.status !== 'published') throw new ExecutionError('not_published', 'the pinned version is not published');
   sopState.current.pin(version);
 }
@@ -277,7 +278,7 @@ export const executionModule: FastifyPluginAsync<{ resolveWorkflowTeam?: (tenant
     let run: Execution;
     if (b.sopId && runStore) {
       const db = runStore;
-      const [active] = await loadActiveWorkflows(db, b.sopId);
+      const [active] = await loadActiveWorkflows(db, tenantId, b.sopId);
       if (!active || active.id !== b.versionId) return reply.code(409).send({ error: 'published_version_changed' });
       if (active.definition.employeeStatus === 'paused') throw new ExecutionError('not_started', 'the SOP is paused');
       sopState.current.pin(active);

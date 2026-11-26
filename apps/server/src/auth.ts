@@ -5,6 +5,7 @@
 import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from 'fastify';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import { ROLES, type Role, type UserContext } from '@superagent/shared';
+import { enterTenant } from './tenancy.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -40,9 +41,11 @@ export function createAuthenticate(cfg: AuthConfig): preHandlerHookHandler {
     if (cfg.mode === 'dev') {
       const raw = req.headers['x-dev-user'];
       if (typeof raw !== 'string') return reply.code(401).send({ error: 'unauthenticated' });
-      const [userId, roles = '', scopes = ''] = raw.split('|');
+      // user|roles|projectScopes|tenant. The fourth field lets tests act as a second company; it defaults to the platform tenant.
+      const [userId, roles = '', scopes = '', tenant = ''] = raw.split('|');
       if (!userId?.trim()) return reply.code(401).send({ error: 'unauthenticated' }); // blank identity is no identity
-      req.user = { tenantId: cfg.platformTenantId, userId: userId!, roles: toRoles(roles.split(',')), projectScopes: scopes ? scopes.split(',') : [] };
+      req.user = { tenantId: tenant.trim() || cfg.platformTenantId, userId: userId!, roles: toRoles(roles.split(',')), projectScopes: scopes ? scopes.split(',') : [] };
+      enterTenant(req.user.tenantId);
       return;
     }
     const header = req.headers.authorization;
@@ -62,6 +65,7 @@ export function createAuthenticate(cfg: AuthConfig): preHandlerHookHandler {
     const resolved = cfg.resolveUser ? await cfg.resolveUser(oid, tokenRoles) : { roles: tokenRoles, projectScopes: [] };
     if (!resolved) return reply.code(403).send({ error: 'user_not_provisioned' });
     req.user = { tenantId: cfg.platformTenantId, userId: oid, ...resolved };
+    enterTenant(req.user.tenantId);
   };
 }
 

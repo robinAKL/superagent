@@ -105,7 +105,7 @@ live('real Postgres: reset clears tenant A knowledge_tenants & knowledge_chunks 
       });
     }
 
-    await pool.query(`INSERT INTO sop_versions (id, sop_id, number, definition, status, revision) VALUES ('v-pub', 'sop-shared', 1, '{}'::jsonb, 'published', 1), ('v-draft', 'sop-draft', 1, '{}'::jsonb, 'draft', 1)`);
+    await pool.query(`INSERT INTO sop_versions (id, tenant_id, sop_id, number, definition, status, revision) VALUES ('v-pub', $1, 'sop-shared', 1, '{}'::jsonb, 'published', 1), ('v-draft', $1, 'sop-draft', 1, '{}'::jsonb, 'draft', 1)`, [tenantA]);
     await pool.query(`INSERT INTO sop_instances (id, tenant_id, sop_id, sop_version_id, version_number, event_key, status) VALUES ('inst-a', $1, 'sop-shared', 'v-pub', 1, 'k-a', 'running')`, [tenantA]);
 
     await service.resetKnowledge(ctxA, { confirmText: 'RESET' });

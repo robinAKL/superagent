@@ -37,7 +37,7 @@ live('a stale process cannot execute an approval after the original contract was
       nodes: [{ id: 't', kind: 'trigger', label: 'mail' }, { id: 'e', kind: 'employee', label: 'employee', ref: 'employee' }, { id: 'h', kind: 'human_review', label: 'approval' }, { id: 'w', kind: 'tool', label: 'write', ref: 'fixture.write' }],
       edges: [{ from: 't', to: 'e' }, { from: 'e', to: 'h' }, { from: 'h', to: 'w' }] } });
     const context = { employees: { employee: { status: 'active' as const } }, tools: { 'fixture.write': { stage: 'available', effect: 'write' } } };
-    expect(sop.validate(version.id, context).status).toBe('passed'); sop.publish(version.id, undefined, context); await saveSopSnapshot(db, sop.snapshot());
+    expect(sop.validate(version.id, context).status).toBe('passed'); sop.publish(version.id, undefined, context); await saveSopSnapshot(db, sop.snapshot(), 'tenant');
     sopState.current = sop; gatewayState.current = new ToolGateway(); inboxState.current = new WorkInbox(); let writes = 0;
     executionState.current = new SopExecutor({ sop: () => sopState.current, inbox: () => inboxState.current, gateway: gatewayState.current,
       tools: () => ({ effect: 'write', available: true }), connectors: new Map([['fixture.write', params => { writes++; return { actual: structuredClone(params) }; }]]),

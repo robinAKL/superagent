@@ -35,7 +35,7 @@ function published(employeeStatus: 'active' | 'paused' = 'active') {
 
 live('accepts receipt, pinned SOP and instance atomically across independent processes; retries and new versions preserve identity', async () => {
   await database(async (pool, db) => {
-    const { runtime, version } = published(); await saveSopSnapshot(db, runtime.snapshot());
+    const { runtime, version } = published(); await saveSopSnapshot(db, runtime.snapshot(), 'tenant');
     const configured = [source]; const prepare = prepareMailSopStarts(configured);
     const workers = Array.from({ length: 12 }, () => new LongWork(new PgLongWorkStore(pool, prepare)));
     await Promise.all(workers.map(w => w.ingest(source, mail)));
@@ -54,7 +54,7 @@ live('accepts receipt, pinned SOP and instance atomically across independent pro
     expect(disabled.status).toBe('blocked_source'); expect(disabled.versionId).toBe(version.id); expect(disabled.instanceId).toBe(item.sopStart!.instanceId);
     configured.push(source);
     const v2 = runtime.draft(source.sopId, ready); runtime.validate(v2.id); runtime.publish(v2.id);
-    await saveSopSnapshot(db, runtime.snapshot());
+    await saveSopSnapshot(db, runtime.snapshot(), 'tenant');
     const restarted = new LongWork(new PgLongWorkStore(pool, prepare)); await restarted.tick(source.tenant);
     const after = (await restarted.snapshot(source.tenant)).items[0]!;
     expect(after.id).toBe(item.id); expect(after.sopStart).toEqual(item.sopStart);
@@ -72,13 +72,13 @@ live('a failed acceptance rolls receipt, claim and instance back together; unpub
     const accepted = await work.ingest(source, mail); const id = accepted.item!.id;
     expect(accepted.item!.sopStart?.status).toBe('waiting_publication');
     expect((await pool.query('SELECT * FROM sop_instances')).rows).toHaveLength(0);
-    const { runtime } = published('paused'); await saveSopSnapshot(db, runtime.snapshot());
+    const { runtime } = published('paused'); await saveSopSnapshot(db, runtime.snapshot(), 'tenant');
     expect((await work.snapshot(source.tenant)).items[0]!.sopStart?.status).toBe('waiting_publication');
     await work.tick(source.tenant);
     expect((await work.snapshot(source.tenant)).items[0]!.sopStart?.status).toBe('paused');
     expect((await pool.query('SELECT * FROM sop_instances')).rows).toHaveLength(0);
     const active = runtime.draft(source.sopId, ready); runtime.validate(active.id); runtime.publish(active.id);
-    await saveSopSnapshot(db, runtime.snapshot());
+    await saveSopSnapshot(db, runtime.snapshot(), 'tenant');
     await work.tick(source.tenant);
     expect((await work.snapshot(source.tenant)).items[0]!.id).toBe(id);
     expect((await work.snapshot(source.tenant)).items[0]!.sopStart?.status).toBe('waiting_runtime');

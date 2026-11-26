@@ -5,6 +5,7 @@ import {
   LOAD_INSTANCES_SQL,
   LOAD_PUBLISHED_SQL,
   LOAD_SEQ_SQL,
+  LOAD_SOP_TENANTS_SQL,
   LOAD_VERSIONS_SQL,
   UPSERT_EVENT_SQL,
   UPSERT_INSTANCE_SQL,
@@ -76,8 +77,8 @@ export function parseSopEventKey(key: string): { tenantId: string; source: strin
   return { tenantId: parts[0]!, source: parts[1]!, eventId: parts[2]!, sopId: parts.slice(3).join('|') };
 }
 
-export async function saveSopSnapshot(db: Queryable, snapshot: SopSnapshot): Promise<void> {
-  await db.query(UPSERT_SEQ_SQL, [snapshot.seq]);
+export async function saveSopSnapshot(db: Queryable, snapshot: SopSnapshot, tenantId: string): Promise<void> {
+  await db.query(UPSERT_SEQ_SQL, [snapshot.seq, tenantId]);
   for (const version of snapshot.versions) {
     await db.query(UPSERT_VERSION_SQL, [
       version.id,
@@ -89,6 +90,7 @@ export async function saveSopSnapshot(db: Queryable, snapshot: SopSnapshot): Pro
       version.revision,
       version.validatedRevision,
       version.effectiveAt,
+      tenantId,
     ]);
   }
   for (const instance of snapshot.instances) {
@@ -114,11 +116,16 @@ export async function saveSopSnapshot(db: Queryable, snapshot: SopSnapshot): Pro
   }
 }
 
-export async function loadSopSnapshot(db: Queryable): Promise<SopSnapshot> {
-  const versions = await db.query<VersionRow>(LOAD_VERSIONS_SQL, []);
-  const instances = await db.query<InstanceRow>(LOAD_INSTANCES_SQL, []);
-  const events = await db.query<EventRow>(LOAD_EVENTS_SQL, []);
-  const seq = await db.query<{ seq: number }>(LOAD_SEQ_SQL, []);
+/** Every company with saved workflow rows. */
+export async function loadSopTenants(db: Queryable): Promise<string[]> {
+  return (await db.query<{ tenant_id: string }>(LOAD_SOP_TENANTS_SQL, [])).rows.map((row) => row.tenant_id);
+}
+
+export async function loadSopSnapshot(db: Queryable, tenantId: string): Promise<SopSnapshot> {
+  const versions = await db.query<VersionRow>(LOAD_VERSIONS_SQL, [tenantId]);
+  const instances = await db.query<InstanceRow>(LOAD_INSTANCES_SQL, [tenantId]);
+  const events = await db.query<EventRow>(LOAD_EVENTS_SQL, [tenantId]);
+  const seq = await db.query<{ seq: number }>(LOAD_SEQ_SQL, [tenantId]);
   const missed: string[] = [];
   const skipped: string[] = [];
   for (const event of events.rows) {
@@ -136,18 +143,18 @@ export async function loadSopSnapshot(db: Queryable): Promise<SopSnapshot> {
 }
 
 /** Latest published version of one SOP. Another process reads this instead of the web process memory. */
-export async function loadPublishedVersion(db: Queryable, sopId: string): Promise<SopVersion | null> {
-  const result = await db.query<VersionRow>(LOAD_PUBLISHED_SQL, [sopId]);
+export async function loadPublishedVersion(db: Queryable, tenantId: string, sopId: string): Promise<SopVersion | null> {
+  const result = await db.query<VersionRow>(LOAD_PUBLISHED_SQL, [sopId, tenantId]);
   const row = result.rows[0];
   return row ? fromVersionRow(row) : null;
 }
 
 /** The version id pinned on an instance. This is not the latest published version. */
-export async function loadVersionById(db: Queryable, id: string): Promise<SopVersion | null> {
+export async function loadVersionById(db: Queryable, tenantId: string, id: string): Promise<SopVersion | null> {
   const result = await db.query<VersionRow>(
     `SELECT id, sop_id, number, definition, status, report, revision, validated_revision, effective_at
-     FROM sop_versions WHERE id = $1`,
-    [id],
+     FROM sop_versions WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId],
   );
   const row = result.rows[0];
   return row ? fromVersionRow(row) : null;
@@ -173,22 +180,22 @@ export async function claimSopEvent(
 }
 
 /** Active versions from the shared store, independently of any process's editor cache. */
-export async function loadActiveWorkflows(db: Queryable, sopId?: string): Promise<SopVersion[]> {
+export async function loadActiveWorkflows(db: Queryable, tenantId: string, sopId?: string): Promise<SopVersion[]> {
   const result = await db.query<VersionRow>(`
     SELECT DISTINCT ON (sop_id) id, sop_id, number, definition, status, report, revision, validated_revision, effective_at
     FROM sop_versions
-    WHERE status = 'published' AND ($1::text IS NULL OR sop_id = $1)
+    WHERE tenant_id = $2 AND status = 'published' AND ($1::text IS NULL OR sop_id = $1)
       AND (effective_at IS NULL OR effective_at::timestamptz <= now())
     ORDER BY sop_id, number DESC
-  `, [sopId ?? null]);
+  `, [sopId ?? null, tenantId]);
   return result.rows.map(fromVersionRow);
 }
 
-export async function countRunningSopInstances(db: Queryable, sopId: string, tenantId?: string): Promise<Map<string, number>> {
+export async function countRunningSopInstances(db: Queryable, sopId: string, tenantId: string): Promise<Map<string, number>> {
   const { rows } = await db.query<{ sop_version_id: string; count: string | number }>(`
     SELECT sop_version_id, count(*) FROM sop_instances
-    WHERE sop_id = $1 AND status = 'running' AND ($2::text IS NULL OR tenant_id = $2)
+    WHERE sop_id = $1 AND status = 'running' AND tenant_id = $2
     GROUP BY sop_version_id
-  `, [sopId, tenantId ?? null]);
+  `, [sopId, tenantId]);
   return new Map(rows.map(row => [row.sop_version_id, Number(row.count)]));
 }
