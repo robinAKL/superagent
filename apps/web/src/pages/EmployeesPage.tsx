@@ -34,7 +34,7 @@ interface Organization {
 export const TEXT = {
   en: {
     title: 'Digital employees',
-    subtitle: 'Review the organization draft from your company knowledge: who does what, with which tools, in which workflows.',
+    subtitle: 'Employees suggested from your company knowledge: who does what, with which tools, in which workflows. Publish them one by one, or all at once.',
     wallSubtitle: 'Make duties, owners and tools clear, then hand work to the right employee.',
     runWorkflow: 'Run a workflow', resizeTeam: 'Change team size (now {n})', teamUpdated: 'Team updated to {n} employees.',
     backToWall: 'All employees',
@@ -44,30 +44,32 @@ export const TEXT = {
     noAccess: 'Only an owner or administrator can review and confirm the organization.',
     blockedRunning: 'Analysis is still running. The draft will be ready to confirm when it finishes.',
     blockedStale: 'Materials changed while they were being analyzed. Run the analysis again before confirming.',
-    emptyTitle: 'No organization draft yet',
-    emptyBody: 'Add and check materials in Company knowledge, then run an analysis. Suggested roles, tools and workflows appear here with their sources.',
+    emptyTitle: 'No digital employees yet',
+    emptyBody: 'Add one now: give it a name and its responsibilities, then publish. Or add materials in Company knowledge and let Super Agent suggest employees.',
     goKnowledge: 'Go to Company knowledge',
-    rolesTitle: 'Roles ({n})',
+    rolesTitle: 'Suggested employees ({n})',
     toolsTitle: 'Tools ({n})',
     sopsTitle: 'Workflows ({n})',
     originInferred: 'From analysis',
     originManual: 'Added by hand · no source',
     privateSource: 'From your MCP source',
-    confirmedRole: 'Created · not connected',
+    confirmedRole: 'Published',
     duty: 'Responsibilities',
     prompt: 'System prompt',
-    promptDefault: 'Starting prompt — edit it to fit this role.',
+    promptDefault: 'Starting prompt — edit it to fit these responsibilities.',
     usesTools: 'Tools', joinsSops: 'Workflows', none: 'None yet',
     evidence: 'Sources ({n})',
     edit: 'Edit', save: 'Save', cancel: 'Cancel', remove: 'Delete', merge: 'Merge into…',
-    mergeInto: 'Merge “{name}” into', mergeChoose: 'Choose a role…', mergeConfirm: 'Merge',
-    mergeHint: 'The kept role takes over its tools and workflows.',
+    mergeInto: 'Merge “{name}” into', mergeChoose: 'Choose an employee…', mergeConfirm: 'Merge',
+    mergeHint: 'The kept employee takes over its tools and workflows.',
     removeConfirm: 'Delete “{name}”?', removeImpact: 'It is removed from: {list}. Future analyses will not add it back.', removeNoImpact: 'Future analyses will not add it back.',
-    removeTool: 'Delete “{name}”? Roles that use it: {list}.',
+    removeTool: 'Delete “{name}”? Employees that use it: {list}.',
     toolExisting: 'Reusable: {name}', toolPlaceholder: 'Missing · placeholder will be created', toolCreated: 'Placeholder created', toolReused: 'Reusing existing tool',
-    usedBy: 'Used by: {list}', joinedBy: 'Roles: {list}', nobody: 'no role yet',
-    addRole: 'Add a role', roleName: 'Role name', addRoleBtn: 'Add role',
-    confirmBtn: 'Create team', applyBtn: 'Save team changes', confirming: 'Saving team…',
+    usedBy: 'Used by: {list}', joinedBy: 'Employees: {list}', nobody: 'no employee yet',
+    addEmployee: 'Add a digital employee', roleName: 'Employee name', dutyHint: 'What it is responsible for, the standard it works to, and when it should come to you.',
+    publishBtn: 'Publish', publishing: 'Publishing…', publishOne: 'Publish this employee',
+    published: '“{name}” is published. Next, bind it to a computer under Linked computers.',
+    confirmBtn: 'Publish all', applyBtn: 'Publish all changes', confirming: 'Publishing…',
     summaryNew: 'Creates {e} employees (not connected, no tools or accounts granted) and {t} tool placeholders.',
     summaryChanged: 'You changed the draft since it was confirmed. Applying updates the same team — nothing is duplicated.',
     summaryDone: 'Team created: {e} employees and {t} tools. Next, review and publish the workflows.',
@@ -77,15 +79,16 @@ export const TEXT = {
     confirmedAt: 'Confirmed {date} · revision {n}',
     draft: 'Draft',
     unsaved: 'Changes not yet applied',
-    saved: 'Saved.', merged: 'Merged.', removed: 'Deleted.', added: 'Role added.',
+    saved: 'Saved.', merged: 'Merged.', removed: 'Deleted.',
     confirmed: 'Organization confirmed. {e} new employees, {t} new tool placeholders.',
     chipsMore: '+{n} more', chipsLess: 'Show less',
     confirmedRetired: 'Organization confirmed. {e} new, {r} removed, {t} new tool placeholders.',
     busyKept: 'Not removed yet because they still have work in progress: {names}. Reassign or finish that work, then confirm again.',
-    planPending: 'A plan for {n} roles is waiting below. Confirming now uses the current {m} roles — adopt the plan first if you want {n}.',
+    planPending: 'A plan for {n} employees is waiting below. Publishing all now uses the current {m} — adopt the plan first if you want {n}.',
     error_analysis_running: 'Analysis is still running.',
     error_analysis_stale: 'Materials changed during analysis. Run it again first.',
-    error_no_employees: 'The draft has no roles yet.',
+    error_no_employees: 'There are no suggested employees yet.',
+    error_invalid_input: 'Fill in the name and responsibilities.',
     error_not_found: 'That draft item no longer exists. Refresh and try again.',
     error_forbidden: 'You need owner or administrator access.',
     error_generic: 'The request did not complete. Try again.',
@@ -93,7 +96,7 @@ export const TEXT = {
   },
   zh: {
     title: '数字员工',
-    subtitle: '审阅从企业知识生成的组织草案：谁负责什么、用哪些工具、参与哪些流程。',
+    subtitle: '根据企业知识推荐的员工：谁负责什么、用哪些工具、参与哪些流程。可以逐个发布，也可以一次全部发布。',
     wallSubtitle: '明确职责、负责人和可用工具，再把工作交给合适的员工。',
     runWorkflow: '运行流程', resizeTeam: '调整团队人数（当前 {n} 人）', teamUpdated: '正式团队现有 {n} 名员工。',
     backToWall: '全部员工',
@@ -103,30 +106,32 @@ export const TEXT = {
     noAccess: '只有企业负责人或管理员可以审阅和确认组织。',
     blockedRunning: '分析仍在进行，完成后即可确认组织。',
     blockedStale: '资料在分析期间发生了变化，请重新分析后再确认。',
-    emptyTitle: '还没有组织草案',
-    emptyBody: '先在企业知识里添加并核对资料，然后开始分析。推荐的岗位、工具和流程会带着原文依据出现在这里。',
+    emptyTitle: '还没有数字员工',
+    emptyBody: '直接新增一个：写好名称和岗位职责就能发布。也可以先在企业知识里添加资料，让 Super Agent 推荐员工。',
     goKnowledge: '去企业知识',
-    rolesTitle: '岗位（{n}）',
+    rolesTitle: '推荐的员工（{n}）',
     toolsTitle: '工具（{n}）',
     sopsTitle: '流程（{n}）',
     originInferred: '分析推荐',
     originManual: '人工创建 · 无知识依据',
     privateSource: '来自你的 MCP 来源',
-    confirmedRole: '已创建 · 未连接',
-    duty: '职责',
+    confirmedRole: '已发布',
+    duty: '岗位职责',
     prompt: '系统提示词',
-    promptDefault: '初始提示词，可按岗位修改。',
+    promptDefault: '初始提示词，可按岗位职责修改。',
     usesTools: '工具', joinsSops: '流程', none: '暂无',
     evidence: '依据（{n}）',
     edit: '编辑', save: '保存', cancel: '取消', remove: '删除', merge: '合并到…',
-    mergeInto: '把「{name}」合并到', mergeChoose: '选择岗位…', mergeConfirm: '合并',
-    mergeHint: '保留的岗位会接手它的工具和流程。',
+    mergeInto: '把「{name}」合并到', mergeChoose: '选择员工…', mergeConfirm: '合并',
+    mergeHint: '保留的员工会接手它的工具和流程。',
     removeConfirm: '删除「{name}」？', removeImpact: '会从这些地方移除：{list}。之后重新分析也不会再加回。', removeNoImpact: '之后重新分析也不会再加回。',
-    removeTool: '删除「{name}」？正在使用它的岗位：{list}。',
+    removeTool: '删除「{name}」？正在使用它的员工：{list}。',
     toolExisting: '可复用：{name}', toolPlaceholder: '缺失 · 确认后建占位', toolCreated: '已建占位', toolReused: '复用已有工具',
-    usedBy: '使用岗位：{list}', joinedBy: '参与岗位：{list}', nobody: '暂无岗位',
-    addRole: '新增岗位', roleName: '岗位名称', addRoleBtn: '添加岗位',
-    confirmBtn: '创建团队', applyBtn: '保存团队修改', confirming: '正在保存团队…',
+    usedBy: '使用员工：{list}', joinedBy: '参与员工：{list}', nobody: '暂无员工',
+    addEmployee: '新增数字员工', roleName: '员工名称', dutyHint: '写清楚它负责什么、按什么标准做、什么情况要找你。',
+    publishBtn: '发布', publishing: '正在发布…', publishOne: '发布这个员工',
+    published: '已发布「{name}」。下一步：在「已连接的电脑」里把它绑到一台电脑上。',
+    confirmBtn: '全部发布', applyBtn: '发布全部修改', confirming: '正在发布…',
     summaryNew: '将创建 {e} 名数字员工（未连接，不授予工具或账号）和 {t} 个工具占位。',
     summaryChanged: '确认之后草案有改动。应用修改会更新同一套团队，不会重复创建。',
     summaryDone: '团队已建立：{e} 名数字员工、{t} 个工具。下一步审阅并发布流程。',
@@ -136,15 +141,16 @@ export const TEXT = {
     confirmedAt: '{date} 已确认 · 第 {n} 版',
     draft: '草案',
     unsaved: '有未应用的修改',
-    saved: '已保存。', merged: '已合并。', removed: '已删除。', added: '已添加岗位。',
+    saved: '已保存。', merged: '已合并。', removed: '已删除。',
     confirmed: '组织已确认。新建 {e} 名员工、{t} 个工具占位。',
     chipsMore: '另有 {n} 项', chipsLess: '收起',
     confirmedRetired: '组织已确认。新建 {e} 名、移除 {r} 名员工，新建 {t} 个工具占位。',
     busyKept: '以下员工还有进行中的工作，暂未移除：{names}。请先改派或完成这些工作，再确认一次。',
-    planPending: '下方有一个 {n} 个岗位的人数方案还没采用。现在确认会按当前 {m} 个岗位创建员工；想要 {n} 个请先「采用这个方案」。',
+    planPending: '下方有一个 {n} 名员工的人数方案还没采用。现在全部发布会按当前 {m} 名员工；想要 {n} 名请先「采用这个方案」。',
     error_analysis_running: '分析仍在进行。',
     error_analysis_stale: '资料在分析期间有变化，请先重新分析。',
-    error_no_employees: '草案里还没有岗位。',
+    error_no_employees: '还没有推荐的员工。',
+    error_invalid_input: '请填写员工名称和岗位职责。',
     error_not_found: '该草案项已不存在，请刷新后重试。',
     error_forbidden: '需要企业负责人或管理员权限。',
     error_generic: '请求未完成，请重试。',
@@ -181,10 +187,10 @@ function ChipList({ items, t, limit = 6 }: { items: { key: string; label: string
   </span>;
 }
 
-export function RoleCard({ role, org, busy, t, onSave, onMerge, onRemove }: {
+export function RoleCard({ role, org, busy, t, onSave, onMerge, onRemove, onPublish }: {
   role: Role; org: Organization; busy: boolean; t: T;
   onSave: (role: Role, patch: { name: string; duty: string; prompt: string; tools: string[]; sops: string[] }) => Promise<boolean>;
-  onMerge: (role: Role, into: string) => void; onRemove: (role: Role) => void;
+  onMerge: (role: Role, into: string) => void; onRemove: (role: Role) => void; onPublish?: (role: Role) => void;
 }) {
   const [mode, setMode] = useState<'view' | 'edit' | 'merge' | 'remove'>('view');
   const [name, setName] = useState(role.name), [duty, setDuty] = useState(role.duty), [prompt, setPrompt] = useState(role.prompt);
@@ -262,12 +268,26 @@ export function RoleCard({ role, org, busy, t, onSave, onMerge, onRemove }: {
         </div>
       </div> : null}
       {org.canConfirm && mode === 'view' ? <div className="org-row org-role-actions">
+        {!role.employeeId && onPublish ? <button className="btn primary" type="button" disabled={busy || !!org.blocked} onClick={() => onPublish(role)}>{t('publishOne')}</button> : null}
         <button className="btn" type="button" disabled={busy} onClick={() => setMode('edit')}>{t('edit')}</button>
         {others.length ? <button className="btn" type="button" disabled={busy} onClick={() => setMode('merge')}>{t('merge')}</button> : null}
         <button className="btn org-quiet" type="button" disabled={busy} onClick={() => setMode('remove')}>{t('remove')}</button>
       </div> : null}
     </>}
   </article>;
+}
+
+/** "新增数字员工": a name and its responsibilities, published at once — no draft to review. */
+export function AddEmployeeForm({ busy, t, onPublish }: { busy: boolean; t: T; onPublish: (name: string, duty: string) => Promise<boolean> }) {
+  const [name, setName] = useState(''), [duty, setDuty] = useState('');
+  return <form className="org-edit" onSubmit={event => {
+    event.preventDefault();
+    void onPublish(name.trim(), duty.trim()).then(ok => { if (ok) { setName(''); setDuty(''); } });
+  }}>
+    <label className="field"><span>{t('roleName')}</span><input required maxLength={160} value={name} onChange={e => setName(e.target.value)} /></label>
+    <label className="field"><span>{t('duty')}</span><textarea required rows={3} maxLength={4000} value={duty} placeholder={t('dutyHint')} onChange={e => setDuty(e.target.value)} /></label>
+    <div className="org-row"><button className="btn primary" disabled={busy || !name.trim() || !duty.trim()}>{busy ? t('publishing') : t('publishBtn')}</button></div>
+  </form>;
 }
 
 /** #employees = card wall once the team exists; #employees?view=draft = the organization draft review. */
@@ -292,7 +312,6 @@ export function EmployeesPage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [newRole, setNewRole] = useState(''), [newDuty, setNewDuty] = useState('');
   const [removingTool, setRemovingTool] = useState<string | null>(null);
   const [planning, setPlanning] = useState(false);
   const planT = (key: keyof typeof PLAN_TEXT.en) => translate(PLAN_TEXT, lang, key);
@@ -330,10 +349,12 @@ export function EmployeesPage() {
   const mergeRole = (role: Role, into: string) => void run(() => post(`/recommendations/${encodeURIComponent(role.id)}/merge`, { into }), t('merged'));
   const removeRole = (role: Role) => void run(() => post(`/recommendations/${encodeURIComponent(role.id)}/delete`), t('removed'));
   const removeTool = (tool: ToolDraft) => void run(() => post(`/recommendations/${encodeURIComponent(tool.id)}/delete`), t('removed')).then(() => setRemovingTool(null));
-  async function addRole(event: FormEvent) {
-    event.preventDefault();
-    if (await run(() => post('/manual-roles', { name: newRole.trim(), description: newDuty.trim() }), t('added'))) { setNewRole(''); setNewDuty(''); }
+  async function addEmployee(name: string, duty: string) {
+    const ok = await run(() => post('/organization/employees', { name, description: duty }), t('published', { name }));
+    if (ok) window.location.hash = 'employees';
+    return ok;
   }
+  const publishRole = (role: Role) => void run(() => post(`/organization/roles/${encodeURIComponent(role.id)}/publish`), t('published', { name: role.name }));
   async function planTeam(count: number) {
     setBusy(true); setPlanning(true); setError(null); setNotice(null);
     try {
@@ -406,6 +427,10 @@ export function EmployeesPage() {
           initial={org.teamPlan?.stale ? undefined : org.teamPlan?.target} busy={busy} planning={planning} onPlan={count => void planTeam(count)} />
       </div>
     </details> : null}
+    {route.add && org?.canConfirm ? <section className="panel org-add-panel" aria-labelledby="org-add-title">
+      <h2 id="org-add-title">{t('addEmployee')}</h2>
+      <AddEmployeeForm busy={busy} t={t} onPublish={addEmployee} />
+    </section> : null}
     <EmployeeWall employees={team} hasDraft={!!org && org.blocked !== 'no_employees'}
       onManage={employee => { window.location.hash = `employees?manage=${encodeURIComponent(employee.id)}`; }} />
     <EmployeeFeedback employees={team} />
@@ -434,7 +459,8 @@ export function EmployeesPage() {
     {org && org.blocked === 'no_employees' ? <section className="panel org-empty">
       <h2>{t('emptyTitle')}</h2>
       <p className="helper">{t('emptyBody')}</p>
-      <a className="btn primary" href="#knowledge">{t('goKnowledge')}</a>
+      {org.canConfirm ? <AddEmployeeForm busy={busy} t={t} onPublish={addEmployee} /> : null}
+      <a className="btn" href="#knowledge">{t('goKnowledge')}</a>
     </section> : null}
 
     {org && org.blocked !== 'no_employees' ? <>
@@ -453,15 +479,10 @@ export function EmployeesPage() {
         <section className="org-roles" aria-labelledby="org-roles-title">
           <h2 id="org-roles-title">{t('rolesTitle', { n: org.employees.length })}</h2>
           {org.employees.map(role => <RoleCard key={`${role.id}:${role.name}:${role.duty}:${role.prompt}:${role.tools.join()}:${role.sops.join()}`}
-            role={role} org={org} busy={busy} t={t} onSave={saveRole} onMerge={mergeRole} onRemove={removeRole} />)}
+            role={role} org={org} busy={busy} t={t} onSave={saveRole} onMerge={mergeRole} onRemove={removeRole} onPublish={publishRole} />)}
           {org.canConfirm ? <details className="org-add" open={route.add || undefined}>
-            <summary>{t('addRole')}</summary>
-            <form className="org-edit" onSubmit={addRole}>
-              <label className="field"><span>{t('roleName')}</span><input required maxLength={160} value={newRole} onChange={e => setNewRole(e.target.value)} /></label>
-              <label className="field"><span>{t('duty')}</span><textarea required rows={3} maxLength={4000} value={newDuty} onChange={e => setNewDuty(e.target.value)} /></label>
-              <p className="helper">{t('originManual')}</p>
-              <button className="btn" disabled={busy || !newRole.trim() || !newDuty.trim()}>{t('addRoleBtn')}</button>
-            </form>
+            <summary>{t('addEmployee')}</summary>
+            <AddEmployeeForm busy={busy} t={t} onPublish={addEmployee} />
           </details> : null}
         </section>
 

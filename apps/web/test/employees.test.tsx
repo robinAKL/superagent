@@ -53,7 +53,7 @@ describe('Digital employees: role card', () => {
     expect(render('en')).not.toMatch(/[一-鿿]/);
     const zh = render('zh', { origin: 'manual', employeeId: 'emp-org-r1' });
     expect(zh).toContain('人工创建 · 无知识依据');
-    expect(zh).toContain('已创建 · 未连接');
+    expect(zh).toContain('已发布');
     expect(zh).toContain('合并到…');
     for (const key of Object.keys(TEXT.en)) expect(TEXT.zh, key).toHaveProperty(key);
   });

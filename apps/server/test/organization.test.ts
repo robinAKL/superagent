@@ -88,6 +88,37 @@ describe('organization draft → confirmed team (PRD §3.3)', () => {
     expect((await f.service.organization(owner)).changedSinceConfirmation).toBe(false);
   });
 
+  it('adds an employee by hand and publishes it at once; a later confirmation keeps it', async () => {
+    const f = await fixture();
+    const result = await f.service.createEmployee(owner, { name: '报价助理', description: '按协议价核对报价，把要拍板的挑出来' });
+    expect(result.published).toEqual([expect.objectContaining({ name: '报价助理', created: true })]);
+    expect(f.employees().list().map(e => e.name)).toEqual(['报价助理']);
+    expect(f.employees().list()[0]).toMatchObject({ duty: '按协议价核对报价，把要拍板的挑出来', source: 'manual' });
+    const org = await f.service.organization(owner);
+    expect(org.employees.find(e => e.name === '报价助理')?.employeeId).toBe(result.published[0]!.employeeId);
+    // The recommended roles stay drafts until published; confirming everything later keeps the hand-added one.
+    expect(org.employees.filter(e => !e.employeeId)).toHaveLength(2);
+    await f.service.confirmOrganization(owner);
+    expect(f.employees().list().map(e => e.name).sort()).toEqual(['信用分析员', '报价助理', '订单审核员'].sort());
+    await expect(f.service.createEmployee(owner, { name: '', description: 'x' })).rejects.toMatchObject({ code: 'invalid_input' });
+    await expect(f.service.createEmployee({ ...owner, roles: ['member'] }, { name: 'a', description: 'b' })).rejects.toBeTruthy();
+  });
+
+  it('publishes one recommended role with its tools, leaving the other roles as drafts', async () => {
+    const f = await fixture();
+    const reviewer = (await f.service.organization(owner)).employees.find(e => e.key === 'order-reviewer')!;
+    const result = await f.service.publishRole(owner, reviewer.id);
+    expect(result).toMatchObject({ revision: 1, createdTools: 1 });
+    expect(f.employees().list().map(e => e.name)).toEqual(['订单审核员']);
+    expect(f.tools().list()).toHaveLength(1);
+    const again = await f.service.publishRole(owner, reviewer.id);
+    expect(again.published[0]!.created).toBe(false);
+    expect(f.employees().list()).toHaveLength(1);
+    const org = await f.service.organization(owner);
+    expect(org.employees.find(e => e.key === 'credit-analyst')?.employeeId).toBeNull();
+    await expect(f.service.publishRole(owner, 'missing')).rejects.toMatchObject({ code: 'not_found' });
+  });
+
   it('merging moves tools and SOPs to the kept role and removes the merged one', async () => {
     const f = await fixture();
     const org = await f.service.organization(owner);
