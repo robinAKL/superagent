@@ -9,6 +9,7 @@ import { DEFAULT_POLICY, cleanPolicy, decide, describe, mcpToolsByServer, parseM
 import { execFile } from 'node:child_process';
 import { AGENTS } from './agents.mjs';
 import { desktopNotice, desktopState } from './desktop.mjs';
+import { openForSignIn } from './browser-mcp.mjs';
 
 /** The local clients Link can run work with (agents.mjs). */
 export const CLIENTS = AGENTS;
@@ -87,6 +88,8 @@ export class WorkerLink {
   #onAuth;
   #onMcpLogin;
   #onClientSetup;
+  #openBrowser;
+  #onBrowserSignIn;
   #discoverClients;
   #desktop;
   /** Local clients as last checked, refreshed hourly (every minute while a person sets one up). */
@@ -102,6 +105,7 @@ export class WorkerLink {
   constructor(config, token, {
     fetcher = fetch, launch = launchAgent, launchWithApprovals = launchCodexWithApprovals,
     sleep = delay, onStatus = () => {}, onTask = () => {}, onAuth = () => {}, onMcpLogin = () => {}, onClientSetup = () => {}, discover = discoverClients, renameState = rename, desktop = desktopState,
+    openBrowser = openForSignIn, onBrowserSignIn = () => {},
   } = {}) {
     const endpoint = new URL(config.endpoint);
     if ((endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(endpoint.hostname)))
@@ -122,6 +126,8 @@ export class WorkerLink {
     this.#onAuth = onAuth;
     this.#onMcpLogin = onMcpLogin;
     this.#onClientSetup = onClientSetup;
+    this.#openBrowser = openBrowser;
+    this.#onBrowserSignIn = onBrowserSignIn;
     this.#discoverClients = discover;
     this.#desktop = desktop;
     this.#renameState = renameState;
@@ -335,6 +341,17 @@ export class WorkerLink {
     this.#onClientSetup(agent, action);
   }
 
+  /**
+   * The web page asks to open the employees' browser here so the person can sign in to a website. A task using the
+   * background browser right now keeps it: the window opens next time.
+   */
+  #browserSignIn(event) {
+    const url = typeof event.payload?.url === 'string' ? event.payload.url : undefined;
+    let result;
+    try { result = this.#active ? 'busy' : this.#openBrowser({ ...(url ? { url } : {}) }); } catch { result = 'missing'; }
+    this.#onBrowserSignIn(result);
+  }
+
   #refreshClients() {
     if (Date.now() - this.#clientsCheckedAt < (Date.now() < this.#clientsWatchUntil ? 60_000 : 60 * 60_000)) return;
     this.#clientsCheckedAt = Date.now();
@@ -358,6 +375,7 @@ export class WorkerLink {
       if (event.kind === 'cancel') this.#cancel(event);
       if (event.kind === 'mcp_login') this.#mcpLogin(event);
       if (event.kind === 'client_setup') this.#clientSetup(event);
+      if (event.kind === 'browser_sign_in') this.#browserSignIn(event);
       this.#state.cursor = event.seq;
       await this.#save();
     }

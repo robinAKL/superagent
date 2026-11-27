@@ -87,3 +87,15 @@ it('the computer reports its local clients; the page can ask it to install, sign
   expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/client-setup`, payload: { agent: 'codex', action: 'run' } })).statusCode).toBe(400);
   expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/client-setup`, headers: { 'x-test-user': 'someone|employee' }, payload: { agent: 'codex', action: 'install' } })).statusCode).toBe(404);
 });
+
+it('the page can open the employees\' browser on the computer for the person there to sign in to websites', async () => {
+  const open = (payload: unknown, headers: Record<string, string> = {}) => a.inject({ method: 'POST', url: `/api/v1/workers/${id}/browser-sign-in`, headers, payload: payload as object });
+  expect((await open({})).json()).toEqual({ opened: true });
+  expect((await events()).filter((event) => event.kind === 'browser_sign_in')).toEqual([expect.objectContaining({ payload: {} })]);
+  // A second click within half a minute does not queue another window.
+  expect((await open({})).json()).toEqual({ opened: true, again: false });
+  // Only web addresses, and only for someone who manages the computer.
+  expect((await open({ url: 'file:///C:/Windows/win.ini' })).statusCode).toBe(400);
+  expect((await open({ url: 'not a url' })).statusCode).toBe(400);
+  expect((await open({}, { 'x-test-user': 'someone|employee' })).statusCode).toBe(404);
+});

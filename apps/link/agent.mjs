@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { runCodexTurn } from './codex-app-server.mjs';
 import { agentSpec, approvalArgs, commandLine, headlessArgs } from './agents.mjs';
-import { findBrowser } from './browser-mcp.mjs';
+import { browserProfile, findBrowser } from './browser-mcp.mjs';
 
 import { AUTH_ERROR, failureReason } from './agent-errors.mjs';
 const RESULT_LIMIT = 60_000;
@@ -81,14 +81,15 @@ export function browserServer(project, env = process.env, find = findBrowser) {
     args: [BROWSER_TOOL],
     env: {
       SUPERAGENT_BROWSER: executable,
-      SUPERAGENT_BROWSER_PROFILE: join(env.LOCALAPPDATA || tmpdir(), 'SuperAgentLink', 'browser-profile'),
+      SUPERAGENT_BROWSER_PROFILE: browserProfile(env),
       SUPERAGENT_BROWSER_OUT: project.directory,
     },
   };
 }
 
 /** Said before the task, so the client reaches for the background browser rather than the screen. */
-export const BROWSER_HINT = '（SuperAgent Link：要打开网页、查资料或填写网页表单时，请使用 superagent_browser 后台浏览器工具（browser_open、browser_read、browser_click、browser_type、browser_screenshot）。它在后台运行，电脑锁屏或远程桌面最小化时也能用。不要去操作屏幕上的窗口，也不要控制用户自己打开的浏览器。）';
+export const BROWSER_HINT = '（SuperAgent Link：要打开网页、查资料或填写网页表单时，请使用 superagent_browser 后台浏览器工具（browser_open、browser_read、browser_click、browser_type、browser_screenshot）。它在后台运行，电脑锁屏或远程桌面最小化时也能用。不要去操作屏幕上的窗口，也不要控制用户自己打开的浏览器。'
+  + '如果网站要求登录，不要尝试输入账号密码，直接回报：“没有做成：<网站> 需要登录。请在这台电脑的 Link 托盘里点「员工浏览器（登录网站）」，或在网页「已连接的电脑」里点「打开员工浏览器」，登录一次后告诉我重试。”）';
 
 /** Codex takes MCP servers as -c overrides; JSON strings are valid TOML basic strings. */
 export function codexBrowserArgs(server) {

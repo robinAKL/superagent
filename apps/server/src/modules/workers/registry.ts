@@ -138,7 +138,7 @@ export interface HeartbeatInput {
  * and gets every event after it, so nothing sent while it slept is lost. Delivery is at-least-once; the worker
  * de-duplicates by event id.
  */
-export const WORKER_EVENT_KINDS = ['wake', 'cancel', 'message', 'mcp_login', 'client_setup'] as const;
+export const WORKER_EVENT_KINDS = ['wake', 'cancel', 'message', 'mcp_login', 'client_setup', 'browser_sign_in'] as const;
 export type WorkerEventKind = (typeof WORKER_EVENT_KINDS)[number];
 export const EVENTS_PAGE = 100;
 
