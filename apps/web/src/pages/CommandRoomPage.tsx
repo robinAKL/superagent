@@ -199,6 +199,19 @@ export function mergeRoomMessages(current: readonly ApiMessage[], incoming: read
 }
 
 /** Picking an employee writes "@name " into the draft. A trailing "@" the person just typed is not doubled. */
+/**
+ * What a key does while the @ list is open: arrows move the highlight (wrapping round), Enter or Tab picks the
+ * highlighted employee instead of sending, Escape closes the list. Any other key is left to the text box.
+ */
+export function mentionKey(key: string, active: number, count: number): { move: number } | 'pick' | 'close' | null {
+  if (key === 'Escape') return 'close';
+  if (count === 0) return null;
+  if (key === 'ArrowDown') return { move: (active + 1) % count };
+  if (key === 'ArrowUp') return { move: (active - 1 + count) % count };
+  if (key === 'Enter' || key === 'Tab') return 'pick';
+  return null;
+}
+
 export function insertMention(draft: string, name: string): string {
   const base = draft.endsWith('@') ? draft.slice(0, -1) : draft;
   const gap = base === '' || /\s$/u.test(base) ? '' : ' ';
@@ -423,6 +436,8 @@ export function CommandRoomPage() {
   const [draft, setDraft] = useState('');
   const [followupId, setFollowupId] = useState<string | null>(null);
   const [mentionOpen, setMentionOpen] = useState(false);
+  /** The highlighted row of the @ list, moved with the arrow keys. */
+  const [mentionActive, setMentionActive] = useState(0);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
   const [reportDraft, setReportDraft] = useState('');
@@ -549,7 +564,7 @@ export function CommandRoomPage() {
   function changeDraft(value: string) {
     setDraft(value);
     if (viewerId) writeDraft(viewerId, value);
-    if (value.endsWith('@')) setMentionOpen(true);
+    if (value.endsWith('@')) { setMentionOpen(true); setMentionActive(0); }
   }
 
   function pickMention(name: string) {
@@ -1032,9 +1047,18 @@ export function CommandRoomPage() {
                 value={draft}
                 disabled={!viewer}
                 onChange={(event) => changeDraft(event.target.value)}
+                aria-controls={mentionOpen ? 'room-mentions' : undefined}
+                aria-activedescendant={mentionOpen && employees[mentionActive] ? `mention-${employees[mentionActive]!.id}` : undefined}
                 onKeyDown={(event) => {
-                  if (event.key === 'Escape' && mentionOpen) {
-                    setMentionOpen(false);
+                  const step = mentionOpen && !event.nativeEvent.isComposing && !event.shiftKey ? mentionKey(event.key, mentionActive, employees.length) : null;
+                  if (step) {
+                    event.preventDefault();
+                    if (step === 'close') setMentionOpen(false);
+                    else if (step === 'pick') pickMention(employees[mentionActive]!.name);
+                    else {
+                      setMentionActive(step.move);
+                      document.getElementById(`mention-${employees[step.move]!.id}`)?.scrollIntoView({ block: 'nearest' });
+                    }
                     return;
                   }
                   if (event.nativeEvent.isComposing || roomDraftKey(event.key, event.shiftKey) !== 'send') return;
@@ -1044,11 +1068,13 @@ export function CommandRoomPage() {
                 placeholder={followupTask ? t('写下要追问的内容，原任务的员工和上下文会带上。') : t('发消息，或 @数字员工…')}
               />
               {mentionOpen ? (
-                <div className="exec-mentions" role="listbox" aria-label={t('选择数字员工')}>
+                <div className="exec-mentions" id="room-mentions" role="listbox" aria-label={t('选择数字员工')}>
                   {employees.length === 0 ? (
                     <p>{t('还没有可以指派的数字员工。')}</p>
-                  ) : employees.map((employee) => (
-                    <button type="button" role="option" aria-selected="false" key={employee.id} data-mention={employee.id} title={employee.duty || undefined} onClick={() => pickMention(employee.name)}>
+                  ) : employees.map((employee, index) => (
+                    <button type="button" role="option" id={`mention-${employee.id}`} aria-selected={index === mentionActive} className={index === mentionActive ? 'is-active' : undefined}
+                      key={employee.id} data-mention={employee.id} title={employee.duty || undefined}
+                      onMouseEnter={() => setMentionActive(index)} onClick={() => pickMention(employee.name)}>
                       {/* Name and state only: the full duty is long, and shows on hover. */}
                       <strong>@{employee.name}</strong>
                       <span>{t(EMPLOYEE_STATE[employee.status])}</span>
@@ -1057,7 +1083,7 @@ export function CommandRoomPage() {
                 </div>
               ) : null}
               <div className="exec-composer-actions room-composer-bar">
-                <button type="button" className="room-chip room-chip-action" aria-haspopup="listbox" aria-expanded={mentionOpen} disabled={!viewer} onClick={() => setMentionOpen((open) => !open)}>{t('@ 提及')}</button>
+                <button type="button" className="room-chip room-chip-action" aria-haspopup="listbox" aria-expanded={mentionOpen} disabled={!viewer} onClick={() => { setMentionActive(0); setMentionOpen((open) => !open); input.current?.focus(); }}>{t('@ 提及')}</button>
                 <span>{t('Enter 发送，Shift+Enter 换行')}</span>
                 <button type="submit" className="room-send" disabled={sending || !viewer}><Icon name="send" size={16} />{t('发送')}</button>
               </div>
