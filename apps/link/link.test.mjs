@@ -28,6 +28,9 @@ else {
 }
 `;
 
+// These tests are about Link, not the background browser: keep their command lines the same on every machine.
+process.env.SUPERAGENT_BROWSER_DISABLED = '1';
+
 async function fixture(t, agent = 'codex', options = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'superagent-link-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -72,6 +75,7 @@ async function fixture(t, agent = 'codex', options = {}) {
       fetcher, launch: options.launch, launchWithApprovals: options.launchWithApprovals,
       sleep: options.sleep, renameState: options.renameState, onAuth: (agent) => control.authAgents.push(agent),
       ...(options.onStatus ? { onStatus: options.onStatus } : {}),
+      desktop: options.desktop ?? (async () => 'available'),
       onMcpLogin: (server) => control.mcpLogins.push(server),
       onClientSetup: (agent, action) => control.clientSetups.push([agent, action]),
       ...(options.discover ? { discover: options.discover } : {}),
@@ -87,6 +91,40 @@ async function fixture(t, agent = 'codex', options = {}) {
     clientSetup: (seq, agent, action) => events.push({ seq, kind: 'client_setup', payload: { agent, action } }),
   };
 }
+
+test('Codex gets the background browser and is told to use it instead of the screen', async (t) => {
+  // Any existing file stands in for Chrome here: what matters is what Link hands Codex.
+  const saved = { disabled: process.env.SUPERAGENT_BROWSER_DISABLED, browser: process.env.SUPERAGENT_BROWSER };
+  process.env.SUPERAGENT_BROWSER_DISABLED = '';
+  process.env.SUPERAGENT_BROWSER = process.execPath;
+  t.after(() => { process.env.SUPERAGENT_BROWSER_DISABLED = saved.disabled; process.env.SUPERAGENT_BROWSER = saved.browser ?? ''; });
+  const f = await fixture(t, 'codex');
+  f.wake(1, 'Open the supplier site');
+  const link = f.make();
+  await link.poll(undefined, 0);
+  await link.runNext();
+  const [agent] = await f.args();
+  const overrides = agent.argv.filter((arg, i) => agent.argv[i - 1] === '-c');
+  assert.equal(overrides.length, 3);
+  assert.match(overrides[0], /^mcp_servers\.superagent_browser\.command=".+"$/);
+  assert.match(overrides[1], /^mcp_servers\.superagent_browser\.args=\[".+browser-mcp\.mjs"\]$/);
+  assert.match(overrides[2], /SUPERAGENT_BROWSER = ".+", SUPERAGENT_BROWSER_PROFILE = ".+browser-profile", SUPERAGENT_BROWSER_OUT = ".+"/);
+  assert.ok(agent.prompt.startsWith('（SuperAgent Link：'));
+  assert.ok(agent.prompt.endsWith('Open the supplier site'));
+});
+
+test('a locked screen is said in the room before the task, and the client is told not to try it', async (t) => {
+  const f = await fixture(t, 'codex', { desktop: async () => 'locked' });
+  f.control.landed = [];
+  f.wake(1, 'Open the accounting app');
+  const link = f.make();
+  await link.poll(undefined, 0);
+  await link.runNext();
+  assert.deepEqual(f.control.landed.slice(0, 2), ['Link received the task.', '这台电脑的屏幕现在不可用（已锁屏），需要操作屏幕上窗口的事这次做不了；网页会用后台浏览器处理。']);
+  const [agent] = await f.args();
+  assert.match(agent.prompt, /^（SuperAgent Link：这台电脑的屏幕现在不可用（已锁屏）/);
+  assert.ok(agent.prompt.endsWith('Open the accounting app'));
+});
 
 test('Codex runs with the trust the employee was given on this computer', async (t) => {
   const f = await fixture(t, 'codex', { policies: { p1: { mode: 'full' } } });
@@ -158,7 +196,7 @@ test('runs Claude Code with a fixed headless adapter', async (t) => {
   assert.deepEqual(withoutPermissionHook(argv), ['--print', '--output-format', 'stream-json', '--verbose']);
   // Permission prompts go to Link's own tool, never to a terminal nobody is watching.
   assert.equal(argv[argv.indexOf('--permission-prompt-tool') + 1], 'mcp__superagent_link__approve');
-  assert.match(argv[argv.indexOf('--mcp-config') + 1], /superagent-link-permissions-.+\.json$/);
+  assert.match(argv[argv.indexOf('--mcp-config') + 1], /superagent-link-mcp-.+.json$/);
   assert.ok(f.requests.some(({ path, body }) => path.endsWith('/report') && body.body === 'Result: Summarise'));
 });
 

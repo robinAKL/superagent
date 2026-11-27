@@ -179,7 +179,11 @@ try {
   await waitFor('Windows to show the tray sleep request during the task', trayRequestsSystemAwake);
   await writeFile(finishTask, '');
   await waitFor('the installed worker to return the CLI result', () => reports.length > 0);
-  assert.deepEqual(reports, ['Executed: Check the installed client']);
+  assert.equal(reports.length, 1);
+  // The installed client is told about the background browser (Edge is on every Windows), then gets the task itself.
+  assert.ok(reports[0].startsWith('Executed: （SuperAgent Link：'), reports[0]);
+  assert.ok(reports[0].includes('superagent_browser'), reports[0]);
+  assert.ok(reports[0].endsWith('Check the installed client'), reports[0]);
   await waitFor('the tray to release its sleep request after task completion', async () =>
     (await readLog()).includes('LINK_TASK:end') && !(await trayRequestsSystemAwake()));
   console.log('Installed dispatch verified: long poll, local CLI fixture, result report and Windows sleep request lifecycle.');

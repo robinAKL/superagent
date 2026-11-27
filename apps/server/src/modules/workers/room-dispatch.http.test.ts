@@ -89,6 +89,8 @@ it('assigns once to the bound device while offline and accepts only its report',
       });
       return new Response(response.body, { status: response.statusCode });
     };
+    // This is about dispatch, not the background browser: the task's words reach the agent unchanged.
+    process.env.SUPERAGENT_BROWSER_DISABLED = '1';
     const link = new WorkerLink({
       endpoint: 'http://127.0.0.1', stateFile,
       projects: { [projectId]: { directory, executable, agent: 'codex' } },
@@ -102,6 +104,7 @@ it('assigns once to the bound device while offline and accepts only its report',
     expect(result.json()).toMatchObject({ kind: 'report', taskIds: [task.id] });
     expect((await report(target.token)).json().id).toBe(result.json().id);
   } finally {
+    delete process.env.SUPERAGENT_BROWSER_DISABLED;
     await app.close();
     await rm(directory, { recursive: true, force: true });
   }

@@ -114,6 +114,7 @@ const ENGLISH: Readonly<Record<string, string>> = {
   "等待": "Waiting",
   "等待连接": "Waiting for connection",
   "执行失败": "Failed on the computer",
+  "没有做成": "Not done",
   "等待本地登录": "Waiting for sign-in on the computer",
   "进度": "Update",
   "等待补充": "Waiting for information",

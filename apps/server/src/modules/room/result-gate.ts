@@ -23,6 +23,25 @@ export function permissionHold(toolId: string): ResultHold {
   return { reason: '未授权的工具', responsible: '企业负责人', toolId };
 }
 
+/**
+ * A report in which the employee says it did not get the work done ("T-320 未完成：…", "无法打开…", "请手动…",
+ * "Access is denied"). Only the first line is read: that is where an employee says how it went, and a result that
+ * quotes an error further down is still a result.
+ */
+const NOT_DONE = /(未完成|没有完成|没能完成|没有做成|没做成|未能(完成|打开|执行|找到|获取|访问|显示|操作)|无法(完成|打开|执行|访问|获取|找到|操作|显示|继续)|做不了|没办法(完成|打开|做)|执行失败|操作失败|请(你)?手动|需要你(手动|先)|拒绝访问|access is denied|permission denied|unable to|could not (complete|open|access|finish)|couldn't (complete|open|access|finish)|failed to)/iu;
+
+export function reportSaysNotDone(body: string): boolean {
+  const first = body.trim().split(/\r?\n/u)[0] ?? '';
+  return NOT_DONE.test(first.slice(0, 160));
+}
+
+/** The first sentence of a report, for Super Agent to quote when it says what is in the way. */
+export function reportReason(body: string): string {
+  const line = body.trim().split(/\r?\n/u)[0] ?? '';
+  const sentence = /^[\s\S]*?[。！？!?]/u.exec(line)?.[0] ?? line;
+  return sentence.length > 120 ? `${sentence.slice(0, 119)}…` : sentence;
+}
+
 export function evidenceFromReport(body: string): ResultEvidence {
   return { fields: { subject: null, body }, sent: false };
 }

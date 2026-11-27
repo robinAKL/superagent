@@ -1,7 +1,7 @@
 import { isLinkAgent, type TaskStatus } from '@superagent/shared';
 import { asksAvailability, asksPresence, isExternalAction, isGreeting, needsParameters, workText, askedTaskNumber, smallTalkReply } from './intent.js';
 import {
-  acceptSupplement, applyAsyncReport, evidenceFromReport, permissionHold, resultOverview, summaryLabel, verificationOf,
+  acceptSupplement, applyAsyncReport, evidenceFromReport, permissionHold, reportReason, reportSaysNotDone, resultOverview, summaryLabel, verificationOf,
   type ResultEvidence, type ResultHold, type ResultVerification,
 } from './result-gate.js';
 
@@ -145,6 +145,8 @@ const COMPLETED: ReadonlySet<TaskStatus> = new Set<TaskStatus>(['completed', 're
 const WAITING_CONNECTION = '等待连接';
 const WAITING_FAILED = '执行失败';
 const WAITING_SIGN_IN = '等待本地登录';
+/** The employee reported back that it could not do the work: a person decides what happens next. */
+const WAITING_NOT_DONE = '没有做成';
 const ACTIVE = (employee: EmployeeRef | undefined) => employee?.status === 'active';
 
 /** Set by the running app: a bound Link computer may still be working for this employee (see workers/presence). */
@@ -503,8 +505,11 @@ export class CommandRoom {
     task.verification = verificationOf(task.evidence, { contract: task.contract?.criteria ?? null });
     // Product decision (T-86): an employee report completes the task directly unless evidence verification fails,
     // in which case the task stays in 'assigned' (in-progress) so the assignee can submit a corrected report.
-    task.status = task.verification === 'failed' ? 'assigned' : 'completed';
-    return this.push({
+    // A report in which the employee says it could not do the work is not a completion: it waits for a person.
+    const notDone = task.verification !== 'failed' && reportSaysNotDone(text);
+    task.status = task.verification === 'failed' ? 'assigned' : notDone ? 'waiting' : 'completed';
+    if (notDone) task.waitingReason = WAITING_NOT_DONE;
+    const reported = this.push({
       roomId: task.roomId,
       tenantId: task.tenantId,
       authorUserId,
@@ -514,6 +519,15 @@ export class CommandRoom {
       taskIds: [task.id],
       kind: 'report',
     });
+    if (notDone) {
+      const code = taskCode(task);
+      this.push({
+        roomId: task.roomId, tenantId: task.tenantId, authorUserId: 'super-agent',
+        body: `${code}「${shortTitle(task.title)}」没有做成，我没有把它算作完成。原因：${reportReason(text)} 你可以补充说明后告诉我“重试 ${code}”，或在任务上取消。`,
+        clientMessageId: `notdone:${clientMessageId}`, mentions: [], taskIds: [task.id], kind: 'nudge',
+      });
+    }
+    return reported;
   }
 
   /** The person who asked, or an owner, withdraws a task that has not been reported yet. */

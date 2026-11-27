@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { runCodexTurn } from './codex-app-server.mjs';
 import { agentSpec, approvalArgs, commandLine, headlessArgs } from './agents.mjs';
+import { findBrowser } from './browser-mcp.mjs';
 
 import { AUTH_ERROR, failureReason } from './agent-errors.mjs';
 const RESULT_LIMIT = 60_000;
@@ -65,19 +66,56 @@ const PERMISSION_TOOL = join(dirname(fileURLToPath(import.meta.url)), 'permissio
  * Claude Code's permission hook: a one-off MCP config with Link's permission tool, pointed at this task's loopback
  * approver. The config file holds no token, only the local address and the task's secret, and is removed afterwards.
  */
-function permissionArgs(approver) {
-  if (!approver) return { args: [], cleanup: () => {} };
-  const file = join(tmpdir(), `superagent-link-permissions-${randomUUID()}.json`);
-  writeFileSync(file, JSON.stringify({
-    mcpServers: {
-      superagent_link: {
-        command: process.execPath, args: [PERMISSION_TOOL],
-        env: { SUPERAGENT_APPROVER_URL: approver.url, SUPERAGENT_APPROVER_SECRET: approver.secret },
-      },
-    },
-  }), { mode: 0o600 });
+const BROWSER_TOOL = join(dirname(fileURLToPath(import.meta.url)), 'browser-mcp.mjs');
+
+/**
+ * The background browser (browser-mcp.mjs) as an MCP server for one project, or null on a computer without Chrome or
+ * Edge. Everything it needs is passed explicitly: a client may start MCP servers with a trimmed environment.
+ */
+export function browserServer(project, env = process.env, find = findBrowser) {
+  if (env.SUPERAGENT_BROWSER_DISABLED === '1') return null;
+  const executable = find(env);
+  if (!executable) return null;
   return {
-    args: ['--mcp-config', file, '--permission-prompt-tool', 'mcp__superagent_link__approve'],
+    command: process.execPath,
+    args: [BROWSER_TOOL],
+    env: {
+      SUPERAGENT_BROWSER: executable,
+      SUPERAGENT_BROWSER_PROFILE: join(env.LOCALAPPDATA || tmpdir(), 'SuperAgentLink', 'browser-profile'),
+      SUPERAGENT_BROWSER_OUT: project.directory,
+    },
+  };
+}
+
+/** Said before the task, so the client reaches for the background browser rather than the screen. */
+export const BROWSER_HINT = '（SuperAgent Link：要打开网页、查资料或填写网页表单时，请使用 superagent_browser 后台浏览器工具（browser_open、browser_read、browser_click、browser_type、browser_screenshot）。它在后台运行，电脑锁屏或远程桌面最小化时也能用。不要去操作屏幕上的窗口，也不要控制用户自己打开的浏览器。）';
+
+/** Codex takes MCP servers as -c overrides; JSON strings are valid TOML basic strings. */
+export function codexBrowserArgs(server) {
+  if (!server) return [];
+  const env = Object.entries(server.env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join(', ');
+  return [
+    '-c', `mcp_servers.superagent_browser.command=${JSON.stringify(server.command)}`,
+    '-c', `mcp_servers.superagent_browser.args=[${server.args.map((arg) => JSON.stringify(arg)).join(', ')}]`,
+    '-c', `mcp_servers.superagent_browser.env={ ${env} }`,
+  ];
+}
+
+/** Claude Code's MCP servers for one run: the background browser, and the permission tool when the room approves. */
+function mcpArgs(approver, browser) {
+  const servers = {};
+  if (approver) {
+    servers.superagent_link = {
+      command: process.execPath, args: [PERMISSION_TOOL],
+      env: { SUPERAGENT_APPROVER_URL: approver.url, SUPERAGENT_APPROVER_SECRET: approver.secret },
+    };
+  }
+  if (browser) servers.superagent_browser = browser;
+  if (!Object.keys(servers).length) return { args: [], cleanup: () => {} };
+  const file = join(tmpdir(), `superagent-link-mcp-${randomUUID()}.json`);
+  writeFileSync(file, JSON.stringify({ mcpServers: servers }), { mode: 0o600 });
+  return {
+    args: ['--mcp-config', file, ...(approver ? ['--permission-prompt-tool', 'mcp__superagent_link__approve'] : [])],
     cleanup: () => { try { rmSync(file, { force: true }); } catch { /* temp file */ } },
   };
 }
@@ -86,15 +124,19 @@ function permissionArgs(approver) {
  * One headless run of the project's client. Claude Code asks the room through `approver`; Codex and the other clients
  * (agents.mjs) get the employee's authorisation `mode` as their own sandbox or approval setting.
  */
-export function launchAgent(project, prompt, session, notify, approver = null, { mode = 'standard' } = {}) {
+export function launchAgent(project, prompt, session, notify, approver = null, { mode = 'standard', browser = browserServer(project) } = {}) {
   const codex = project.agent === 'codex';
   const claude = project.agent === 'claude-code';
-  const permissions = claude ? permissionArgs(approver) : { args: [], cleanup: () => {} };
+  // Claude Code and Codex get the background browser; the hint makes them use it instead of the screen.
+  const withBrowser = Boolean(browser) && (codex || claude);
+  if (withBrowser) prompt = `${BROWSER_HINT}\n\n${prompt}`;
+  const permissions = claude ? mcpArgs(approver, withBrowser ? browser : null) : { args: [], cleanup: () => {} };
   const spec = agentSpec(project.agent);
   // An employee's folder is often plain business files, not a git repository: Codex refuses to run there unless told
   // not to check ("Not inside a trusted directory and --skip-git-repo-check was not specified").
   const args = codex
-    ? ['exec', '--json', '--skip-git-repo-check', ...approvalArgs('codex', mode), ...(session ? ['resume', session] : []), '-']
+    ? ['exec', '--json', '--skip-git-repo-check', ...approvalArgs('codex', mode), ...codexBrowserArgs(withBrowser ? browser : null),
+      ...(session ? ['resume', session] : []), '-']
     : claude
       ? ['--print', '--output-format', 'stream-json', '--verbose', ...permissions.args, ...(session ? ['--resume', session] : [])]
       : headlessArgs(project.agent, { session, mode, prompt });
