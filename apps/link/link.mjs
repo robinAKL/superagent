@@ -423,12 +423,13 @@ export class WorkerLink {
           }
         };
         // Claude Code asks through Link's permission tool: the employee's mode decides, the room answers the rest.
-        // The other clients (Cursor, Copilot, Gemini, Qwen) take the employee's mode as their own approval setting.
+        // The other clients (Codex, Cursor, Copilot, Gemini, Qwen) take the employee's mode as their own setting;
+        // Codex set to ask the room for approvals keeps doing that instead.
         let mode;
         if (project.agent === 'claude-code') {
           approvals = new AbortController();
           approver = await this.#approver(job, await this.#policy(job), approvals.signal);
-        } else if (project.agent !== 'codex') {
+        } else if (!(project.agent === 'codex' && project.approvals === 'room')) {
           mode = (await this.#policy(job)).mode;
         }
         const process = project.agent === 'codex' && project.approvals === 'room'

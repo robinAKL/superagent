@@ -88,6 +88,16 @@ async function fixture(t, agent = 'codex', options = {}) {
   };
 }
 
+test('Codex runs with the trust the employee was given on this computer', async (t) => {
+  const f = await fixture(t, 'codex', { policies: { p1: { mode: 'full' } } });
+  f.wake(1, 'Inspect the project');
+  const link = f.make();
+  await link.poll(undefined, 0);
+  await link.runNext();
+  const [agent] = await f.args();
+  assert.deepEqual(agent.argv, ['exec', '--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', '-']);
+});
+
 test('runs Codex and sends a result, then resumes the poll cursor without rerunning', async (t) => {
   const f = await fixture(t);
   f.wake(1, 'Inspect the project');
@@ -95,7 +105,7 @@ test('runs Codex and sends a result, then resumes the poll cursor without rerunn
   await link.poll(undefined, 0);
   await link.runNext();
   const [agent] = await f.args();
-  assert.deepEqual(agent.argv, ['exec', '--json', '-']);
+  assert.deepEqual(agent.argv, ['exec', '--json', '--skip-git-repo-check', '--sandbox', 'workspace-write', '-']);
   assert.equal(agent.leaked, false);
   assert.equal((await f.state()).jobs[0].session, 'session-1');
   assert.ok(f.requests.some(({ path, body }) => path.endsWith('/report') && body.body === 'Result: Inspect the project'));
@@ -230,7 +240,7 @@ test('a run that fails at once still says "started" before it says why it failed
 
 test('restarts an unfinished task through its explicit saved session', async (t) => {
   for (const [agent, args] of [
-    ['codex', ['exec', '--json', 'resume', 'session-previous', '-']],
+    ['codex', ['exec', '--json', '--skip-git-repo-check', '--sandbox', 'workspace-write', 'resume', 'session-previous', '-']],
     ['claude-code', ['--print', '--output-format', 'stream-json', '--verbose', '--resume', 'session-previous']],
   ]) {
     const f = await fixture(t, agent);
