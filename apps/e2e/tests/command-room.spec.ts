@@ -296,12 +296,12 @@ test('a new message lands in view; a follow-up keeps the original task; read-onl
   const first = (await post(page, OWNER, `@${sales.name} 请整理询价草稿`)).task!;
   for (let i = 1; i <= 8; i++) await post(page, OWNER, `我们讨论一下第 ${i} 个想法`); // enough lines to scroll
   await as(page, OWNER);
-  await expect(stream(page).locator('[data-message]')).toHaveCount(18);
+  await expect(stream(page).locator('[data-message]')).toHaveCount(17); // 9 messages; Super Agent answers the 8 without an employee named
 
   // reading old history, then sending: the new message is where the reader is looking
   await stream(page).evaluate((el) => { el.scrollTop = 0; });
   await say(page, '我们再看看交期');
-  await expect(stream(page).locator('[data-message]')).toHaveCount(20);
+  await expect(stream(page).locator('[data-message]')).toHaveCount(19);
   await expect.poll(() => stream(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(100);
   await expect(stream(page).locator('[data-message]').last()).toBeInViewport();
 
