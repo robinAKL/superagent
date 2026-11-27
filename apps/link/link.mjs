@@ -350,9 +350,10 @@ export class WorkerLink {
    */
   #browserSignIn(event) {
     const url = typeof event.payload?.url === 'string' ? event.payload.url : undefined;
-    let result;
-    try { result = this.#active ? 'busy' : this.#openBrowser({ ...(url ? { url } : {}) }); } catch { result = 'missing'; }
-    this.#onBrowserSignIn(result);
+    void Promise.resolve()
+      .then(() => this.#openBrowser({ ...(url ? { url } : {}) }))
+      .catch(() => 'missing')
+      .then((result) => this.#onBrowserSignIn(result));
   }
 
   #refreshClients() {

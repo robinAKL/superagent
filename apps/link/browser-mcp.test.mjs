@@ -1,11 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BackgroundBrowser, SIGN_IN_PAGE, TOOLS, findBrowser, handle, openForSignIn, screenshotPath, webUrl } from './browser-mcp.mjs';
+import { BackgroundBrowser, SIGN_IN_PAGE, TOOLS, findBrowser, handle, openForSignIn, runningBrowser, screenshotPath, webUrl } from './browser-mcp.mjs';
 
 describe('background browser: rules', () => {
   it('opens only web pages', () => {
@@ -57,18 +57,44 @@ describe('employee browser window', () => {
 });
 
 describe('employee browser for signing in', () => {
-  it('opens a visible window on the employees\' profile, and waits while a task is using it', () => {
+  it('opens the employees\' window (the one later tasks use), and waits while a headless task holds the profile', async () => {
     const launched = [];
     const launch = (file, args) => { launched.push([file, args]); return { unref() {} }; };
-    const profile = join(tmpdir(), 'superagent-signin-profile');
-    assert.equal(openForSignIn({ executable: 'chrome.exe', profile, launch, inUse: () => false }), 'opened');
-    assert.deepEqual(launched[0], ['chrome.exe', [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--new-window', SIGN_IN_PAGE]]);
-    assert.ok(!launched[0][1].some((arg) => /headless|remote-debugging/.test(arg)), 'a person signs in to a normal window');
-    assert.equal(openForSignIn({ executable: 'chrome.exe', profile, launch, inUse: () => false, url: 'javascript:alert(1)' }), 'opened');
+    const profile = await mkdtemp(join(tmpdir(), 'superagent-signin-'));
+    const none = async () => { throw new Error('nothing running'); };
+    assert.equal(await openForSignIn({ executable: 'chrome.exe', profile, launch, inUse: () => false, request: none }), 'opened');
+    assert.deepEqual(launched[0], ['chrome.exe', [`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
+      '--no-first-run', '--no-default-browser-check', '--new-window', SIGN_IN_PAGE]]);
+    assert.ok(!launched[0][1].includes('--headless=new'), 'a person signs in to a normal window');
+    assert.equal(await openForSignIn({ executable: 'chrome.exe', profile, launch, inUse: () => false, request: none, url: 'javascript:alert(1)' }), 'opened');
     assert.equal(launched[1][1].at(-1), SIGN_IN_PAGE);
-    assert.equal(openForSignIn({ executable: 'chrome.exe', profile, launch, inUse: () => true }), 'busy');
-    assert.equal(openForSignIn({ executable: null, profile, launch }), 'missing');
+    assert.equal(await openForSignIn({ executable: 'chrome.exe', profile, launch, inUse: () => true, request: none }), 'busy');
+    assert.equal(await openForSignIn({ executable: null, profile, launch }), 'missing');
     assert.equal(launched.length, 2);
+
+    // The window is already open: the sign-in page opens as a tab in it, nothing new is started.
+    writeFileSync(join(profile, 'DevToolsActivePort'), '9333\n/devtools/browser/x');
+    const asked = [];
+    const running = (headless) => async (url, init) => {
+      asked.push([url, init?.method ?? 'GET']);
+      return { json: async () => ({ 'User-Agent': headless ? 'Mozilla/5.0 HeadlessChrome/140' : 'Mozilla/5.0 Chrome/140' }) };
+    };
+    assert.equal(await openForSignIn({ executable: 'chrome.exe', profile, launch, request: running(false) }), 'opened');
+    assert.deepEqual(asked.at(-1), [`http://127.0.0.1:9333/json/new?${SIGN_IN_PAGE}`, 'PUT']);
+    assert.equal(await openForSignIn({ executable: 'chrome.exe', profile, launch, request: running(true) }), 'busy');
+    assert.equal(launched.length, 2);
+    await rm(profile, { recursive: true, force: true });
+  });
+});
+
+describe('the employees\' window stays', () => {
+  it('knows a running employees\' browser from a stale port file', async () => {
+    const profile = await mkdtemp(join(tmpdir(), 'superagent-running-'));
+    assert.equal(await runningBrowser(profile), null);
+    writeFileSync(join(profile, 'DevToolsActivePort'), '9444\n/devtools/browser/y');
+    assert.equal(await runningBrowser(profile, async () => { throw new Error('refused'); }), null);
+    assert.deepEqual(await runningBrowser(profile, async () => ({ json: async () => ({ 'User-Agent': 'Chrome/140' }) })), { port: 9444, headless: false });
+    await rm(profile, { recursive: true, force: true });
   });
 });
 

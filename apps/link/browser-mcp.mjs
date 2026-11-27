@@ -134,6 +134,7 @@ export class BackgroundBrowser {
   #profile;
   #visible;
   #launch;
+  #request;
   #child = null;
   #socket = null;
   #next = 1;
@@ -141,27 +142,31 @@ export class BackgroundBrowser {
   #waiters = [];
 
   /** `visible`: a window the person at the computer can watch; otherwise headless. Driven the same way either way. */
-  constructor({ executable = findBrowser(), profile, visible = false, launch = spawn } = {}) {
+  constructor({ executable = findBrowser(), profile, visible = false, launch = spawn, request = fetch } = {}) {
     this.#executable = executable;
     this.#profile = profile;
     this.#visible = visible;
     this.#launch = launch;
+    this.#request = request;
   }
 
   async #start() {
     if (this.#socket) return;
     if (!this.#executable) throw new Error('No Chrome or Edge was found on this computer for the background browser.');
     mkdirSync(this.#profile, { recursive: true });
-    // The person may have the employees' browser open to sign in: both cannot use one profile at once.
+    // Already open (the window kept from the last task, or opened to sign in): work in a new tab of it.
+    const running = await runningBrowser(this.#profile, this.#request);
+    if (running) return this.#connect(running.port, true);
     if (profileInUse(this.#profile)) {
-      throw new Error('The employees\' browser is open for signing in on this computer. Close that window, then try again.');
+      throw new Error('The employees\' browser is open on this computer in a way Link cannot use. Close its window, then try again.');
     }
     const portFile = join(this.#profile, 'DevToolsActivePort');
     rmSync(portFile, { force: true });
     this.#child = this.#launch(this.#executable, [
       ...(this.#visible ? [] : ['--headless=new']), `--user-data-dir=${this.#profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
       '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--window-size=1366,900', 'about:blank',
-    ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    // A window stays after the task (detached, so it outlives this tool); a headless browser goes with it.
+    ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: !this.#visible, detached: this.#visible });
     // What the browser says on the way up, kept to explain a start that fails.
     let said = '';
     this.#child.stderr?.on('data', (chunk) => { said = (said + String(chunk)).slice(-2_000); });
@@ -175,9 +180,16 @@ export class BackgroundBrowser {
       if (!port) await delay(100);
     }
     if (!port) throw new Error('The background browser did not start in time.' + why());
-    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-    const page = targets.find((target) => target.type === 'page');
-    if (!page) throw new Error('The background browser has no page to use.');
+    if (this.#visible) { this.#child.stderr?.destroy(); this.#child.unref?.(); }
+    return this.#connect(port, false);
+  }
+
+  /** Drives one tab: a new one in a browser that was already open, else the first page of the one just started. */
+  async #connect(port, fresh) {
+    const page = fresh
+      ? await (await this.#request(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json()
+      : (await (await this.#request(`http://127.0.0.1:${port}/json/list`)).json()).find((target) => target.type === 'page');
+    if (!page?.webSocketDebuggerUrl) throw new Error('The background browser has no page to use.');
     const socket = new WebSocket(page.webSocketDebuggerUrl);
     await new Promise((ok, fail) => { socket.onopen = ok; socket.onerror = () => fail(new Error('Could not connect to the background browser.')); });
     socket.onmessage = (event) => {
@@ -268,9 +280,10 @@ export class BackgroundBrowser {
     return path;
   }
 
+  /** A window stays open on the last page for the person to see; a headless browser started here is stopped. */
   close() {
     try { this.#socket?.close(); } catch { /* closing */ }
-    this.#child?.kill();
+    if (!this.#visible) this.#child?.kill();
     this.#child = null;
     this.#socket = null;
   }
@@ -288,6 +301,22 @@ export function profileInUse(profile) {
   try { rmSync(lock); return false; } catch { return true; }
 }
 
+/**
+ * The employees' browser already running on this profile and answering on loopback: a window kept from the last
+ * task, or the one the person opened to sign in. Returns its port and whether it shows a window, or null.
+ */
+export async function runningBrowser(profile, request = fetch) {
+  let port = 0;
+  try { port = Number(readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || 0; } catch { return null; }
+  if (!port) return null;
+  try {
+    const version = await (await request(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2_000) })).json();
+    return { port, headless: /Headless/i.test(String(version['User-Agent'] ?? version.Browser ?? '')) };
+  } catch {
+    return null;
+  }
+}
+
 /** The first page shown when the person opens the employees' browser to sign in. */
 export const SIGN_IN_PAGE = 'https://accounts.google.com/';
 
@@ -296,11 +325,21 @@ export const SIGN_IN_PAGE = 'https://accounts.google.com/';
  * need. Nothing is automated in it; the logins it keeps are what the background browser uses afterwards.
  * Returns 'opened', 'busy' (a task is using the browser now) or 'missing' (no Chrome or Edge here).
  */
-export function openForSignIn({ executable = findBrowser(), profile = browserProfile(), url = SIGN_IN_PAGE, launch = spawn, inUse = profileInUse } = {}) {
+export async function openForSignIn({ executable = findBrowser(), profile = browserProfile(), url = SIGN_IN_PAGE, launch = spawn, inUse = profileInUse, request = fetch } = {}) {
   if (!executable) return 'missing';
   mkdirSync(profile, { recursive: true });
+  const page = webUrl(url) ?? SIGN_IN_PAGE;
+  // The employees' window is already open: show the sign-in page in it. A headless one belongs to a running task.
+  const running = await runningBrowser(profile, request);
+  if (running) {
+    if (running.headless) return 'busy';
+    await request(`http://127.0.0.1:${running.port}/json/new?${page}`, { method: 'PUT' });
+    return 'opened';
+  }
   if (inUse(profile)) return 'busy';
-  const child = launch(executable, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--new-window', webUrl(url) ?? SIGN_IN_PAGE], {
+  // The same window the employees work in afterwards: loopback-only debugging lets the next task use it.
+  const child = launch(executable, [`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
+    '--no-first-run', '--no-default-browser-check', '--new-window', page], {
     detached: true, stdio: 'ignore',
   });
   child.unref?.();
@@ -336,9 +375,10 @@ export async function handle(message, browser, output) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === '--sign-in') {
   // The tray's "Employee browser" item: open it visibly, say how it went, and leave.
-  const result = openForSignIn({ url: process.argv[3] || SIGN_IN_PAGE });
-  console.log('LINK_BROWSER_SIGN_IN:' + result);
-  process.exitCode = result === 'opened' ? 0 : result === 'busy' ? 3 : 4;
+  void openForSignIn({ url: process.argv[3] || SIGN_IN_PAGE }).catch(() => 'missing').then((result) => {
+    console.log('LINK_BROWSER_SIGN_IN:' + result);
+    process.exitCode = result === 'opened' ? 0 : result === 'busy' ? 3 : 4;
+  });
 } else if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const profile = browserProfile();
   const output = process.env.SUPERAGENT_BROWSER_OUT || process.cwd();
