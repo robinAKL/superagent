@@ -198,7 +198,6 @@ export function mergeRoomMessages(current: readonly ApiMessage[], incoming: read
   return [...current, ...added].sort((a, b) => order(a) - order(b));
 }
 
-/** Picking an employee writes "@name " into the draft. A trailing "@" the person just typed is not doubled. */
 /**
  * What a key does while the @ list is open: arrows move the highlight (wrapping round), Enter or Tab picks the
  * highlighted employee instead of sending, Escape closes the list. Any other key is left to the text box.
@@ -212,6 +211,25 @@ export function mentionKey(key: string, active: number, count: number): { move: 
   return null;
 }
 
+/** Whether a message names a digital employee itself: then the person assigns the work, not Super Agent. */
+export function namesAnEmployee(body: string, employees: { name: string }[]): boolean {
+  return employees.some((employee) => employee.name && body.includes(`@${employee.name}`));
+}
+
+/**
+ * The task card shown under a message. A person's own message shows the task it created when Super Agent did not
+ * answer it (they assigned it themselves); everyone else's message shows the task it is about.
+ */
+export function messageTask<T extends { id: string; messageId?: string }>(
+  message: { id: string; taskIds: string[] }, mine: boolean, tasks: T[], messages: { clientMessageId?: string }[],
+): T | undefined {
+  const linked = message.taskIds.map((id) => tasks.find((task) => task.id === id)).filter((task): task is T => Boolean(task)).slice(-1)[0];
+  if (!mine) return linked;
+  if (!linked || linked.messageId !== message.id) return undefined;
+  return messages.some((other) => other.clientMessageId === `reply:${message.id}`) ? undefined : linked;
+}
+
+/** Picking an employee writes "@name " into the draft. A trailing "@" the person just typed is not doubled. */
 export function insertMention(draft: string, name: string): string {
   const base = draft.endsWith('@') ? draft.slice(0, -1) : draft;
   const gap = base === '' || /\s$/u.test(base) ? '' : ' ';
@@ -787,10 +805,11 @@ export function CommandRoomPage() {
 
   const reviewStatus = new Set(['reported', 'outcome_unknown']);
   const firstEmployee = employees.find((employee) => employee.status === 'active') ?? employees[0];
-  const states = agentStates(employees, tasks, outbox !== null || awaiting !== null);
+  const thinking = awaiting !== null || (outbox !== null && !namesAnEmployee(outbox.body, employees));
+  const states = agentStates(employees, tasks, thinking);
   // Who holds the floor: Super Agent while it reads a message, else the employee whose computer is working.
   const runningTask = tasks.find((task) => task.status === 'running') ?? null;
-  const floor = outbox || awaiting
+  const floor = thinking
     ? { id: 'super-agent', name: t('超级智能体'), what: t('正在思考'), since: '', icon: <Icon name="brain" size={16} /> }
     : runningTask
       ? {
@@ -852,7 +871,7 @@ export function CommandRoomPage() {
         </div>
       </article>);
     }
-    if (outbox || awaiting) bubbles.push(<TypingBubble key="super-agent" who={t('超级智能体')} what={t('正在思考')} data="super-agent" />);
+    if (thinking) bubbles.push(<TypingBubble key="super-agent" who={t('超级智能体')} what={t('正在思考')} data="super-agent" />);
     for (const task of tasks.filter((item) => item.status === 'running').slice(0, 3)) {
       const name = employees.find((employee) => employee.id === task.employeeId)?.name ?? t('数字员工');
       bubbles.push(<TypingBubble key={`task-${task.id}`} who={name} what={`${t('正在处理')}「${task.title}」`} data={task.id} />);
@@ -993,7 +1012,7 @@ export function CommandRoomPage() {
             ) : (narrowed && streamShown.length === 0 ? [<p key="none" className="exec-empty room-stream-none">{t('没有符合条件的消息。')}</p>] : streamShown.map((message) => {
               const mine = isMine(message);
               const who = actorLabel(message, viewer, tasks, employees, lang);
-              const linked = mine ? undefined : message.taskIds.map((id) => tasks.find((task) => task.id === id)).filter((task): task is ApiTask => Boolean(task)).slice(-1)[0];
+              const linked = messageTask(message, mine, tasks, messages);
               return (
               <article
                 key={message.id}

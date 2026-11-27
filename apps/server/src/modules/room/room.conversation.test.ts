@@ -64,9 +64,18 @@ it('naming an employee with work creates one task carrying who, the source messa
     followupTo: null,
     promptSnapshot: { employeeId: 'emp-sales', promptVersion: 3, modelTier: 'default', takenAt: '2026-11-10T00:00:00.000Z' },
   });
-  expect(posted.reply?.kind).toBe('reply');
+  // The person assigned it themselves: Super Agent does not repeat it back, but the task is on its board.
+  expect(posted.reply).toBeNull();
   expect(posted.task?.title).toBe('请整理一份供应商询价草稿');
-  expect(posted.reply?.body).toBe('已交给 @销售员工：请整理一份供应商询价草稿');
+  expect(posted.message.taskIds).toEqual([posted.task!.id]);
+  expect(service.supervise().messages).toEqual([]);
+  expect(service.listTasks(owner)[0]!.watch).toMatchObject({ state: expect.any(String) });
+});
+
+it('Super Agent still speaks up when a task someone assigned directly cannot start', () => {
+  const service = room();
+  service.post({ roomId: 'room-1', tenantId: 't1', authorUserId: 'user-owner', body: '@销售员工 整理询价', clientMessageId: 'c-model', modelAvailable: false });
+  expect(service.eventsAfter('room-1', 0, owner).map((message) => message.body)).toContain('暂时无法处理。任务已保留，状态是等待模型。');
 });
 
 it('an outward action with no object asks for it first; with one, the task is marked as needing approval', () => {
@@ -163,7 +172,7 @@ it('a snapshot written before tasks carried context still loads, and reports kee
     tasks: saved.tasks.map(({ createdByUserId: _c, followupTo: _f, promptSnapshot: _p, approval: _a, reviewedByUserId: _r, ...task }) => task),
   } as unknown as typeof saved;
   const reloaded = CommandRoom.restore(employees, old);
-  expect(reloaded.eventsAfter('room-1', 0, owner).map((message) => message.kind)).toEqual(['message', 'reply', 'report']);
+  expect(reloaded.eventsAfter('room-1', 0, owner).map((message) => message.kind)).toEqual(['message', 'report']);
   expect(reloaded.listTasks(owner)[0]).toMatchObject({ approval: 'none', followupTo: null, promptSnapshot: null, reviewedByUserId: null });
   expect(CommandRoom.restore(employees, saved).listTasks(owner)[0]?.promptSnapshot?.promptVersion).toBe(3);
 });

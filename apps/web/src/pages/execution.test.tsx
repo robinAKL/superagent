@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
-  actorLabel, applyAsyncReport, approvalLine, attemptsLine, CommandRoomPage, draftStorageKey, insertMention, mentionKey, mergeRoomMessages, messageKindLabel, nextRoomCursor,
+  actorLabel, applyAsyncReport, approvalLine, attemptsLine, CommandRoomPage, draftStorageKey, insertMention, mentionKey, messageTask, namesAnEmployee, mergeRoomMessages, messageKindLabel, nextRoomCursor,
   resultOverview, roomDraftKey, roomEventsFromSse, supplementError, taskActions, taskLine, taskReports, taskStatusLabel,
   unsentDraftBoundary,
   type ApiMessage, type ApiTask, type RosterEmployee,
@@ -75,6 +75,19 @@ describe('execution pages reuse the v12 copy', () => {
     // the reply to my own send (seq 5, 6) is shown before the poll brings an earlier line from a colleague (seq 3)
     const afterSend = mergeRoomMessages(shown, [m('m5', 5), m('m6', 6)]);
     expect(mergeRoomMessages(afterSend, [m('m3', 3), m('m5', 5)]).map((message) => message.id)).toEqual(['m1', 'm3', 'm4', 'm5', 'm6']);
+  });
+
+  it('a message naming an employee is assigned by the person: no thinking, and its task shows under it', () => {
+    const people = [{ name: '销售获客' }, { name: 'Wholesale Operations' }];
+    expect(namesAnEmployee('@销售获客 你在线吗', people)).toBe(true);
+    expect(namesAnEmployee('现在谁在线？', people)).toBe(false);
+    const task = { id: 't1', messageId: 'm1' };
+    const mine = { id: 'm1', taskIds: ['t1'] };
+    expect(messageTask(mine, true, [task], [{ clientMessageId: 'c1' }])).toBe(task);
+    // When Super Agent answered (it routed the work, or the task could not start), the card is under its answer.
+    expect(messageTask(mine, true, [task], [{ clientMessageId: 'reply:m1' }])).toBeUndefined();
+    expect(messageTask({ id: 'm2', taskIds: ['t1'] }, false, [task], [])).toBe(task);
+    expect(messageTask({ id: 'm3', taskIds: ['t1'] }, true, [task], [])).toBeUndefined();
   });
 
   it('inserts a mention and keeps drafts apart per person', () => {

@@ -258,7 +258,9 @@ test('a report shows up without touching the draft; the reported task completes 
   await as(page, OWNER);
   await say(page, `@${sales.name} 请整理一份供应商询价草稿`);
   await expect(taskCards(page)).toHaveCount(1);
-  await expect(stream(page)).toContainText(`已交给 @${sales.name}`);
+  // The owner assigned it directly: Super Agent does not repeat it back; the task shows under the owner's message.
+  await expect(stream(page).locator('[data-mine="yes"] [data-open-task]')).toHaveCount(1);
+  await expect(stream(page)).not.toContainText(`已交给 @${sales.name}`);
   const [task] = await tasksOf(page, OWNER);
 
   // the owner is in the middle of typing when the employee's report arrives
@@ -608,7 +610,7 @@ test('qa-human-work#41: an existing conversation still produces a draft task, an
 
   await say(page, `@${sales.name} 请整理询价草稿`);
   await expect(taskCards(page)).toHaveCount(2);
-  await expect(stream(page)).toContainText(`已交给 @${sales.name}`);
+  await expect(stream(page).locator('[data-mine="yes"] [data-open-task]').last()).toBeVisible();
   const draftTask = (await tasksOf(page, OWNER)).find((task) => task.id !== earlier.id);
   expect(draftTask).toMatchObject({ title: '请整理询价草稿', employeeId: sales.id, assigneeUserId: staff, status: 'assigned', followupTo: null });
   // A title that says 草稿 stores an unsent shell. That is not a report, and it does not complete the task.
