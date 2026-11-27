@@ -70,6 +70,22 @@ it('asking after an employee by name gets its state from Super Agent, never a ta
   expect(say(service, owner, '@销售员工 在吗，帮我核对报价').task?.title).toBe('在吗，帮我核对报价');
 });
 
+it('a report saying the work was not done is not a completion: Super Agent says why and what can be done', () => {
+  const service = room();
+  const task = say(service, owner, '@销售员工 用 Chrome 打开 https://www.google.com').task!;
+  const code = 'T-' + task.id.split('_')[1];
+  service.report(task.id, 'user-sales', `${code} 未完成：Chrome 控制被系统拒绝（Access is denied），无法打开 Google。请解锁桌面后重试。`, 'r1');
+  expect(service.listTasks(owner)[0]).toMatchObject({ status: 'waiting', waitingReason: '没有做成' });
+  const said = service.eventsAfter('room-1', 0, owner).at(-1)!;
+  expect(said).toMatchObject({ authorUserId: 'super-agent', kind: 'nudge', taskIds: [task.id] });
+  expect(said.body).toBe(`${code}「用 Chrome 打开 https://www.goog…」没有做成，我没有把它算作完成。原因：${code} 未完成：Chrome 控制被系统拒绝（Access is denied），无法打开 Google。 你可以补充说明后告诉我“重试 ${code}”，或在任务上取消。`);
+
+  // A real result that mentions an error further down is still a result.
+  const listed = say(service, owner, '@销售员工 列出项目文件').task!;
+  service.report(listed.id, 'user-sales', ['项目里有 3 个文件：a.md、b.csv、c.txt。', '', '另外日志里有一行旧的 failed to connect，与本任务无关。'].join('\n'), 'r2');
+  expect(service.listTasks(owner).find((item) => item.id === listed.id)?.status).toBe('completed');
+});
+
 it('naming an employee with work creates one task carrying who, the source message and the prompt snapshot', () => {
   const service = room();
   const posted = say(service, owner, '@销售员工 请整理一份供应商询价草稿');
