@@ -46,8 +46,28 @@ it('a new room has no tasks, and small talk, questions and discussion only get a
   expect(say(service, owner, '现在有哪些数字员工在线？').reply?.body).toBe('当前有 2 名数字员工在线：销售员工、财务员工。');
   expect(say(service, sales, '有哪些员工在线').reply?.body).toBe('当前有 1 名数字员工在线：销售员工。'); // only their own
   expect(say(service, owner, '我们希望把售后做得更好').reply?.body).toContain('我还没读懂要交给谁');
-  expect(say(service, owner, '@销售员工').reply?.body).toContain('还不是明确的工作请求');
+  expect(say(service, owner, '@销售员工').reply?.body).toBe('@销售员工 在线，现在空闲。要派活请直接 @它 并说清楚要做的事。');
   expect(service.listTasks(owner)).toEqual([]);
+});
+
+it('asking after an employee by name gets its state from Super Agent, never a task', () => {
+  let now = new Date('2026-11-10T00:00:00.000Z');
+  const service = new CommandRoom(employees, () => now);
+  expect(say(service, owner, '@销售员工 在吗').reply?.body).toBe('@销售员工 在线，现在空闲。要派活请直接 @它 并说清楚要做的事。');
+  expect(say(service, owner, '@运营员工 你在线吗？').reply?.body).toBe('@运营员工 的电脑现在不在线。那台电脑上线后，我会把它的任务继续派过去。');
+  expect(service.listTasks(owner)).toEqual([]);
+
+  // Working, then quiet for a long while: Super Agent says which task and how long, and what can be done.
+  const task = say(service, owner, '@销售员工 整理询价草稿').task!;
+  service.updateFromWorker(task.id, 't', 'Agent started.', 'w1', false, () => true);
+  service.supervise();
+  expect(say(service, owner, '@销售员工 忙吗').reply?.body).toBe('@销售员工 在线，正在处理 T-' + task.id.split('_')[1] + '「整理询价草稿」。要派活请直接 @它 并说清楚要做的事。');
+  now = new Date('2026-11-10T00:47:00.000Z');
+  const code = 'T-' + task.id.split('_')[1];
+  expect(say(service, owner, '@销售员工 你在线吗').reply?.body).toBe(`@销售员工 在线，正在处理 ${code}「整理询价草稿」（已 47 分钟没有新进展）。如果 ${code} 卡住了，可以在任务上取消，或告诉我“重试 ${code}”。`);
+  expect(service.listTasks(owner)).toHaveLength(1);
+  // Real work in the same breath is still a task.
+  expect(say(service, owner, '@销售员工 在吗，帮我核对报价').task?.title).toBe('在吗，帮我核对报价');
 });
 
 it('naming an employee with work creates one task carrying who, the source message and the prompt snapshot', () => {

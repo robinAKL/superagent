@@ -194,6 +194,11 @@ export function roomText(text: string, lang: Lang): string {
 const SYSTEM_MESSAGES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^@(.*) 不在当前身份可以指派的范围内，我不会创建这个任务。$/u, 'You do not have permission to assign work to @$1.'],
   [/^已看到 @(.*)，这条还不是明确的工作请求。$/u, 'I saw the mention of @$1. Describe the work to create a task.'],
+  // Super Agent's answer to "@员工 在吗" and the like (room.ts employeeState).
+  [/^@(.*?) 在线，现在空闲。要派活请直接 @它 并说清楚要做的事。$/u, '@$1 is online and free. To assign work, @mention it and describe the task.'],
+  [/^@(.*?) 的电脑现在不在线。那台电脑上线后，我会把它的任务继续派过去。$/u, '@$1’s computer is offline. Its tasks continue once that computer is back online.'],
+  [/^@(.*?) 已暂停。恢复这名员工后，它才会接新任务。$/u, '@$1 is paused. Resume it to give it new work.'],
+  [/^@(.*?) 还没有连接电脑。那台电脑上线后，我会把它的任务继续派过去。$/u, '@$1 is not connected to a computer yet. Its tasks start once its computer is online.'],
   [/^已把这件事交给 @(.*)，对方当前已暂停，任务标为等待连接。$/u, 'Assigned to @$1. The employee is paused and the task is waiting for a connection.'],
   [/^已把这件事交给 @(.*)，对方当前不在线，任务标为等待连接。$/u, 'Assigned to @$1. The employee is offline and the task is waiting for a connection.'],
   [/^已作为「(.*)」的追问交给 @(.*?)：([\s\S]*)$/u, 'Follow-up to “$1” assigned to @$2: $3'],

@@ -56,6 +56,16 @@ export function isGreeting(body: string): boolean {
   return GREETING.test(body.trim());
 }
 
+/**
+ * "@员工 在吗", "@员工 你在线吗", "@员工 忙吗", "@员工 怎么样了": the whole message asks after the employee, so
+ * Super Agent answers with its state instead of making a task of the question.
+ */
+const PRESENCE = /^(你|您)?(还)?(在吗|在不在|在线吗|在线不|在线没|在线么|有空吗|有空不|忙吗|忙不忙|在忙吗|在干嘛|在做什么|在干什么|在做啥|怎么样了?|进度呢|进度如何|好了吗|做完了吗|完成了吗)[!！。.?？~\s]*$/u;
+
+export function asksPresence(body: string): boolean {
+  return PRESENCE.test(body.trim());
+}
+
 export function asksAvailability(body: string): boolean {
   return AVAILABILITY.test(body);
 }
