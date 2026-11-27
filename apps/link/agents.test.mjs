@@ -23,6 +23,9 @@ describe('agents', () => {
     assert.deepEqual(approvalArgs('copilot', 'strict'), []);
     assert.deepEqual(approvalArgs('copilot', 'full'), ['--allow-all-tools']);
     assert.deepEqual(approvalArgs('gemini', 'anything'), ['--approval-mode', 'auto_edit']);
+    assert.deepEqual(approvalArgs('codex', 'strict'), ['--sandbox', 'read-only']);
+    assert.deepEqual(approvalArgs('codex', 'standard'), ['--sandbox', 'workspace-write']);
+    assert.deepEqual(approvalArgs('codex', 'full'), ['--dangerously-bypass-approvals-and-sandbox']);
   });
 
   it('builds headless command lines and drops a session id that is not safe to pass', () => {

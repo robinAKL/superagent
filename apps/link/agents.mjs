@@ -124,6 +124,8 @@ export function approvalArgs(agent, mode = 'standard') {
     case 'copilot': return level === 'full' ? ['--allow-all-tools'] : level === 'standard' ? ['--allow-tool=write'] : [];
     case 'gemini': return ['--approval-mode', { strict: 'default', standard: 'auto_edit', full: 'yolo' }[level]];
     case 'qwen': return ['--approval-mode', { strict: 'default', standard: 'auto-edit', full: 'yolo' }[level]];
+    // `codex exec` asks nobody: its sandbox is the whole permission. Full trust runs without one.
+    case 'codex': return level === 'full' ? ['--dangerously-bypass-approvals-and-sandbox'] : ['--sandbox', level === 'strict' ? 'read-only' : 'workspace-write'];
     default: return [];
   }
 }

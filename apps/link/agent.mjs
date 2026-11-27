@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { runCodexTurn } from './codex-app-server.mjs';
-import { agentSpec, commandLine, headlessArgs } from './agents.mjs';
+import { agentSpec, approvalArgs, commandLine, headlessArgs } from './agents.mjs';
 
 import { AUTH_ERROR, failureReason } from './agent-errors.mjs';
 const RESULT_LIMIT = 60_000;
@@ -83,16 +83,18 @@ function permissionArgs(approver) {
 }
 
 /**
- * One headless run of the project's client. Claude Code asks the room through `approver`; Codex follows its own
- * configuration; the other clients (agents.mjs) get the employee's authorisation `mode` as their approval setting.
+ * One headless run of the project's client. Claude Code asks the room through `approver`; Codex and the other clients
+ * (agents.mjs) get the employee's authorisation `mode` as their own sandbox or approval setting.
  */
 export function launchAgent(project, prompt, session, notify, approver = null, { mode = 'standard' } = {}) {
   const codex = project.agent === 'codex';
   const claude = project.agent === 'claude-code';
   const permissions = claude ? permissionArgs(approver) : { args: [], cleanup: () => {} };
   const spec = agentSpec(project.agent);
+  // An employee's folder is often plain business files, not a git repository: Codex refuses to run there unless told
+  // not to check ("Not inside a trusted directory and --skip-git-repo-check was not specified").
   const args = codex
-    ? ['exec', '--json', ...(session ? ['resume', session] : []), '-']
+    ? ['exec', '--json', '--skip-git-repo-check', ...approvalArgs('codex', mode), ...(session ? ['resume', session] : []), '-']
     : claude
       ? ['--print', '--output-format', 'stream-json', '--verbose', ...permissions.args, ...(session ? ['--resume', session] : [])]
       : headlessArgs(project.agent, { session, mode, prompt });
