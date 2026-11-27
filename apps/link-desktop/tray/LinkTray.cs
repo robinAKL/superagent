@@ -129,6 +129,7 @@ namespace SuperAgentLinkTray
         private ToolStripMenuItem _updateItem;
         private ToolStripMenuItem _checkUpdateItem;
         private ToolStripMenuItem _modeMenu;
+        private ToolStripMenuItem _browserMenu;
         private LinkStatus _status = LinkStatus.Unpaired;
         private int _restartAttempt;
         private Icon _currentIcon;
@@ -182,6 +183,10 @@ namespace SuperAgentLinkTray
                 _modeMenu.DropDownItems.Add(item);
             }
             _modeMenu.DropDownOpening += (s, e) => RefreshPermissionMode();
+            _browserMenu = new ToolStripMenuItem("Employee browser window / 员工浏览器窗口");
+            _browserMenu.DropDownItems.Add(new ToolStripMenuItem("Show the window / 显示窗口（推荐）", null, (s, e) => SetBrowserMode("visible")) { Tag = "visible" });
+            _browserMenu.DropDownItems.Add(new ToolStripMenuItem("Background only / 在后台运行", null, (s, e) => SetBrowserMode("background")) { Tag = "background" });
+            _browserMenu.DropDownOpening += (s, e) => RefreshBrowserMode();
 
             var menu = new ContextMenuStrip();
             menu.Items.Add(_statusItem);
@@ -191,6 +196,7 @@ namespace SuperAgentLinkTray
             menu.Items.Add(openRoomItem);
             menu.Items.Add(configureItem);
             menu.Items.Add(browserItem);
+            menu.Items.Add(_browserMenu);
             menu.Items.Add(repairItem);
             menu.Items.Add(logsItem);
             menu.Items.Add(_modeMenu);
@@ -848,6 +854,57 @@ namespace SuperAgentLinkTray
                         var menuItem = item as ToolStripMenuItem;
                         if (menuItem != null) menuItem.Checked = current != null && (string)menuItem.Tag == current;
                     }
+                }, null);
+            });
+        }
+
+        /** Tick how the employees' browser runs on this computer (a window to watch, or the background). */
+        private void RefreshBrowserMode()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                string current = null;
+                try
+                {
+                    var body = WorkerLinkPost("/permissions", "{}");
+                    if (body != null)
+                    {
+                        var parsed = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(body);
+                        object value;
+                        current = parsed.TryGetValue("browser", out value) ? Convert.ToString(value) : "visible";
+                    }
+                }
+                catch (Exception ex) { Log("Could not read the browser mode: " + ex.Message); }
+                _uiContext.Post(__ =>
+                {
+                    foreach (ToolStripItem item in _browserMenu.DropDownItems)
+                    {
+                        var menuItem = item as ToolStripMenuItem;
+                        if (menuItem != null) menuItem.Checked = current != null && (string)menuItem.Tag == current;
+                    }
+                }, null);
+            });
+        }
+
+        private void SetBrowserMode(string mode)
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                string failure = null;
+                try { if (WorkerLinkPost("/browser-mode", "{\"mode\":\"" + mode + "\"}") == null) failure = "这台电脑还没有配对。"; }
+                catch (Exception ex) { failure = ex.Message; }
+                _uiContext.Post(__ =>
+                {
+                    if (failure != null)
+                    {
+                        Log("Could not change the browser mode: " + failure);
+                        Notify("没能切换员工浏览器", failure, ToolTipIcon.Warning);
+                        return;
+                    }
+                    Log("Employee browser set to " + mode);
+                    Notify("员工浏览器：" + (mode == "visible" ? "显示窗口" : "在后台运行"), mode == "visible"
+                        ? "员工用浏览器干活时会弹出窗口，你能看着它操作；锁屏或远程断开时自动转到后台。"
+                        : "员工用浏览器干活时不弹窗口，全部在后台完成。", ToolTipIcon.Info);
                 }, null);
             });
         }

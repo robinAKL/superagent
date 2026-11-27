@@ -89,6 +89,8 @@ export class WorkerLink {
   #onMcpLogin;
   #onClientSetup;
   #openBrowser;
+  /** 'visible' (default) or 'background': how the employees' browser runs here, read with the permissions. */
+  #browserMode = 'visible';
   #onBrowserSignIn;
   #discoverClients;
   #desktop;
@@ -253,7 +255,8 @@ export class WorkerLink {
   /** This employee's authorisation on this computer, read fresh for each task; the default when it cannot be read. */
   async #policy(job) {
     try {
-      const { policies } = await this.#api('/permissions', {}, AbortSignal.timeout(10_000));
+      const { policies, browser } = await this.#api('/permissions', {}, AbortSignal.timeout(10_000));
+      if (browser === 'visible' || browser === 'background') this.#browserMode = browser;
       return cleanPolicy(policies?.[job.projectId]);
     } catch {
       return { ...DEFAULT_POLICY };
@@ -454,13 +457,16 @@ export class WorkerLink {
           mode = (await this.#policy(job)).mode;
         }
         // A locked or disconnected screen is said up front: the room hears why, the client does not try the screen.
-        const screen = desktopNotice(await this.#desktop().catch(() => 'unknown'));
+        const desktop = await this.#desktop().catch(() => 'unknown');
+        const screen = desktopNotice(desktop);
+        // A window the person can watch, unless they chose the background or nobody can see this screen now.
+        const visible = this.#browserMode === 'visible' && desktop !== 'locked' && desktop !== 'disconnected';
         if (screen) say(screen.progress);
         const prompt = screen ? `${screen.hint}\n\n${job.prompt}` : job.prompt;
         const process = project.agent === 'codex' && project.approvals === 'room'
           ? this.#launchWithApprovals(project, prompt, job.session, notify, (request, signal) => this.#approve(job, request, signal))
-          : mode ? this.#launch(project, prompt, job.session, notify, null, { mode })
-            : this.#launch(project, prompt, job.session, notify, approver);
+          : mode ? this.#launch(project, prompt, job.session, notify, null, { mode, visible })
+            : this.#launch(project, prompt, job.session, notify, approver, { visible });
         this.#active = { job, process };
         this.#onTask(true);
         void this.#api('/heartbeat', { busy: true, waitingAuthReason: null }, AbortSignal.timeout(10_000)).catch(() => {});

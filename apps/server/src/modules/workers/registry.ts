@@ -88,7 +88,15 @@ export interface WorkerCapabilities {
   allowEmployees?: string[];
   /** Empty or absent: every project on the tenant may run here. */
   allowProjects?: string[];
+  /**
+   * How the employees' browser runs on this computer: a window the person can watch ('visible', the default), or
+   * in the background only. Set from the tray or the web page; Link reads it with the permissions for every task.
+   */
+  browser?: BrowserMode;
 }
+
+export const BROWSER_MODES = ['visible', 'background'] as const;
+export type BrowserMode = (typeof BROWSER_MODES)[number];
 
 export interface WorkerRecord {
   id: string;
@@ -259,6 +267,7 @@ export function cleanCapabilities(value: unknown): WorkerCapabilities {
   if (agents) out.agents = agents;
   if (allowEmployees) out.allowEmployees = allowEmployees;
   if (allowProjects) out.allowProjects = allowProjects;
+  if (BROWSER_MODES.includes(raw.browser as BrowserMode)) out.browser = raw.browser as BrowserMode;
   return out;
 }
 

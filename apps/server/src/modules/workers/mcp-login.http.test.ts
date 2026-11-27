@@ -88,6 +88,21 @@ it('the computer reports its local clients; the page can ask it to install, sign
   expect((await a.inject({ method: 'POST', url: `/api/v1/workers/${id}/client-setup`, headers: { 'x-test-user': 'someone|employee' }, payload: { agent: 'codex', action: 'install' } })).statusCode).toBe(404);
 });
 
+it('the employees\' browser shows a window by default; the tray and the page can switch it to the background', async () => {
+  const link = (path: string, payload: unknown) => a.inject({ method: 'POST', url: `/api/v1/worker-link${path}`, headers: { authorization: 'Bearer ' + token }, payload: payload as object });
+  expect((await link('/permissions', {})).json().browser).toBe('visible');
+  expect((await link('/browser-mode', { mode: 'background' })).json()).toEqual({ browser: 'background' });
+  expect((await link('/permissions', {})).json().browser).toBe('background');
+  expect((await link('/browser-mode', { mode: 'fullscreen' })).statusCode).toBe(400);
+  const page = (payload: unknown, headers: Record<string, string> = {}) => a.inject({ method: 'POST', url: `/api/v1/workers/${id}/browser-mode`, headers, payload: payload as object });
+  expect((await page({ mode: 'visible' })).json()).toEqual({ browser: 'visible' });
+  expect((await link('/permissions', {})).json().browser).toBe('visible');
+  const listed = (await a.inject({ method: 'GET', url: '/api/v1/workers' })).json().workers.find((worker: { id: string }) => worker.id === id);
+  expect(listed.capabilities.browser).toBe('visible');
+  expect((await page({ mode: 'nope' })).statusCode).toBe(400);
+  expect((await page({ mode: 'background' }, { 'x-test-user': 'someone|employee' })).statusCode).toBe(404);
+});
+
 it('the page can open the employees\' browser on the computer for the person there to sign in to websites', async () => {
   const open = (payload: unknown, headers: Record<string, string> = {}) => a.inject({ method: 'POST', url: `/api/v1/workers/${id}/browser-sign-in`, headers, payload: payload as object });
   expect((await open({})).json()).toEqual({ opened: true });

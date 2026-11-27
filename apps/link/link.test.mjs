@@ -59,7 +59,7 @@ async function fixture(t, agent = 'codex', options = {}) {
       if (await control.stopAfterPoll?.()) return Response.json({ events: [] });
       return Response.json({ events: events.filter((event) => event.seq > body.since) });
     }
-    if (path.endsWith('/permissions')) return Response.json({ policies: options.policies ?? {} });
+    if (path.endsWith('/permissions')) return Response.json({ policies: options.policies ?? {}, ...(options.browserMode ? { browser: options.browserMode } : {}) });
     if (path.endsWith('/approvals')) return Response.json({ approval: { id: 'approval-1', expiresAt: Date.now() + 60_000 } }, { status: 201 });
     if (path.endsWith('/approvals/approval-1/wait')) {
       return Response.json({ approval: { status: options.approvalStatus } });
@@ -141,6 +141,26 @@ test('the page opens the employees\' browser here for the person to sign in, and
   await link.poll(undefined, 0);
   assert.deepEqual(f.control.browserOpened.at(-1), {});
   assert.deepEqual(f.control.browserSignIns, ['opened', 'busy']);
+});
+
+test('the employees\' browser shows a window by default, and stays in the background when chosen or nobody can see', async (t) => {
+  const saved = { disabled: process.env.SUPERAGENT_BROWSER_DISABLED, browser: process.env.SUPERAGENT_BROWSER };
+  process.env.SUPERAGENT_BROWSER_DISABLED = '';
+  process.env.SUPERAGENT_BROWSER = process.execPath;
+  t.after(() => { process.env.SUPERAGENT_BROWSER_DISABLED = saved.disabled; process.env.SUPERAGENT_BROWSER = saved.browser ?? ''; });
+  const visibleIn = async (options) => {
+    const f = await fixture(t, 'codex', options);
+    f.wake(1, 'Open the supplier site');
+    const link = f.make();
+    await link.poll(undefined, 0);
+    await link.runNext();
+    const [agent] = await f.args();
+    return /SUPERAGENT_BROWSER_VISIBLE = "1"/.test(agent.argv.join(' '));
+  };
+  assert.equal(await visibleIn({}), true);
+  assert.equal(await visibleIn({ browserMode: 'background' }), false);
+  assert.equal(await visibleIn({ desktop: async () => 'locked' }), false);
+  assert.equal(await visibleIn({ desktop: async () => 'disconnected' }), false);
 });
 
 test('Codex runs with the trust the employee was given on this computer', async (t) => {

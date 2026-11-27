@@ -42,6 +42,20 @@ describe('background browser: rules', () => {
   });
 });
 
+describe('employee browser window', () => {
+  it('shows a window when asked, and runs headless otherwise; both are driven the same way', async () => {
+    const started = [];
+    const launch = (file, args) => { started.push(args); throw new Error('stop here'); };
+    const profile = join(tmpdir(), 'superagent-visible-profile');
+    for (const visible of [true, false]) {
+      await assert.rejects(new BackgroundBrowser({ executable: 'chrome.exe', profile, visible, launch }).read(), /stop here/);
+    }
+    assert.equal(started[0].includes('--headless=new'), false);
+    assert.equal(started[1].includes('--headless=new'), true);
+    for (const args of started) assert.ok(args.includes('--remote-debugging-port=0'));
+  });
+});
+
 describe('employee browser for signing in', () => {
   it('opens a visible window on the employees\' profile, and waits while a task is using it', () => {
     const launched = [];
