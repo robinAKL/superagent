@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const TEXT_LIMIT = 20_000;
 const LOAD_TIMEOUT_MS = 30_000;
+const START_TIMEOUT_MS = 45_000;
 
 /** Chrome first (what people use), then Edge (on every Windows 10/11), then common Linux and macOS installs. */
 export function findBrowser(env = process.env, exists = existsSync) {
@@ -155,14 +156,20 @@ export class BackgroundBrowser {
     this.#child = spawn(this.#executable, [
       '--headless=new', `--user-data-dir=${this.#profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
       '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--window-size=1366,900', 'about:blank',
-    ], { stdio: 'ignore', windowsHide: true });
+    ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    // What the browser says on the way up, kept to explain a start that fails.
+    let said = '';
+    this.#child.stderr?.on('data', (chunk) => { said = (said + String(chunk)).slice(-2_000); });
     this.#child.once('exit', () => { this.#child = null; this.#socket = null; });
-    let port = null;
-    for (let waited = 0; waited < 20_000 && !port; waited += 100) {
-      if (!this.#child) throw new Error('The background browser stopped while starting.');
-      try { port = Number(readFileSync(portFile, 'utf8').split('\n')[0]); } catch { await delay(100); }
+    const why = () => (said.trim() ? ` ${said.trim().split('\n').slice(-3).join(' ')}` : '');
+    let port = 0;
+    // A first start on a slow or busy computer can take a while; the port file may also exist before it is written.
+    for (const deadline = Date.now() + START_TIMEOUT_MS; !port && Date.now() < deadline;) {
+      if (!this.#child) throw new Error('The background browser stopped while starting.' + why());
+      try { port = Number(readFileSync(portFile, 'utf8').split('\n')[0]) || 0; } catch { port = 0; }
+      if (!port) await delay(100);
     }
-    if (!port) throw new Error('The background browser did not start in time.');
+    if (!port) throw new Error('The background browser did not start in time.' + why());
     const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     const page = targets.find((target) => target.type === 'page');
     if (!page) throw new Error('The background browser has no page to use.');
