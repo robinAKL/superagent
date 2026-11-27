@@ -1,5 +1,5 @@
 import { isLinkAgent, type TaskStatus } from '@superagent/shared';
-import { asksAvailability, isExternalAction, isGreeting, needsParameters, workText, askedTaskNumber, smallTalkReply } from './intent.js';
+import { asksAvailability, asksPresence, isExternalAction, isGreeting, needsParameters, workText, askedTaskNumber, smallTalkReply } from './intent.js';
 import {
   acceptSupplement, applyAsyncReport, evidenceFromReport, permissionHold, resultOverview, summaryLabel, verificationOf,
   type ResultEvidence, type ResultHold, type ResultVerification,
@@ -401,9 +401,10 @@ export class CommandRoom {
     if (!isOwner(author) && employee.ownerUserId !== author.userId) {
       return noTask(`@${employee.name} 不在当前身份可以指派的范围内，我不会创建这个任务。`);
     }
-    // Punctuation alone ("@员工 、") is not work; it would become a task named "、".
-    if (isGreeting(work) || !/[\p{L}\p{N}]/u.test(work)) {
-      return noTask(`已看到 @${mentions.map((item) => item.name).join(' @')}，这条还不是明确的工作请求。`);
+    // Naming an employee to greet it or ask after it ("在吗", "你在线吗", "忙吗") gets its state from Super Agent, who
+    // watches every employee's work; punctuation alone ("@员工 、") is answered the same way rather than becoming a task.
+    if (isGreeting(work) || asksPresence(work) || !/[\p{L}\p{N}]/u.test(work)) {
+      return noTask(mentions.map((item) => this.employeeState(item, author)).join('\n'));
     }
     if (!input.systemWork && needsParameters(work)) {
       return noTask('这是对外动作。请先补充具体对象（收件人或单号）、内容和依据，我再交给数字员工。');
@@ -995,6 +996,38 @@ export class CommandRoom {
     // Someone who cannot see the task must not learn that it exists.
     if (!task || !this.canSeeTask(task, viewer)) throw new Error('task_not_found');
     return task;
+  }
+
+  /** What Super Agent says when someone asks after one employee: online or not, and what it is working on. */
+  private employeeState(employee: EmployeeRef, viewer: Viewer): string {
+    const now = this.now();
+    const online = ACTIVE(employee) || (employee.status !== 'paused' && roomHooks.linkMayBeOnline(employee.id));
+    const where = employee.status === 'paused' ? '已暂停'
+      : online ? '在线'
+        : employee.status === 'unconnected' ? '还没有连接电脑' : '的电脑现在不在线';
+    const open = this.tasks.filter((task) => task.employeeId === employee.id && OPEN.has(task.status) && this.canSeeTask(task, viewer));
+    const running = open.filter((task) => task.status === 'running');
+    const queued = open.filter((task) => task.status !== 'running');
+    const quiet = (task: RoomTask) => task.watch?.state === `${task.status}:${task.waitingReason ?? ''}` ? minutesSince(task.watch.since, now) : 0;
+    const parts: string[] = [];
+    if (running.length) {
+      parts.push(`正在处理 ${running.slice(0, 3).map((task) => {
+        const age = quiet(task);
+        return `${taskCode(task)}「${shortTitle(task.title)}」${age >= 10 ? `（已 ${age} 分钟没有新进展）` : ''}`;
+      }).join('、')}`);
+    } else if (online && employee.status !== 'paused') {
+      parts.push('现在空闲');
+    }
+    if (queued.length) {
+      parts.push(`还有 ${queued.length} 个任务在等：${queued.slice(0, 3).map((task) => `${taskCode(task)}（${stateText(task)}）`).join('、')}`);
+    }
+    const stuck = running.find((task) => quiet(task) >= 30);
+    const next = stuck
+      ? `如果 ${taskCode(stuck)} 卡住了，可以在任务上取消，或告诉我“重试 ${taskCode(stuck)}”。`
+      : employee.status === 'paused' ? '恢复这名员工后，它才会接新任务。'
+        : !online ? '那台电脑上线后，我会把它的任务继续派过去。'
+          : '要派活请直接 @它 并说清楚要做的事。';
+    return `@${employee.name} ${where}${parts.length ? '，' + parts.join('；') : ''}。${next}`;
   }
 
   private availability(viewer: Viewer): string {
