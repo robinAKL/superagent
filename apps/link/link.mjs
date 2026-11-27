@@ -396,9 +396,15 @@ export class WorkerLink {
       if (job.status === 'cancelled' || signal?.aborted) return;
       let approver = null;
       let approvals = null;
+      let updates = () => Promise.resolve();
       try {
         const project = projectDirectory(this.#projects, job.projectId);
         const progressMessages = new Set();
+        // A run's updates reach the room in the order they happened: "Agent started." must never land after the
+        // failure or result that followed it, or the task would look as if it were running again.
+        let sent = Promise.resolve();
+        const say = (body) => { sent = sent.then(() => this.#update(job, 'progress', body)).catch(() => {}); };
+        updates = () => sent;
         let sessionWrite = Promise.resolve();
         const notify = (event) => {
           if (event.session) {
@@ -413,7 +419,7 @@ export class WorkerLink {
           }
           if (event.progress && !progressMessages.has(event.progress)) {
             progressMessages.add(event.progress);
-            void this.#update(job, 'progress', event.progress).catch(() => {});
+            say(event.progress);
           }
         };
         // Claude Code asks through Link's permission tool: the employee's mode decides, the room answers the rest.
@@ -432,7 +438,7 @@ export class WorkerLink {
         this.#active = { job, process };
         this.#onTask(true);
         void this.#api('/heartbeat', { busy: true, waitingAuthReason: null }, AbortSignal.timeout(10_000)).catch(() => {});
-        void this.#update(job, 'progress', 'Agent started.').catch(() => {});
+        say('Agent started.');
         job.outcome = await process.completed;
         await sessionWrite;
       } catch {
@@ -448,6 +454,7 @@ export class WorkerLink {
         await this.#api('/heartbeat', { busy: false }, AbortSignal.timeout(10_000));
         return;
       }
+      await updates();
       job.status = 'reporting';
       await this.#save();
     }
