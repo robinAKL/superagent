@@ -103,7 +103,7 @@ const TYPE = `((target) => {
 export const TOOLS = [
   {
     name: 'browser_open',
-    description: 'Open a web page in the background browser on this computer and return its title, address, text, links and form fields. Use this for every web page task: it works even when the screen is locked or the remote desktop is minimised. Never try to control the visible desktop or the person\'s own browser window.',
+    description: 'Open a web page in the employees\' browser on this computer and return its title, address, text, links and form fields. Use this for every web page task: it needs no screen control, so it works even when the screen is locked or the remote desktop is minimised. Never try to control the desktop or the person\'s own browser window.',
     inputSchema: { type: 'object', properties: { url: { type: 'string', description: 'An http or https address.' } }, required: ['url'] },
   },
   {
@@ -132,15 +132,20 @@ export const TOOLS = [
 export class BackgroundBrowser {
   #executable;
   #profile;
+  #visible;
+  #launch;
   #child = null;
   #socket = null;
   #next = 1;
   #pending = new Map();
   #waiters = [];
 
-  constructor({ executable = findBrowser(), profile } = {}) {
+  /** `visible`: a window the person at the computer can watch; otherwise headless. Driven the same way either way. */
+  constructor({ executable = findBrowser(), profile, visible = false, launch = spawn } = {}) {
     this.#executable = executable;
     this.#profile = profile;
+    this.#visible = visible;
+    this.#launch = launch;
   }
 
   async #start() {
@@ -153,8 +158,8 @@ export class BackgroundBrowser {
     }
     const portFile = join(this.#profile, 'DevToolsActivePort');
     rmSync(portFile, { force: true });
-    this.#child = spawn(this.#executable, [
-      '--headless=new', `--user-data-dir=${this.#profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
+    this.#child = this.#launch(this.#executable, [
+      ...(this.#visible ? [] : ['--headless=new']), `--user-data-dir=${this.#profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
       '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--window-size=1366,900', 'about:blank',
     ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
     // What the browser says on the way up, kept to explain a start that fails.
@@ -337,7 +342,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 } else if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const profile = browserProfile();
   const output = process.env.SUPERAGENT_BROWSER_OUT || process.cwd();
-  const browser = new BackgroundBrowser({ profile });
+  const browser = new BackgroundBrowser({ profile, visible: process.env.SUPERAGENT_BROWSER_VISIBLE === '1' });
   const reader = createInterface({ input: process.stdin });
   reader.on('line', (line) => {
     let message;

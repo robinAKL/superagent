@@ -33,6 +33,8 @@ export interface LinkDevice {
     mcpServers?: { name: string; status: 'connected' | 'needs_auth' | 'failed' | 'unknown'; tools?: string[] }[];
     /** Local clients (agent CLIs) Link found here, from Link 0.1.8. */
     clients?: { agent: LinkAgent; state: 'missing' | 'signed-out' | 'ready'; connected: boolean }[];
+    /** How the employees' browser runs there: a window to watch (default) or the background only. */
+    browser?: 'visible' | 'background';
   };
 }
 

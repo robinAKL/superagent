@@ -21,6 +21,8 @@ import {
   EVENTS_PAGE,
   MemoryWorkerRegistry,
   WORKER_EVENT_KINDS,
+  BROWSER_MODES,
+  type BrowserMode,
   type WorkerEventKind,
   registerWorker,
   toView,
@@ -373,6 +375,19 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return { opened: true };
   });
 
+  /** The same switch from the web page: whether the employees' browser shows a window on that computer. */
+  app.post('/:id/browser-mode', SELF, async (req, reply) => {
+    const user = req.user!;
+    const { id } = req.params as { id: string };
+    if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
+    const device = await workersState.registry.get(user.tenantId, id);
+    if (!device || device.revokedAt !== null || device.kind !== 'link' || !mayManage(user, device)) return reply.code(404).send({ error: 'not_found' });
+    const { mode } = (req.body ?? {}) as { mode?: unknown };
+    if (!BROWSER_MODES.includes(mode as BrowserMode)) return reply.code(400).send({ error: 'invalid_mode' });
+    await workersState.registry.patchCapabilities(user.tenantId, id, { browser: mode as BrowserMode });
+    return { browser: mode };
+  });
+
   /** Address an instruction to one worker. It is delivered on the worker's next poll, however long it was away. */
   app.post('/:id/events', async (req, reply) => {
     const user = req.user;
@@ -574,7 +589,16 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
       policies[binding.projectId] = policy;
       modes[binding.employeeId] = policy.mode;
     }
-    return { policies, modes };
+    return { policies, modes, browser: fresh?.capabilities.browser ?? 'visible' };
+  });
+
+  /** The tray's switch for the employees' browser on this computer: a window to watch, or the background only. */
+  app.post('/browser-mode', async (req, reply) => {
+    const worker = req.worker!;
+    const { mode } = (req.body ?? {}) as { mode?: unknown };
+    if (!BROWSER_MODES.includes(mode as BrowserMode)) return reply.code(400).send({ error: 'invalid_mode' });
+    await workersState.registry.patchCapabilities(worker.tenantId, worker.id, { browser: mode as BrowserMode });
+    return { browser: mode };
   });
 
   /** Tool names the agent asked about during a task, so the tool list can show them with a switch each. */

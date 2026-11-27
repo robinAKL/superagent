@@ -72,7 +72,7 @@ const BROWSER_TOOL = join(dirname(fileURLToPath(import.meta.url)), 'browser-mcp.
  * The background browser (browser-mcp.mjs) as an MCP server for one project, or null on a computer without Chrome or
  * Edge. Everything it needs is passed explicitly: a client may start MCP servers with a trimmed environment.
  */
-export function browserServer(project, env = process.env, find = findBrowser) {
+export function browserServer(project, env = process.env, find = findBrowser, { visible = false } = {}) {
   if (env.SUPERAGENT_BROWSER_DISABLED === '1') return null;
   const executable = find(env);
   if (!executable) return null;
@@ -83,12 +83,13 @@ export function browserServer(project, env = process.env, find = findBrowser) {
       SUPERAGENT_BROWSER: executable,
       SUPERAGENT_BROWSER_PROFILE: browserProfile(env),
       SUPERAGENT_BROWSER_OUT: project.directory,
+      SUPERAGENT_BROWSER_VISIBLE: visible ? '1' : '0',
     },
   };
 }
 
 /** Said before the task, so the client reaches for the background browser rather than the screen. */
-export const BROWSER_HINT = '（SuperAgent Link：要打开网页、查资料或填写网页表单时，请使用 superagent_browser 后台浏览器工具（browser_open、browser_read、browser_click、browser_type、browser_screenshot）。它在后台运行，电脑锁屏或远程桌面最小化时也能用。不要去操作屏幕上的窗口，也不要控制用户自己打开的浏览器。'
+export const BROWSER_HINT = '（SuperAgent Link：要打开网页、查资料或填写网页表单时，请使用 superagent_browser 员工浏览器工具（browser_open、browser_read、browser_click、browser_type、browser_screenshot）。它不需要操作屏幕，电脑锁屏或远程桌面最小化时也能用。不要去操作屏幕上的其他窗口，也不要控制用户自己打开的浏览器。'
   + '如果网站要求登录，不要尝试输入账号密码，直接回报：“没有做成：<网站> 需要登录。请在这台电脑的 Link 托盘里点「员工浏览器（登录网站）」，或在网页「已连接的电脑」里点「打开员工浏览器」，登录一次后告诉我重试。”）';
 
 /** Codex takes MCP servers as -c overrides; JSON strings are valid TOML basic strings. */
@@ -125,7 +126,7 @@ function mcpArgs(approver, browser) {
  * One headless run of the project's client. Claude Code asks the room through `approver`; Codex and the other clients
  * (agents.mjs) get the employee's authorisation `mode` as their own sandbox or approval setting.
  */
-export function launchAgent(project, prompt, session, notify, approver = null, { mode = 'standard', browser = browserServer(project) } = {}) {
+export function launchAgent(project, prompt, session, notify, approver = null, { mode = 'standard', visible = false, browser = browserServer(project, process.env, findBrowser, { visible }) } = {}) {
   const codex = project.agent === 'codex';
   const claude = project.agent === 'claude-code';
   // Claude Code and Codex get the background browser; the hint makes them use it instead of the screen.

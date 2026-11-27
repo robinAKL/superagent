@@ -28,6 +28,8 @@ const TEXT = {
     browserTitle: 'Employee browser',
     browserHint: 'Employees open web pages in their own background browser on this computer, not on your screen. To let them use a website that needs an account (Google, a supplier portal), open it here once and sign in; it stays signed in for later tasks.',
     browserOpen: 'Open the employee browser to sign in',
+    browserVisible: 'Show the window while working', browserBackground: 'Background only',
+    browserModeHint: 'Show the window: when an employee uses the browser, a window opens on this computer so whoever is there can watch. It switches to the background by itself while the screen is locked or the remote desktop is disconnected.',
     browserSent: 'Opening on {device}. Sign in to the websites in that window, then close it.',
   },
   zh: {
@@ -43,6 +45,8 @@ const TEXT = {
     browserTitle: '员工浏览器',
     browserHint: '员工打开网页用的是这台电脑上自己的后台浏览器，不占你的屏幕。员工要用到需要账号的网站（比如谷歌、供应商后台）时，在这里打开一次登录好，之后的任务都保持登录。',
     browserOpen: '打开员工浏览器（登录网站）',
+    browserVisible: '干活时显示窗口', browserBackground: '在后台运行',
+    browserModeHint: '显示窗口：员工用浏览器干活时，这台电脑上会弹出窗口，电脑前的人能看着它操作；锁屏或远程桌面断开时会自动转到后台。',
     browserSent: '正在 {device} 上打开。在那个窗口里登录员工要用的网站，登录完关掉窗口即可。',
   },
 };
@@ -60,6 +64,15 @@ export function LocalClients({ device, users = {}, onChanged }: { device: LinkDe
   const [state, setState] = useState<{ agent: string; result: 'sent' | 'failed' } | null>(null);
   const [busy, setBusy] = useState(false);
   const [browser, setBrowser] = useState<'sent' | 'failed' | null>(null);
+  const mode = device.capabilities.browser ?? 'visible';
+
+  async function setMode(next: 'visible' | 'background') {
+    setBusy(true);
+    const r = await api(`/api/v1/workers/${device.id}/browser-mode`, { method: 'POST', body: JSON.stringify({ mode: next }) }).catch(() => null);
+    setBusy(false);
+    if (!r || r.status !== 200) setBrowser('failed');
+    onChanged();
+  }
 
   async function openBrowser() {
     setBusy(true);
@@ -106,7 +119,15 @@ export function LocalClients({ device, users = {}, onChanged }: { device: LinkDe
       <button type="button" className="btn quiet" disabled={busy || device.status === 'offline' || device.status === 'revoked'} onClick={() => void openBrowser()}>
         {t('browserOpen')}
       </button>
-      <p className="helper">{t('browserHint')}</p>
+      <div className="chip-row local-browser-mode" role="group" aria-label={t('browserTitle')}>
+        {(['visible', 'background'] as const).map((option) => (
+          <button key={option} type="button" className="chip" aria-pressed={mode === option} disabled={busy || device.status === 'revoked'}
+            onClick={() => { if (mode !== option) void setMode(option); }}>
+            {t(option === 'visible' ? 'browserVisible' : 'browserBackground')}
+          </button>
+        ))}
+      </div>
+      <p className="helper">{t(mode === 'visible' ? 'browserModeHint' : 'browserHint')}</p>
       {browser ? <p className={browser === 'sent' ? 'helper' : 'warn'} role="status">{browser === 'sent' ? t('browserSent', { device: device.name }) : t('failed')}</p> : null}
     </div>
   </section>;

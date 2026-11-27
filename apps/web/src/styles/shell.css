@@ -324,6 +324,7 @@ button, input, select, textarea { font-family: inherit; }
   padding: var(--space-xs) var(--space-sm); border: 1px dashed var(--color-rule); border-radius: var(--radius-sm); }
 .local-browser .btn { grid-column: 3; }
 .local-browser > p { grid-column: 1 / -1; margin: 0; }
+.local-browser-mode { grid-column: 1 / -1; }
 @media (max-width: 560px) { .local-client { grid-template-columns: 1fr auto; } .local-client .btn { grid-column: 1 / -1; } }
 
 /* Phones: the capability list reads as one block per capability (name, then who provides it) instead of a table
