@@ -39,12 +39,16 @@ async function fixture(t, agent = 'codex', options = {}) {
   if (options.launchWithApprovals) config.projects.p1.approvals = 'room';
   const events = [];
   const requests = [];
-  const control = { refuseDispatch: false, pollFailures: 0, authAgents: [], mcpLogins: [], clientSetups: [] };
+  const control = { refuseDispatch: false, pollFailures: 0, pollTimeouts: 0, authAgents: [], mcpLogins: [], clientSetups: [] };
   const fetcher = async (url, init) => {
     const path = url.pathname;
     const body = JSON.parse(init.body);
     requests.push({ path, body });
     if (path.endsWith('/poll')) {
+      if (control.pollTimeouts > 0) {
+        control.pollTimeouts -= 1;
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      }
       if (control.pollFailures > 0) {
         control.pollFailures -= 1;
         throw new Error('synthetic disconnect');
@@ -64,6 +68,7 @@ async function fixture(t, agent = 'codex', options = {}) {
     make: () => new WorkerLink(config, 'test-token', {
       fetcher, launch: options.launch, launchWithApprovals: options.launchWithApprovals,
       sleep: options.sleep, renameState: options.renameState, onAuth: (agent) => control.authAgents.push(agent),
+      ...(options.onStatus ? { onStatus: options.onStatus } : {}),
       onMcpLogin: (server) => control.mcpLogins.push(server),
       onClientSetup: (agent, action) => control.clientSetups.push([agent, action]),
       ...(options.discover ? { discover: options.discover } : {}),
@@ -180,6 +185,32 @@ test('reconnects with backoff and delivers a queued task after a network interru
   assert.deepEqual(retryDelays, [1_000, 2_000]);
   assert.equal((await f.state()).cursor, 1);
   assert.ok(f.requests.some(({ path, body }) => path.endsWith('/report') && body.body === 'Result: Review the sample'));
+});
+
+test('one poll that runs long is retried at once; two in a row are a reconnect', { timeout: 8_000 }, async (t) => {
+  const retryDelays = [];
+  const states = [];
+  const f = await fixture(t, 'codex', { sleep: async (ms) => { retryDelays.push(ms); }, onStatus: (state) => states.push(state) });
+  const shutdown = new AbortController();
+  f.control.pollTimeouts = 1;
+  let polls = 0;
+  f.control.stopAfterPoll = async () => {
+    polls += 1;
+    if (polls === 1) return false;
+    if (polls === 2) { f.control.pollTimeouts = 2; return false; }
+    shutdown.abort();
+    return true;
+  };
+  await f.make().start(shutdown.signal);
+  // The lone timeout neither waited nor reported a reconnect; the pair did, once.
+  assert.deepEqual(retryDelays, [1_000]);
+  assert.deepEqual(states, ['connected', 'reconnecting', 'connected']);
+});
+
+test('Link waits long enough for the server to hold a poll and for a slow task update', async () => {
+  const { POLL_WAIT_MS, POLL_TIMEOUT_MS, TASK_UPDATE_TIMEOUT_MS } = await import('./link.mjs');
+  assert.ok(POLL_TIMEOUT_MS - POLL_WAIT_MS >= 10_000);
+  assert.ok(TASK_UPDATE_TIMEOUT_MS >= 30_000);
 });
 
 test('restarts an unfinished task through its explicit saved session', async (t) => {

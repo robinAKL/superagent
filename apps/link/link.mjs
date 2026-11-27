@@ -58,6 +58,16 @@ export function withMcpTools(servers, tools) {
 
 const IDLE_ERROR_DELAY_MS = 2_000;
 const FIRST_POLL_RETRY_MS = 1_000;
+/** The server holds a poll open this long when there is nothing to hand over (LONG_POLL_MAX_MS on the server). */
+export const POLL_WAIT_MS = 25_000;
+/**
+ * How long Link waits for a poll before giving up. The server may hold it POLL_WAIT_MS, and a computer in New
+ * Zealand reaching a server in Australia needs headroom on top: 3 s was too little and logged a timeout and a
+ * reconnect every half hour or so.
+ */
+export const POLL_TIMEOUT_MS = POLL_WAIT_MS + 15_000;
+/** Saying a task was received, its progress or its result: a slow server must not make Link give up early. */
+export const TASK_UPDATE_TIMEOUT_MS = 30_000;
 const MAX_POLL_RETRY_MS = 5_000;
 const STATE_TEMP_SUFFIX = '.tmp';
 const STATE_RENAME_RETRY_MS = [0, 15, 30, 60, 120, 240];
@@ -199,7 +209,7 @@ export class WorkerLink {
   }
 
   #update(job, kind, body) {
-    return this.#api('/room-tasks/' + encodeURIComponent(job.id) + '/' + kind, { body }, AbortSignal.timeout(10_000));
+    return this.#api('/room-tasks/' + encodeURIComponent(job.id) + '/' + kind, { body }, AbortSignal.timeout(TASK_UPDATE_TIMEOUT_MS));
   }
 
   /** A Codex App Server request ({ kind }) or a Claude Code tool call ({ tool, input, summary }) for the room to decide. */
@@ -337,7 +347,7 @@ export class WorkerLink {
     if (this.#active?.job === job) this.#active.process.cancel();
   }
 
-  async poll(signal, waitMs = 25_000) {
+  async poll(signal, waitMs = POLL_WAIT_MS) {
     const { events } = await this.#api('/poll', { since: this.#state.cursor, waitMs, eventsOnly: true }, signal);
     for (const event of events ?? []) {
       if (!Number.isSafeInteger(event.seq) || event.seq <= this.#state.cursor) continue;
@@ -459,6 +469,8 @@ export class WorkerLink {
     const shutdown = new AbortController();
     const signal = AbortSignal.any([externalSignal, shutdown.signal]);
     let retryMs = FIRST_POLL_RETRY_MS;
+    // One poll that runs long is retried at once without calling it a lost connection; a second in a row is one.
+    let timedOut = false;
     let lastStatus;
     let publishAfter = 0;
     // The first heartbeat already says which local clients this computer has (the page shows what to do next).
@@ -489,9 +501,10 @@ export class WorkerLink {
             await this.#api('/heartbeat', { capabilities: this.#capabilities() }, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
             publishAfter = Date.now() + 30_000;
           }
-          await this.poll(AbortSignal.any([signal, AbortSignal.timeout(28_000)]));
+          await this.poll(AbortSignal.any([signal, AbortSignal.timeout(POLL_TIMEOUT_MS)]));
           markStatus('connected');
           retryMs = FIRST_POLL_RETRY_MS;
+          timedOut = false;
           schedule();
         } catch (error) {
           if (this.#storageFailure) throw this.#storageFailure;
@@ -500,6 +513,11 @@ export class WorkerLink {
             markStatus('revoked');
             throw error;
           }
+          if (error.name === 'TimeoutError' && !timedOut) {
+            timedOut = true;
+            continue;
+          }
+          timedOut = false;
           markStatus('reconnecting');
           publishAfter = 0;
           console.error(error.message);
