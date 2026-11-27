@@ -189,9 +189,30 @@ test('a new room has no tasks; greetings, questions and discussion only get a re
   await expect(taskCards(page)).toHaveCount(0);
   expect(await tasksOf(page, OWNER)).toEqual([]);
 
+  // typing @ opens the picker, which the keyboard drives: arrows move, Escape closes, Enter picks instead of sending
+  const picker = page.getByRole('listbox', { name: '选择数字员工' });
+  await draft(page).fill('');
+  await draft(page).press('@');
+  await expect(picker).toBeVisible();
+  const first = picker.getByRole('option').first();
+  await expect(first).toHaveAttribute('aria-selected', 'true');
+  await draft(page).press('ArrowDown');
+  await draft(page).press('ArrowUp');
+  await expect(first).toHaveAttribute('aria-selected', 'true');
+  await draft(page).press('Escape');
+  await expect(picker).toHaveCount(0);
+  await expect(draft(page)).toHaveValue('@');
+  await draft(page).fill('');
+  await draft(page).press('@');
+  const firstName = (await picker.getByRole('option').first().locator('strong').innerText()).replace(/^@/, '');
+  await draft(page).press('Enter');
+  await expect(picker).toHaveCount(0);
+  await expect(draft(page)).toHaveValue(`@${firstName} `);
+  await expect(taskCards(page)).toHaveCount(0);
+  await draft(page).fill('');
+
   // the mention picker opens, lists the real employee, and writes "@name " into the draft
   await page.getByRole('button', { name: '@ 提及' }).click();
-  const picker = page.getByRole('listbox', { name: '选择数字员工' });
   await expect(picker).toBeVisible();
   await picker.locator(`[data-mention="${sales.id}"]`).click();
   await expect(picker).toHaveCount(0);

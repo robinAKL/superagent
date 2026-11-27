@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
-  actorLabel, applyAsyncReport, approvalLine, attemptsLine, CommandRoomPage, draftStorageKey, insertMention, mergeRoomMessages, messageKindLabel, nextRoomCursor,
+  actorLabel, applyAsyncReport, approvalLine, attemptsLine, CommandRoomPage, draftStorageKey, insertMention, mentionKey, mergeRoomMessages, messageKindLabel, nextRoomCursor,
   resultOverview, roomDraftKey, roomEventsFromSse, supplementError, taskActions, taskLine, taskReports, taskStatusLabel,
   unsentDraftBoundary,
   type ApiMessage, type ApiTask, type RosterEmployee,
@@ -83,6 +83,19 @@ describe('execution pages reuse the v12 copy', () => {
     expect(insertMention('请看一下', '销售员工')).toBe('请看一下 @销售员工 ');
     expect(insertMention('请看一下 @', '销售员工')).toBe('请看一下 @销售员工 ');
     expect(draftStorageKey('user-owner')).not.toBe(draftStorageKey('user-sales'));
+  });
+
+  it('the @ list follows the arrow keys, picks with Enter or Tab and closes with Escape', () => {
+    expect(mentionKey('ArrowDown', 0, 2)).toEqual({ move: 1 });
+    expect(mentionKey('ArrowDown', 1, 2)).toEqual({ move: 0 });
+    expect(mentionKey('ArrowUp', 0, 2)).toEqual({ move: 1 });
+    expect(mentionKey('Enter', 1, 2)).toBe('pick');
+    expect(mentionKey('Tab', 0, 2)).toBe('pick');
+    expect(mentionKey('Escape', 0, 2)).toBe('close');
+    expect(mentionKey('Escape', 0, 0)).toBe('close');
+    // With nobody to pick, Enter still sends the message; other keys keep typing.
+    expect(mentionKey('Enter', 0, 0)).toBeNull();
+    expect(mentionKey('a', 0, 2)).toBeNull();
   });
 
   it('labels a server task by status and the employee it was given to', () => {
