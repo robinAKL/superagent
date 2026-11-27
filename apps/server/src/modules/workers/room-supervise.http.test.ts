@@ -58,6 +58,17 @@ it('Super Agent resumes a task whose computer came back: the same task goes to L
   expect(again.json().duplicate).toBeUndefined();
   expect(roomState.current.task(task.id, { userId: 'owner', roles: ['owner'], projectScopes: [] }).status).toBe('running');
   expect(roomState.current.listTasks({ userId: 'owner', roles: ['owner'], projectScopes: [] })).toHaveLength(1);
+
+  // The first run's failure arrives late (its computer timed out and sent it again): it is not this run's word.
+  const late = await progress(task.id, 'Agent CLI could not be started.');
+  expect(late.statusCode).toBe(409);
+  expect(late.json().error).toBe('run_replaced');
+  expect(roomState.current.task(task.id, { userId: 'owner', roles: ['owner'], projectScopes: [] }).status).toBe('running');
+  // The current run's own identical failure is then taken, not dropped as a repeat.
+  const failed = await progress(`${task.id}~r1`, 'Agent CLI could not be started.');
+  expect(failed.statusCode).toBe(200);
+  expect(failed.json().duplicate).toBeUndefined();
+  expect(roomState.current.task(task.id, { userId: 'owner', roles: ['owner'], projectScopes: [] }).waitingReason).toBe('执行失败');
   void worker;
 });
 

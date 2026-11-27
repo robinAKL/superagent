@@ -62,6 +62,9 @@ async function fixture(t, agent = 'codex', options = {}) {
       return Response.json({ approval: { status: options.approvalStatus } });
     }
     if (control.refuseDispatch && path.endsWith('/progress')) return Response.json({}, { status: 404 });
+    // A slow server for one update: what reaches it first is what lands first.
+    if (control.slowBody && body.body === control.slowBody) await delay(80);
+    if (path.includes('/room-tasks/')) control.landed?.push(body.body);
     return Response.json({});
   };
   return {
@@ -211,6 +214,18 @@ test('Link waits long enough for the server to hold a poll and for a slow task u
   const { POLL_WAIT_MS, POLL_TIMEOUT_MS, TASK_UPDATE_TIMEOUT_MS } = await import('./link.mjs');
   assert.ok(POLL_TIMEOUT_MS - POLL_WAIT_MS >= 10_000);
   assert.ok(TASK_UPDATE_TIMEOUT_MS >= 30_000);
+});
+
+test('a run that fails at once still says "started" before it says why it failed', { timeout: 8_000 }, async (t) => {
+  const failed = { completed: Promise.resolve({ failure: 'Agent CLI could not be started.' }), cancel() {} };
+  const f = await fixture(t, 'gemini', { launch: () => failed });
+  f.control.slowBody = 'Agent started.';
+  f.control.landed = [];
+  const link = f.make();
+  f.wake(1, 'Review the sample');
+  await link.poll(undefined, 0);
+  await link.runNext();
+  assert.deepEqual(f.control.landed, ['Link received the task.', 'Agent started.', 'Agent CLI could not be started.']);
 });
 
 test('restarts an unfinished task through its explicit saved session', async (t) => {

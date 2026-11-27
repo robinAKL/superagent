@@ -689,13 +689,15 @@ export const workerLinkModule: FastifyPluginAsync = async (app) => {
       return reply.code(404).send({ error: 'task_not_found' });
     }
     const digest = createHash('sha256').update(body).digest('hex');
-    // A run Super Agent resumed or retried may say the same words as the run before; it is still a new update.
-    const attempt = roomState.current.listTasks({ userId: 'system', roles: ['owner'], projectScopes: [] }).find((item) => item.id === id)?.watch;
-    const sends = attempt?.sends ?? attempt?.attempts ?? 0;
+    // Updates belong to the run that sent them. A run Super Agent has since replaced (it was retried or resumed) may
+    // still deliver late, for instance after its computer timed out and sent again: that must not be counted as the
+    // current run's word, or the current run's own identical update would be taken for a repeat and dropped.
+    const current = roomState.current.listTasks({ userId: 'system', roles: ['owner'], projectScopes: [] }).find((item) => item.id === id);
+    if (current && runId !== roomRunId(id, sendNumber(current))) return reply.code(409).send({ error: 'run_replaced' });
     let message;
     try {
       message = roomState.current.updateFromWorker(
-        id, worker.tenantId, body, 'worker-' + action + ':' + id + ':' + (sends ? `a${sends}:` : '') + digest, action === 'report',
+        id, worker.tenantId, body, 'worker-' + action + ':' + runId + ':' + digest, action === 'report',
         task => workerMayRun(worker, task) && !!worker.capabilities.roomAssignments?.some(assignment =>
           assignment.employeeId === task.employeeId && assignment.projectId === task.projectId,
         ),
