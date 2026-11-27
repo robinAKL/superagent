@@ -42,7 +42,7 @@ async function fixture(t, agent = 'codex', options = {}) {
   if (options.launchWithApprovals) config.projects.p1.approvals = 'room';
   const events = [];
   const requests = [];
-  const control = { refuseDispatch: false, pollFailures: 0, pollTimeouts: 0, authAgents: [], mcpLogins: [], clientSetups: [] };
+  const control = { refuseDispatch: false, pollFailures: 0, pollTimeouts: 0, browserOpened: [], browserSignIns: [], authAgents: [], mcpLogins: [], clientSetups: [] };
   const fetcher = async (url, init) => {
     const path = url.pathname;
     const body = JSON.parse(init.body);
@@ -76,6 +76,8 @@ async function fixture(t, agent = 'codex', options = {}) {
       sleep: options.sleep, renameState: options.renameState, onAuth: (agent) => control.authAgents.push(agent),
       ...(options.onStatus ? { onStatus: options.onStatus } : {}),
       desktop: options.desktop ?? (async () => 'available'),
+      openBrowser: (request) => { control.browserOpened.push(request); return control.browserResult ?? 'opened'; },
+      onBrowserSignIn: (result) => control.browserSignIns.push(result),
       onMcpLogin: (server) => control.mcpLogins.push(server),
       onClientSetup: (agent, action) => control.clientSetups.push([agent, action]),
       ...(options.discover ? { discover: options.discover } : {}),
@@ -89,6 +91,7 @@ async function fixture(t, agent = 'codex', options = {}) {
     cancel: (seq) => events.push({ seq, kind: 'cancel', payload: { roomTaskId: 'task1' } }),
     mcpLogin: (seq, server) => events.push({ seq, kind: 'mcp_login', payload: { server } }),
     clientSetup: (seq, agent, action) => events.push({ seq, kind: 'client_setup', payload: { agent, action } }),
+    browserSignIn: (seq, payload = {}) => events.push({ seq, kind: 'browser_sign_in', payload }),
   };
 }
 
@@ -124,6 +127,20 @@ test('a locked screen is said in the room before the task, and the client is tol
   const [agent] = await f.args();
   assert.match(agent.prompt, /^（SuperAgent Link：这台电脑的屏幕现在不可用（已锁屏）/);
   assert.ok(agent.prompt.endsWith('Open the accounting app'));
+});
+
+test('the page opens the employees\' browser here for the person to sign in, and says when a task is using it', async (t) => {
+  const f = await fixture(t, 'codex');
+  const link = f.make();
+  f.browserSignIn(1, { url: 'https://accounts.google.com/' });
+  await link.poll(undefined, 0);
+  assert.deepEqual(f.control.browserOpened, [{ url: 'https://accounts.google.com/' }]);
+  assert.deepEqual(f.control.browserSignIns, ['opened']);
+  f.control.browserResult = 'busy';
+  f.browserSignIn(2);
+  await link.poll(undefined, 0);
+  assert.deepEqual(f.control.browserOpened.at(-1), {});
+  assert.deepEqual(f.control.browserSignIns, ['opened', 'busy']);
 });
 
 test('Codex runs with the trust the employee was given on this computer', async (t) => {

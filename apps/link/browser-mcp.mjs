@@ -146,6 +146,10 @@ export class BackgroundBrowser {
     if (this.#socket) return;
     if (!this.#executable) throw new Error('No Chrome or Edge was found on this computer for the background browser.');
     mkdirSync(this.#profile, { recursive: true });
+    // The person may have the employees' browser open to sign in: both cannot use one profile at once.
+    if (profileInUse(this.#profile)) {
+      throw new Error('The employees\' browser is open for signing in on this computer. Close that window, then try again.');
+    }
     const portFile = join(this.#profile, 'DevToolsActivePort');
     rmSync(portFile, { force: true });
     this.#child = spawn(this.#executable, [
@@ -260,6 +264,37 @@ export class BackgroundBrowser {
   }
 }
 
+/** Where the employees' browser keeps its logins on this computer (Link and the tray use the same folder). */
+export function browserProfile(env = process.env) {
+  return env.SUPERAGENT_BROWSER_PROFILE || join(env.LOCALAPPDATA || tmpdir(), 'SuperAgentLink', 'browser-profile');
+}
+
+/** Chrome holds this file open while it runs with the profile: a running task's background browser, for one. */
+export function profileInUse(profile) {
+  const lock = join(profile, 'lockfile');
+  if (!existsSync(lock)) return false;
+  try { rmSync(lock); return false; } catch { return true; }
+}
+
+/** The first page shown when the person opens the employees' browser to sign in. */
+export const SIGN_IN_PAGE = 'https://accounts.google.com/';
+
+/**
+ * Opens the employees' browser as an ordinary, visible window, so the person signs in to the websites the employees
+ * need. Nothing is automated in it; the logins it keeps are what the background browser uses afterwards.
+ * Returns 'opened', 'busy' (a task is using the browser now) or 'missing' (no Chrome or Edge here).
+ */
+export function openForSignIn({ executable = findBrowser(), profile = browserProfile(), url = SIGN_IN_PAGE, launch = spawn, inUse = profileInUse } = {}) {
+  if (!executable) return 'missing';
+  mkdirSync(profile, { recursive: true });
+  if (inUse(profile)) return 'busy';
+  const child = launch(executable, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--new-window', webUrl(url) ?? SIGN_IN_PAGE], {
+    detached: true, stdio: 'ignore',
+  });
+  child.unref?.();
+  return 'opened';
+}
+
 /** Answers one MCP request; `browser` does the work. */
 export async function handle(message, browser, output) {
   const { id, method, params } = message;
@@ -287,9 +322,13 @@ export async function handle(message, browser, output) {
   return null;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const profile = process.env.SUPERAGENT_BROWSER_PROFILE
-    || join(process.env.LOCALAPPDATA || tmpdir(), 'SuperAgentLink', 'browser-profile');
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === '--sign-in') {
+  // The tray's "Employee browser" item: open it visibly, say how it went, and leave.
+  const result = openForSignIn({ url: process.argv[3] || SIGN_IN_PAGE });
+  console.log('LINK_BROWSER_SIGN_IN:' + result);
+  process.exitCode = result === 'opened' ? 0 : result === 'busy' ? 3 : 4;
+} else if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const profile = browserProfile();
   const output = process.env.SUPERAGENT_BROWSER_OUT || process.cwd();
   const browser = new BackgroundBrowser({ profile });
   const reader = createInterface({ input: process.stdin });

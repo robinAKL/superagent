@@ -167,6 +167,7 @@ namespace SuperAgentLinkTray
             var configureItem = new ToolStripMenuItem("Local clients / 本地客户端（Claude Code、Codex、Cursor、Copilot、Gemini、Qwen）", null, OnConfigureAgent);
             var repairItem = new ToolStripMenuItem("Re-pair / 重新配对", null, OnRepair);
             var logsItem = new ToolStripMenuItem("View Logs / 查看日志", null, OnViewLogs);
+            var browserItem = new ToolStripMenuItem("Employee browser - sign in to websites / 员工浏览器（登录网站）", null, OnOpenEmployeeBrowser);
             var exitItem = new ToolStripMenuItem("Exit / 退出", null, OnExit);
             _signInItem = new ToolStripMenuItem("Sign in again / 重新登录", null, (s, e) => BeginReauth(_authAgent)) { Visible = false };
 
@@ -189,6 +190,7 @@ namespace SuperAgentLinkTray
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(openRoomItem);
             menu.Items.Add(configureItem);
+            menu.Items.Add(browserItem);
             menu.Items.Add(repairItem);
             menu.Items.Add(logsItem);
             menu.Items.Add(_modeMenu);
@@ -478,6 +480,52 @@ namespace SuperAgentLinkTray
             {
                 OpenMcpLogin(line.Substring("LINK_MCP_LOGIN:".Length).Trim());
             }
+            else if (line.StartsWith("LINK_BROWSER_SIGN_IN:", StringComparison.Ordinal))
+            {
+                // Asked from the web page: Link opened the employees' browser here, or says why it could not.
+                ExplainBrowserSignIn(line.Substring("LINK_BROWSER_SIGN_IN:".Length).Trim());
+            }
+        }
+
+        /** What the person at this computer is told when the employees' browser could not be opened. */
+        private void ExplainBrowserSignIn(string result)
+        {
+            if (result == "busy")
+                Notify("员工浏览器 / Employee browser", "员工正在用浏览器干活，做完后再打开登录。 An employee is using the browser now; try again when it finishes.", ToolTipIcon.Info);
+            else if (result == "missing")
+                Notify("员工浏览器 / Employee browser", "这台电脑上没有找到 Chrome 或 Edge。 No Chrome or Edge was found on this computer.", ToolTipIcon.Warning);
+        }
+
+        /**
+         * Opens the employees' browser as a normal window so the person signs in to the websites the employees use
+         * (Google, a supplier portal). The background browser keeps those logins for every later task.
+         */
+        private async void OnOpenEmployeeBrowser(object sender, EventArgs e)
+        {
+            var tool = Path.Combine(_installDir, "app", "link", "browser-mcp.mjs");
+            if (!File.Exists(_nodeExe) || !File.Exists(tool)) { Log("Missing employee browser tool: " + tool); return; }
+            string result = "missing";
+            await Task.Run(() =>
+            {
+                try
+                {
+                    var start = new ProcessStartInfo
+                    {
+                        FileName = _nodeExe, Arguments = "\"" + tool + "\" --sign-in",
+                        UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true,
+                    };
+                    using (var process = Process.Start(start))
+                    {
+                        var output = process.StandardOutput.ReadToEnd();
+                        process.WaitForExit(15000);
+                        var marker = "LINK_BROWSER_SIGN_IN:";
+                        var at = output.IndexOf(marker, StringComparison.Ordinal);
+                        if (at >= 0) result = output.Substring(at + marker.Length).Trim();
+                    }
+                }
+                catch (Exception error) { Log("Employee browser failed to open: " + error.Message); }
+            });
+            ExplainBrowserSignIn(result);
         }
 
         /** The local clients Link supports (apps/link/agents.mjs): name and the CLI's own sign-in arguments. */

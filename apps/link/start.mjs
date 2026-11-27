@@ -94,6 +94,7 @@ async function main() {
         onMcpLogin: (server) => console.log(`LINK_MCP_LOGIN:${server}`),
         // The tray opens its local clients window at that step (install, sign in, connect a folder).
         onClientSetup: (agent, action) => console.log(`LINK_CLIENT_SETUP:${agent}:${action}`),
+        onBrowserSignIn: (result) => console.log(`LINK_BROWSER_SIGN_IN:${result}`),
       }).start(shutdown.signal);
     } catch (error) {
       if (error.status !== 401) throw error;

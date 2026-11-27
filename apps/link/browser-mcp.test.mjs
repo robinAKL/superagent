@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BackgroundBrowser, TOOLS, findBrowser, handle, screenshotPath, webUrl } from './browser-mcp.mjs';
+import { BackgroundBrowser, SIGN_IN_PAGE, TOOLS, findBrowser, handle, openForSignIn, screenshotPath, webUrl } from './browser-mcp.mjs';
 
 describe('background browser: rules', () => {
   it('opens only web pages', () => {
@@ -39,6 +39,22 @@ describe('background browser: rules', () => {
       new BackgroundBrowser({ executable: null, profile: tmpdir() }), tmpdir());
     assert.equal(refused.result.isError, true);
     assert.match(refused.result.content[0].text, /http or https/);
+  });
+});
+
+describe('employee browser for signing in', () => {
+  it('opens a visible window on the employees\' profile, and waits while a task is using it', () => {
+    const launched = [];
+    const launch = (file, args) => { launched.push([file, args]); return { unref() {} }; };
+    const profile = join(tmpdir(), 'superagent-signin-profile');
+    assert.equal(openForSignIn({ executable: 'chrome.exe', profile, launch, inUse: () => false }), 'opened');
+    assert.deepEqual(launched[0], ['chrome.exe', [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--new-window', SIGN_IN_PAGE]]);
+    assert.ok(!launched[0][1].some((arg) => /headless|remote-debugging/.test(arg)), 'a person signs in to a normal window');
+    assert.equal(openForSignIn({ executable: 'chrome.exe', profile, launch, inUse: () => false, url: 'javascript:alert(1)' }), 'opened');
+    assert.equal(launched[1][1].at(-1), SIGN_IN_PAGE);
+    assert.equal(openForSignIn({ executable: 'chrome.exe', profile, launch, inUse: () => true }), 'busy');
+    assert.equal(openForSignIn({ executable: null, profile, launch }), 'missing');
+    assert.equal(launched.length, 2);
   });
 });
 

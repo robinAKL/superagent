@@ -350,6 +350,29 @@ export const workersModule: FastifyPluginAsync = async (app) => {
     return { opened: true };
   });
 
+  /**
+   * Open the employees' browser on that computer, visibly, so the person there signs in to a website the employees
+   * use (Google, a supplier portal). The background browser keeps those logins.
+   */
+  app.post('/:id/browser-sign-in', SELF, async (req, reply) => {
+    const user = req.user!;
+    const { id } = req.params as { id: string };
+    if (!UUID_RE.test(id)) return reply.code(404).send({ error: 'not_found' });
+    const device = await workersState.registry.get(user.tenantId, id);
+    if (!device || device.revokedAt !== null || device.kind !== 'link' || !mayManage(user, device)) return reply.code(404).send({ error: 'not_found' });
+    const { url } = (req.body ?? {}) as { url?: unknown };
+    let page: string | undefined;
+    if (url !== undefined && url !== '') {
+      try { page = new URL(String(url)).href; } catch { return reply.code(400).send({ error: 'invalid_url' }); }
+      if (!/^https?:$/.test(new URL(page).protocol)) return reply.code(400).send({ error: 'invalid_url' });
+    }
+    const key = `${id}:browser`;
+    if ((lastMcpLogin.get(key) ?? 0) > workersState.now() - 30_000) return { opened: true, again: false };
+    lastMcpLogin.set(key, workersState.now());
+    await workersState.registry.appendEvent(user.tenantId, id, 'browser_sign_in', page ? { url: page } : {}, user.userId, workersState.now());
+    return { opened: true };
+  });
+
   /** Address an instruction to one worker. It is delivered on the worker's next poll, however long it was away. */
   app.post('/:id/events', async (req, reply) => {
     const user = req.user;

@@ -25,6 +25,10 @@ const TEXT = {
     sent: 'Opened on {device}. Follow the window there: click the button, sign in in the browser, then choose a folder. This page updates by itself.',
     failed: 'The computer could not be reached. Check that Link is running on it, then try again.',
     none: 'No client is connected yet: Super Agent cannot run work on this computer until one is.',
+    browserTitle: 'Employee browser',
+    browserHint: 'Employees open web pages in their own background browser on this computer, not on your screen. To let them use a website that needs an account (Google, a supplier portal), open it here once and sign in; it stays signed in for later tasks.',
+    browserOpen: 'Open the employee browser to sign in',
+    browserSent: 'Opening on {device}. Sign in to the websites in that window, then close it.',
   },
   zh: {
     title: '本地客户端', unknown: 'Link 还没有上报客户端情况（需要 Link 0.1.8 或更新版本，请在托盘里检查更新）。',
@@ -36,6 +40,10 @@ const TEXT = {
     sent: '已在 {device} 上打开。请在那台电脑弹出的窗口里点按钮、在浏览器里登录，最后选一个文件夹。这里会自动更新。',
     failed: '没能联系到那台电脑。请确认那台电脑上的 Link 在运行，再试一次。',
     none: '还没有连接任何客户端：连接之前，Super Agent 没法在这台电脑上干活。',
+    browserTitle: '员工浏览器',
+    browserHint: '员工打开网页用的是这台电脑上自己的后台浏览器，不占你的屏幕。员工要用到需要账号的网站（比如谷歌、供应商后台）时，在这里打开一次登录好，之后的任务都保持登录。',
+    browserOpen: '打开员工浏览器（登录网站）',
+    browserSent: '正在 {device} 上打开。在那个窗口里登录员工要用的网站，登录完关掉窗口即可。',
   },
 };
 
@@ -51,6 +59,14 @@ export function LocalClients({ device, users = {}, onChanged }: { device: LinkDe
   const clients = device.capabilities.clients;
   const [state, setState] = useState<{ agent: string; result: 'sent' | 'failed' } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [browser, setBrowser] = useState<'sent' | 'failed' | null>(null);
+
+  async function openBrowser() {
+    setBusy(true);
+    const r = await api(`/api/v1/workers/${device.id}/browser-sign-in`, { method: 'POST', body: '{}' }).catch(() => null);
+    setBusy(false);
+    setBrowser(r && r.status === 200 ? 'sent' : 'failed');
+  }
 
   async function open(client: LocalClient) {
     setBusy(true);
@@ -84,5 +100,14 @@ export function LocalClients({ device, users = {}, onChanged }: { device: LinkDe
         </li>;
       })}</ul>
     </>}
+    {/* The employees' own background browser: where the person signs in to websites the employees use. */}
+    <div className="local-browser" data-browser="">
+      <span className="local-client-name">{t('browserTitle')}</span>
+      <button type="button" className="btn quiet" disabled={busy || device.status === 'offline' || device.status === 'revoked'} onClick={() => void openBrowser()}>
+        {t('browserOpen')}
+      </button>
+      <p className="helper">{t('browserHint')}</p>
+      {browser ? <p className={browser === 'sent' ? 'helper' : 'warn'} role="status">{browser === 'sent' ? t('browserSent', { device: device.name }) : t('failed')}</p> : null}
+    </div>
   </section>;
 }
