@@ -82,7 +82,8 @@ it('mentioning an employee creates a task linked back to the message, and the re
   assert.deepEqual(report.taskIds, [result.task!.id]);
   assert.equal(service.listTasks(sales)[0]?.status, 'completed');
   const afterReload = service.eventsAfter('room-1', 0, owner);
-  assert.equal(afterReload.length >= 3, true);
+  // The message and the report; Super Agent does not repeat back a task the person assigned themselves.
+  assert.deepEqual(afterReload.map((message) => message.kind), ['message', 'report']);
 });
 
 it('reconnect returns only unseen messages, and a resent client id is stored once', () => {

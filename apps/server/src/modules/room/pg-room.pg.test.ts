@@ -102,8 +102,8 @@ live('a restarted room reloads the conversation from Postgres and keeps the clie
     const restored = CommandRoom.restore(employees, await loadRoomRows(db, 't'));
     const owner = { userId: 'user-owner', roles: ['owner' as const], projectScopes: [] };
     const messages = restored.eventsAfter('room-1', 0, owner);
-    expect(messages.map((message) => message.body)).toEqual(['@销售员工 整理询价草稿', '已交给 @销售员工：整理询价草稿', '询价草稿已整理']);
-    expect(messages.map((message) => message.kind)).toEqual(['message', 'reply', 'report']);
+    expect(messages.map((message) => message.body)).toEqual(['@销售员工 整理询价草稿', '询价草稿已整理']);
+    expect(messages.map((message) => message.kind)).toEqual(['message', 'report']);
     expect(restored.listTasks(owner)).toHaveLength(1);
     expect(restored.listTasks(owner)[0]).toMatchObject({
       status: 'completed',

@@ -444,6 +444,10 @@ export class CommandRoom {
     };
     this.tasks.push(task);
     message.taskIds = original ? [original.id, task.id] : [task.id];
+    // The person named the employee and the work themselves: the task is theirs, and Super Agent does not repeat it
+    // back. It still watches the task like any other (supervise()) and speaks up when something needs someone.
+    const direct = !input.systemWork && !original && mentions[0] === employee;
+    if (direct && !waiting) return { message, reply: null, task, duplicate: false };
     const reply = say(
       modelDown
         ? '暂时无法处理。任务已保留，状态是等待模型。'

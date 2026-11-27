@@ -216,7 +216,7 @@ it('a repeated report client id does not add a second transcript row', async () 
   expect(messages.json().messages.filter((message: { clientMessageId: string }) => message.clientMessageId === 'dedup-report')).toHaveLength(1);
   const stream = await app.inject({
     method: 'GET',
-    url: `/api/v1/room/stream?roomId=room-1&after=${posted.json().reply.seq}`,
+    url: `/api/v1/room/stream?roomId=room-1&after=${posted.json().message.seq}`,
   });
   expect(stream.headers['content-type']).toContain('text/event-stream');
   expect(stream.body.match(/"clientMessageId":"dedup-report"/g)).toHaveLength(1);
