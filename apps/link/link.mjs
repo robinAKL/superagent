@@ -8,6 +8,7 @@ import { launchAgent, launchCodexWithApprovals, projectDirectory } from './agent
 import { DEFAULT_POLICY, cleanPolicy, decide, describe, mcpToolsByServer, parseMcpList } from './policy.mjs';
 import { execFile } from 'node:child_process';
 import { AGENTS } from './agents.mjs';
+import { desktopNotice, desktopState } from './desktop.mjs';
 
 /** The local clients Link can run work with (agents.mjs). */
 export const CLIENTS = AGENTS;
@@ -87,6 +88,7 @@ export class WorkerLink {
   #onMcpLogin;
   #onClientSetup;
   #discoverClients;
+  #desktop;
   /** Local clients as last checked, refreshed hourly (every minute while a person sets one up). */
   #clients = null;
   #clientsCheckedAt = 0;
@@ -99,7 +101,7 @@ export class WorkerLink {
 
   constructor(config, token, {
     fetcher = fetch, launch = launchAgent, launchWithApprovals = launchCodexWithApprovals,
-    sleep = delay, onStatus = () => {}, onTask = () => {}, onAuth = () => {}, onMcpLogin = () => {}, onClientSetup = () => {}, discover = discoverClients, renameState = rename,
+    sleep = delay, onStatus = () => {}, onTask = () => {}, onAuth = () => {}, onMcpLogin = () => {}, onClientSetup = () => {}, discover = discoverClients, renameState = rename, desktop = desktopState,
   } = {}) {
     const endpoint = new URL(config.endpoint);
     if ((endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(endpoint.hostname)))
@@ -121,6 +123,7 @@ export class WorkerLink {
     this.#onMcpLogin = onMcpLogin;
     this.#onClientSetup = onClientSetup;
     this.#discoverClients = discover;
+    this.#desktop = desktop;
     this.#renameState = renameState;
     try { this.#state = JSON.parse(readFileSync(config.stateFile, 'utf8')); }
     catch (error) {
@@ -432,10 +435,14 @@ export class WorkerLink {
         } else if (!(project.agent === 'codex' && project.approvals === 'room')) {
           mode = (await this.#policy(job)).mode;
         }
+        // A locked or disconnected screen is said up front: the room hears why, the client does not try the screen.
+        const screen = desktopNotice(await this.#desktop().catch(() => 'unknown'));
+        if (screen) say(screen.progress);
+        const prompt = screen ? `${screen.hint}\n\n${job.prompt}` : job.prompt;
         const process = project.agent === 'codex' && project.approvals === 'room'
-          ? this.#launchWithApprovals(project, job.prompt, job.session, notify, (request, signal) => this.#approve(job, request, signal))
-          : mode ? this.#launch(project, job.prompt, job.session, notify, null, { mode })
-            : this.#launch(project, job.prompt, job.session, notify, approver);
+          ? this.#launchWithApprovals(project, prompt, job.session, notify, (request, signal) => this.#approve(job, request, signal))
+          : mode ? this.#launch(project, prompt, job.session, notify, null, { mode })
+            : this.#launch(project, prompt, job.session, notify, approver);
         this.#active = { job, process };
         this.#onTask(true);
         void this.#api('/heartbeat', { busy: true, waitingAuthReason: null }, AbortSignal.timeout(10_000)).catch(() => {});

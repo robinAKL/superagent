@@ -80,6 +80,11 @@ it('a report saying the work was not done is not a completion: Super Agent says 
   expect(said).toMatchObject({ authorUserId: 'super-agent', kind: 'nudge', taskIds: [task.id] });
   expect(said.body).toBe(`${code}「用 Chrome 打开 https://www.goog…」没有做成，我没有把它算作完成。原因：${code} 未完成：Chrome 控制被系统拒绝（Access is denied），无法打开 Google。 你可以补充说明后告诉我“重试 ${code}”，或在任务上取消。`);
 
+  // What Link tells a client to say when the screen cannot be used.
+  const screen = say(service, owner, '@销售员工 打开记账软件').task!;
+  service.report(screen.id, 'user-sales', '没有做成：这台电脑的屏幕不可用（已锁屏）', 'r3');
+  expect(service.listTasks(owner).find((item) => item.id === screen.id)).toMatchObject({ status: 'waiting', waitingReason: '没有做成' });
+
   // A real result that mentions an error further down is still a result.
   const listed = say(service, owner, '@销售员工 列出项目文件').task!;
   service.report(listed.id, 'user-sales', ['项目里有 3 个文件：a.md、b.csv、c.txt。', '', '另外日志里有一行旧的 failed to connect，与本任务无关。'].join('\n'), 'r2');
